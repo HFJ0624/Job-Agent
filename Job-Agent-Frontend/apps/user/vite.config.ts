@@ -12,8 +12,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 开发环境把 /api 转发到后端，避免浏览器跨域问题。
-      "/api": {
+      // 用户前台开发环境把 /front 转发到后端，避免浏览器跨域问题。
+      "/front": {
         target: "http://localhost:8500",
         changeOrigin: true
       }

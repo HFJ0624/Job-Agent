@@ -2,21 +2,20 @@
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Fold, SwitchButton } from "@element-plus/icons-vue";
+import { adminMenus } from "../api/menu";
 import SidebarMenu from "../components/SidebarMenu.vue";
-import { useAdminMenuStore } from "../stores/menu";
 import { useAdminUserStore } from "../stores/user";
 
 const route = useRoute();
 const router = useRouter();
 const userStore = useAdminUserStore();
-const menuStore = useAdminMenuStore();
 const collapsed = ref(false);
 
 const currentTitle = computed(() => String(route.meta.title || "工作台"));
 
-function logout() {
-  userStore.logout();
-  menuStore.reset();
+async function logout() {
+  // 先调用后台退出接口，再跳回登录页；即使接口失败，请求封装也会清掉本地 token。
+  await userStore.logout();
   router.replace("/login");
 }
 </script>
@@ -38,7 +37,7 @@ function logout() {
         text-color="#cbd5e1"
         active-text-color="#ffffff"
       >
-        <SidebarMenu :menus="menuStore.menus" />
+        <SidebarMenu :menus="adminMenus" />
       </el-menu>
     </el-aside>
 
@@ -53,7 +52,7 @@ function logout() {
         </div>
 
         <div class="header-right">
-          <el-tag effect="plain" type="success">动态菜单已启用</el-tag>
+          <el-tag effect="plain" type="success">固定菜单</el-tag>
           <span>{{ userStore.displayName }}</span>
           <el-button :icon="SwitchButton" circle @click="logout" />
         </div>

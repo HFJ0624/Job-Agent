@@ -1,10 +1,3 @@
-<script setup lang="ts">
-import JobCard from "../components/JobCard.vue";
-import { jobs } from "../data";
-
-const filters = ["全部", "上海", "杭州", "深圳", "北京"];
-</script>
-
 <template>
   <main class="page-section">
     <div class="list-toolbar">
@@ -37,3 +30,10 @@ const filters = ["全部", "上海", "杭州", "深圳", "北京"];
     </div>
   </main>
 </template>
+
+<script setup lang="ts">
+import JobCard from "../components/JobCard.vue";
+import { jobs } from "../data";
+
+const filters = ["全部", "上海", "杭州", "深圳", "北京"];
+</script>

@@ -1,4 +1,4 @@
-package com.job.bootstrap.controller.admin;
+package com.job.bootstrap.controller.front;
 
 import com.job.bootstrap.config.MinioProperties;
 import com.job.common.vo.file.FileUploadVO;
@@ -27,7 +27,7 @@ import java.util.UUID;
  * 日期:2026/6/2 15:20
  */
 @RestController
-@RequestMapping("/api/file")
+@RequestMapping("/front/file")
 @RequiredArgsConstructor
 public class FileController {
 

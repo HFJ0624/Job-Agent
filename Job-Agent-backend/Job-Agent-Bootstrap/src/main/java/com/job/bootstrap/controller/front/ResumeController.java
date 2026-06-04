@@ -35,7 +35,7 @@ import java.util.List;
  */
 @Validated
 @RestController
-@RequestMapping("/api/resume")
+@RequestMapping("/front/resume")
 @RequiredArgsConstructor
 public class ResumeController {
 

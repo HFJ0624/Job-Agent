@@ -1,14 +1,11 @@
 import { defineStore } from "pinia";
 import { getCurrentUserApi, loginApi, logoutApi } from "../api/auth";
 import type { UserInfo } from "../api/types";
-import type { AdminUserProfile } from "../types/menu";
 
-const ROLE_KEY = "job-agent-admin-role";
 const TOKEN_VALUE_KEY = "job-agent-admin-token-value";
 
 export const useAdminUserStore = defineStore("admin-user", {
   state: () => ({
-    role: (localStorage.getItem(ROLE_KEY) || "admin") as AdminUserProfile["role"],
     profile: null as UserInfo | null
   }),
   getters: {
@@ -16,22 +13,25 @@ export const useAdminUserStore = defineStore("admin-user", {
     displayName: state => state.profile?.nickname || state.profile?.username || "未登录"
   },
   actions: {
-    async login(payload: { account: string; password: string; role: AdminUserProfile["role"] }) {
+    async login(payload: { account: string; password: string }) {
       const data = await loginApi({
         account: payload.account,
         password: payload.password
       });
-      this.role = payload.role;
-      localStorage.setItem(ROLE_KEY, payload.role);
       this.profile = data.user;
     },
     async loadProfile() {
       this.profile = await getCurrentUserApi();
     },
     async logout() {
-      await logoutApi();
-      this.profile = null;
-      localStorage.removeItem(ROLE_KEY);
+      try {
+        await logoutApi();
+      } catch (error) {
+        // 退出时即使后端 token 已失效，也要清空前端登录态，避免用户卡在后台页面。
+        console.error("[Job-Agent Admin] 后台退出接口异常，本地登录态已清理", error);
+      } finally {
+        this.profile = null;
+      }
     }
   }
 });

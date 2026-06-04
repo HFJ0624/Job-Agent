@@ -5,7 +5,7 @@ export function uploadAvatar(file: File) {
   const formData = new FormData();
   formData.append("file", file);
 
-  return request<FileUploadResponse>("/api/file/avatar", {
+  return request<FileUploadResponse>("/front/file/avatar", {
     method: "POST",
     body: formData
   });

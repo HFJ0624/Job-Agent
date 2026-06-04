@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Validated
 @RestController
-@RequestMapping("/api/user/address")
+@RequestMapping("/front/user/address")
 @RequiredArgsConstructor
 public class UserAddressController {
 

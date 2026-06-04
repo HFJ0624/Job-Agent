@@ -11,7 +11,7 @@ export function uploadResume(payload: { resumeName: string; file: File }) {
   formData.append("file", payload.file);
 
   // 这里 body 是 FormData，请求封装层会自动跳过 JSON Content-Type，让浏览器自己生成 boundary。
-  return request<ResumeInfo>("/api/resume/upload", {
+  return request<ResumeInfo>("/front/resume/upload", {
     method: "POST",
     body: formData
   });
@@ -21,7 +21,7 @@ export function uploadResume(payload: { resumeName: string; file: File }) {
  * 查询当前登录用户的简历列表。
  */
 export function listResumes() {
-  return request<ResumeInfo[]>("/api/resume/list");
+  return request<ResumeInfo[]>("/front/resume/list");
 }
 
 /**
@@ -37,7 +37,7 @@ export async function downloadResumeFile(resumeId: string) {
     headers.set(tokenName, tokenValue);
   }
 
-  const response = await fetch(`/api/resume/${resumeId}/file`, {
+  const response = await fetch(`/front/resume/${resumeId}/file`, {
     method: "GET",
     headers
   });

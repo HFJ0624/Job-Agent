@@ -8,5 +8,5 @@ export function pageUsersApi(params: { pageNo: number; pageSize: number; keyword
   if (params.keyword) {
     search.set("keyword", params.keyword);
   }
-  return request<PageResult<UserInfo>>(`/api/user/page?${search.toString()}`);
+  return request<PageResult<UserInfo>>(`/admin/user/page?${search.toString()}`);
 }

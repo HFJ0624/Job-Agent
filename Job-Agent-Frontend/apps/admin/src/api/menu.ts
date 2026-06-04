@@ -1,20 +1,17 @@
-import type { AdminMenuItem, AdminUserProfile } from "../types/menu";
+import type { AdminMenuItem } from "../types/menu";
 
-const mockProfiles: Record<AdminUserProfile["role"], AdminUserProfile> = {
-  admin: { id: 1, name: "超级管理员", role: "admin" },
-  operator: { id: 2, name: "运营管理员", role: "operator" }
-};
-
-// 这里模拟后端返回的动态菜单。真实接后端时，只需要把这个数组换成接口返回值。
-const allMenus: AdminMenuItem[] = [
+/**
+ * 后台固定菜单。
+ * P表示参数描述，这里不再按角色动态请求菜单，侧边栏和路由都直接使用这份静态配置。
+ */
+export const adminMenus: AdminMenuItem[] = [
   {
     id: 1,
     path: "/dashboard",
     name: "Dashboard",
     title: "数据看板",
     icon: "DataBoard",
-    component: "dashboard/Workbench",
-    roles: ["admin", "operator"]
+    component: "dashboard/Workbench"
   },
   {
     id: 2,
@@ -22,7 +19,6 @@ const allMenus: AdminMenuItem[] = [
     name: "UserRoot",
     title: "用户管理",
     icon: "User",
-    roles: ["admin"],
     children: [
       {
         id: 21,
@@ -30,8 +26,7 @@ const allMenus: AdminMenuItem[] = [
         name: "UserList",
         title: "用户列表",
         icon: "UserFilled",
-        component: "users/UserList",
-        roles: ["admin"]
+        component: "users/UserList"
       }
     ]
   },
@@ -41,7 +36,6 @@ const allMenus: AdminMenuItem[] = [
     name: "JobRoot",
     title: "岗位管理",
     icon: "Briefcase",
-    roles: ["admin", "operator"],
     children: [
       {
         id: 31,
@@ -49,8 +43,7 @@ const allMenus: AdminMenuItem[] = [
         name: "JobList",
         title: "岗位列表",
         icon: "Tickets",
-        component: "jobs/JobList",
-        roles: ["admin", "operator"]
+        component: "jobs/JobList"
       },
       {
         id: 32,
@@ -58,8 +51,7 @@ const allMenus: AdminMenuItem[] = [
         name: "JobImport",
         title: "岗位导入",
         icon: "Upload",
-        component: "jobs/JobImport",
-        roles: ["admin"]
+        component: "jobs/JobImport"
       }
     ]
   },
@@ -69,8 +61,7 @@ const allMenus: AdminMenuItem[] = [
     name: "Community",
     title: "社区管理",
     icon: "ChatLineRound",
-    component: "community/PostManage",
-    roles: ["admin", "operator"]
+    component: "community/PostManage"
   },
   {
     id: 5,
@@ -78,8 +69,7 @@ const allMenus: AdminMenuItem[] = [
     name: "AgentLogs",
     title: "Agent 日志",
     icon: "Connection",
-    component: "agent/TraceLog",
-    roles: ["admin", "operator"]
+    component: "agent/TraceLog"
   },
   {
     id: 6,
@@ -87,7 +77,6 @@ const allMenus: AdminMenuItem[] = [
     name: "SystemRoot",
     title: "系统配置",
     icon: "Setting",
-    roles: ["admin"],
     children: [
       {
         id: 61,
@@ -95,8 +84,7 @@ const allMenus: AdminMenuItem[] = [
         name: "PromptManage",
         title: "Prompt 管理",
         icon: "Document",
-        component: "system/PromptManage",
-        roles: ["admin"]
+        component: "system/PromptManage"
       },
       {
         id: 62,
@@ -104,32 +92,8 @@ const allMenus: AdminMenuItem[] = [
         name: "ModelManage",
         title: "模型配置",
         icon: "Cpu",
-        component: "system/ModelManage",
-        roles: ["admin"]
+        component: "system/ModelManage"
       }
     ]
   }
 ];
-
-function hasRole(menu: AdminMenuItem, role: AdminUserProfile["role"]) {
-  return !menu.roles || menu.roles.includes(role);
-}
-
-function filterMenusByRole(menus: AdminMenuItem[], role: AdminUserProfile["role"]): AdminMenuItem[] {
-  return menus
-    .filter(menu => hasRole(menu, role))
-    .map(menu => ({
-      ...menu,
-      children: menu.children ? filterMenusByRole(menu.children, role) : undefined
-    }))
-    .filter(menu => !menu.children || menu.children.length > 0);
-}
-
-export async function fetchAdminProfile(role: AdminUserProfile["role"]) {
-  // 用 Promise 模拟接口异步返回，方便后面替换为真实 request 方法。
-  return Promise.resolve(mockProfiles[role]);
-}
-
-export async function fetchAdminMenus(role: AdminUserProfile["role"]) {
-  return Promise.resolve(filterMenusByRole(allMenus, role));
-}

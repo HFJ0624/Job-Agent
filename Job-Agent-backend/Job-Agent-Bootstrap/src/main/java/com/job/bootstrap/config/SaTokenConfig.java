@@ -21,15 +21,16 @@ public class SaTokenConfig implements WebMvcConfigurer {
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        // 1. /api/** 默认都要登录后才能访问。
+        // 1. 前台接口走 /front/**，后台接口走 /admin/**，默认都要登录后才能访问。
         registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
-                .addPathPatterns("/api/**")
+                .addPathPatterns("/front/**", "/admin/**")
 
-                // 2. 登录、注册和接口文档地址不需要登录。
+                // 2. 前台登录注册、头像上传、后台登录和接口文档地址不需要登录。
                 .excludePathPatterns(
-                        "/api/auth/login",
-                        "/api/auth/register",
-                        "/api/file/avatar",
+                        "/front/auth/login",
+                        "/front/auth/register",
+                        "/front/file/avatar",
+                        "/admin/auth/login",
                         "/doc.html",
                         "/swagger-ui.html",
                         "/swagger-ui/**",

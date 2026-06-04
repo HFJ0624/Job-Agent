@@ -1,6 +1,6 @@
 import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
-import { useAdminMenuStore } from "../stores/menu";
+import { adminMenus } from "../api/menu";
 import { useAdminUserStore } from "../stores/user";
 import type { AdminMenuItem } from "../types/menu";
 
@@ -8,34 +8,8 @@ const AdminLayout = () => import("../layout/AdminLayout.vue");
 const LoginView = () => import("../views/login/LoginView.vue");
 const NotFoundView = () => import("../views/NotFoundView.vue");
 
-// Vite 会把 views 下的页面编译成懒加载模块，菜单只需要提供 component 字段。
+// Vite 会把 views 下的页面编译成懒加载模块，固定菜单只需要提供 component 字段。
 const pageModules = import.meta.glob("../views/**/*.vue");
-
-const staticRoutes: RouteRecordRaw[] = [
-  {
-    path: "/login",
-    name: "Login",
-    component: LoginView,
-    meta: { title: "登录" }
-  },
-  {
-    path: "/",
-    name: "RootLayout",
-    component: AdminLayout,
-    redirect: "/dashboard",
-    children: []
-  },
-  {
-    path: "/:pathMatch(.*)*",
-    name: "NotFound",
-    component: NotFoundView
-  }
-];
-
-const router = createRouter({
-  history: createWebHistory(),
-  routes: staticRoutes
-});
 
 function trimLeadingSlash(path: string) {
   return path.replace(/^\//, "");
@@ -46,7 +20,7 @@ function resolvePage(component?: string) {
   return pageModules[`../views/${component}.vue`] as RouteRecordRaw["component"];
 }
 
-function flattenMenuRoutes(menus: AdminMenuItem[]) {
+function flattenStaticRoutes(menus: AdminMenuItem[]) {
   const routes: RouteRecordRaw[] = [];
 
   menus.forEach(menu => {
@@ -66,25 +40,41 @@ function flattenMenuRoutes(menus: AdminMenuItem[]) {
     }
 
     if (menu.children?.length) {
-      routes.push(...flattenMenuRoutes(menu.children));
+      routes.push(...flattenStaticRoutes(menu.children));
     }
   });
 
   return routes;
 }
 
-function registerDynamicRoutes(menus: AdminMenuItem[]) {
-  flattenMenuRoutes(menus).forEach(route => {
-    // hasRoute 可以避免刷新或重复进入时反复注册同名路由。
-    if (route.name && !router.hasRoute(route.name)) {
-      router.addRoute("RootLayout", route);
-    }
-  });
-}
+const routes: RouteRecordRaw[] = [
+  {
+    path: "/login",
+    name: "Login",
+    component: LoginView,
+    meta: { title: "登录" }
+  },
+  {
+    path: "/",
+    name: "RootLayout",
+    component: AdminLayout,
+    redirect: "/dashboard",
+    children: flattenStaticRoutes(adminMenus)
+  },
+  {
+    path: "/:pathMatch(.*)*",
+    name: "NotFound",
+    component: NotFoundView
+  }
+];
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+});
 
 router.beforeEach(async to => {
   const userStore = useAdminUserStore();
-  const menuStore = useAdminMenuStore();
 
   if (to.path === "/login") {
     return true;
@@ -96,21 +86,12 @@ router.beforeEach(async to => {
 
   if (!userStore.profile) {
     try {
+      // 刷新页面后 Pinia 会丢失内存里的用户信息，这里用后台 /admin/auth/me 补回来。
       await userStore.loadProfile();
     } catch {
       await userStore.logout();
-      menuStore.reset();
       return { path: "/login", query: { redirect: to.fullPath } };
     }
-  }
-
-  if (!menuStore.loaded) {
-    await menuStore.loadMenus(userStore.role);
-    registerDynamicRoutes(menuStore.menus);
-
-    // 菜单路由刚注册完，需要只按 path 重新匹配一次。
-    // 不能把旧的 route name 带回去，否则首次进入 /dashboard 时可能仍然命中 NotFound。
-    return { path: to.fullPath, replace: true };
   }
 
   return true;

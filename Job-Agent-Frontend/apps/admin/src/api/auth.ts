@@ -2,7 +2,7 @@ import { clearToken, request, saveToken } from "./request";
 import type { LoginResponse, UserInfo } from "./types";
 
 export async function loginApi(payload: { account: string; password: string }) {
-  const data = await request<LoginResponse>("/api/auth/login", {
+  const data = await request<LoginResponse>("/admin/auth/login", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -12,7 +12,7 @@ export async function loginApi(payload: { account: string; password: string }) {
 
 export async function logoutApi() {
   try {
-    await request<null>("/api/auth/logout", {
+    await request<null>("/admin/auth/logout", {
       method: "POST"
     });
   } finally {
@@ -21,5 +21,5 @@ export async function logoutApi() {
 }
 
 export function getCurrentUserApi() {
-  return request<UserInfo>("/api/auth/me");
+  return request<UserInfo>("/admin/auth/me");
 }

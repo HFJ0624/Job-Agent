@@ -1,29 +1,3 @@
-<script setup lang="ts">
-import { reactive, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { useAuthStore } from "../stores/auth";
-
-const router = useRouter();
-const route = useRoute();
-const authStore = useAuthStore();
-const errorMessage = ref("");
-
-const form = reactive({
-  account: "",
-  password: ""
-});
-
-async function submit() {
-  errorMessage.value = "";
-  try {
-    await authStore.login(form);
-    router.push(String(route.query.redirect || "/home"));
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "登录失败";
-  }
-}
-</script>
-
 <template>
   <main class="auth-page">
     <section class="auth-card">
@@ -49,3 +23,29 @@ async function submit() {
     </section>
   </main>
 </template>
+
+<script setup lang="ts">
+import { reactive, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useAuthStore } from "../stores/auth";
+
+const router = useRouter();
+const route = useRoute();
+const authStore = useAuthStore();
+const errorMessage = ref("");
+
+const form = reactive({
+  account: "",
+  password: ""
+});
+
+async function submit() {
+  errorMessage.value = "";
+  try {
+    await authStore.login(form);
+    router.push(String(route.query.redirect || "/home"));
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "登录失败";
+  }
+}
+</script>

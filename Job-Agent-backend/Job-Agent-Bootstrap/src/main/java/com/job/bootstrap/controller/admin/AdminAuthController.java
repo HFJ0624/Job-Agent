@@ -1,14 +1,13 @@
-package com.job.bootstrap.controller.front;
+package com.job.bootstrap.controller.admin;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.job.bootstrap.service.JobUserService;
 import com.job.common.dto.auth.LoginDTO;
-import com.job.common.vo.auth.LoginVO;
-import com.job.common.dto.auth.RegisterDTO;
-import com.job.common.vo.user.UserVO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.entity.user.JobUser;
+import com.job.common.vo.auth.LoginVO;
+import com.job.common.vo.user.UserVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,48 +18,32 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 作者:hfj
- * 功能:用户登录、注册、退出和获取当前用户信息接口
- * 日期:2026/6/2 10:45
+ * 功能:后台系统登录、退出和获取当前后台用户信息接口
+ * 日期:2026/6/4 15:20
  */
 @RestController
-@RequestMapping("/front/auth")
+@RequestMapping("/admin/auth")
 @RequiredArgsConstructor
-public class AuthController {
+public class AdminAuthController {
 
     private final JobUserService jobUserService;
 
     /**
-     * 用户注册接口。
-     * P表示参数描述，方便前端知道需要传什么。
-     *
-     * @param request 注册请求参数，包含用户名、密码、昵称、手机号和邮箱
-     * @return 返回注册成功后的用户信息，不包含密码
-     */
-    @PostMapping("/register")
-    public Result<UserVO> register(@Valid @RequestBody RegisterDTO request) {
-        // 1. 把前端 DTO 转成用户实体，并交给 Service 做注册校验和保存。
-        JobUser user = jobUserService.register(request.toEntity());
-
-        // 2. 统一包装成 Result 返回给前端。
-        return Result.build(UserVO.from(user), ResultCodeEnum.SUCCESS);
-    }
-
-    /**
-     * 用户登录接口。
+     * 后台登录接口。
      * P表示参数描述，账号可以是用户名、手机号或邮箱。
      *
      * @param request 登录请求参数，包含账号和密码
-     * @return 返回 token 名称、token 值和当前用户信息
+     * @return 返回 token 名称、token 值和当前后台用户信息
      */
     @PostMapping("/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO request) {
-        // 1. 校验账号密码，Service 会负责密码比对和账号状态判断。
+        // 1. 后台登录也复用用户账号体系，账号密码校验统一交给 Service 处理。
         JobUser user = jobUserService.login(request.getAccount(), request.getPassword());
 
-        // 2. 登录成功后让 Sa-Token 生成登录态。
+        // 2. 登录成功后生成 Sa-Token 登录态，后台前端后续请求需要带上这个 token。
         StpUtil.login(user.getId());
 
-        // 3. 把 token 和用户信息返回给前端，前端后续请求需要带上 token。
+        // 3. 统一返回 token 和用户信息，方便后台 Pinia 保存当前登录人。
         LoginVO response = new LoginVO(
                 StpUtil.getTokenName(),
                 StpUtil.getTokenValue(),
@@ -70,7 +53,7 @@ public class AuthController {
     }
 
     /**
-     * 用户退出登录接口。
+     * 后台退出登录接口。
      *
      * @return 返回退出成功结果
      */
@@ -82,16 +65,16 @@ public class AuthController {
     }
 
     /**
-     * 查询当前登录用户接口。
+     * 查询当前后台登录用户接口。
      *
-     * @return 返回当前登录用户信息，不包含密码
+     * @return 返回当前后台登录用户信息
      */
     @GetMapping("/me")
     public Result<UserVO> me() {
-        // 1. 从 Sa-Token 中取出当前登录用户 ID。
+        // 1. 从 Sa-Token 中读取当前登录用户 ID。
         Long userId = StpUtil.getLoginIdAsLong();
 
-        // 2. 根据用户 ID 查询用户详情。
+        // 2. 根据用户 ID 查询完整用户信息，再转成 VO 返回给后台页面。
         JobUser user = jobUserService.getUserRequired(userId);
         return Result.build(UserVO.from(user), ResultCodeEnum.SUCCESS);
     }

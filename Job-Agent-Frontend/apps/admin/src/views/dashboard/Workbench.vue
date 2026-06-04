@@ -29,7 +29,7 @@ const metrics = [
     <el-card shadow="never">
       <template #header>系统能力</template>
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="动态菜单">已根据角色加载</el-descriptions-item>
+        <el-descriptions-item label="后台菜单">固定菜单配置</el-descriptions-item>
         <el-descriptions-item label="AI 模块">简历评分、岗位匹配、打招呼语</el-descriptions-item>
         <el-descriptions-item label="数据闭环">用户、简历、岗位、Agent Trace</el-descriptions-item>
       </el-descriptions>

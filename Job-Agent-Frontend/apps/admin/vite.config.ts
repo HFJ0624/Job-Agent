@@ -23,8 +23,8 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      // 管理后台开发环境同样走后端 8500 端口。
-      "/api": {
+      // 管理后台开发环境把 /admin 转发到后端 8500 端口。
+      "/admin": {
         target: "http://localhost:8500",
         changeOrigin: true
       }
