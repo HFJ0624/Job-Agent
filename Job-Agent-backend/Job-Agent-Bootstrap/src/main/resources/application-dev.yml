@@ -1,0 +1,63 @@
+# 配置服务端口号
+server:
+  port: 8500
+
+# 配置数据库连接信息 url需要改成自己的虚拟机ip地址192.168.10.100
+spring:
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://192.168.10.100:3306/job_agent?characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: root
+    password: 1234
+
+  servlet:
+    multipart:
+      max-file-size: 10MB # 单个文件最大上传大小：改为10MB
+      max-request-size: 10MB # 单次请求最大大小（多文件上传总大小），建议和单文件一致
+
+    # Redis的相关配置
+  data:
+    redis:
+      host: 192.168.10.100
+      port: 6379
+  #  password: 1234
+
+# 自定义配置 访问权限路由配置
+job:
+  minio:
+    endpointUrl: http://192.168.10.100:9001
+    accessKey: admin
+    secreKey: admin123456
+    bucketName: job-agent-bucket
+
+  agent:
+    draft:
+      # Agent 草稿过期时间，单位：分钟
+      ttl-minutes: 15
+
+# MyBatis-Plus配置
+mybatis-plus:
+  # 自定义SQL的mapper.xml文件路径（如果有）
+  mapper-locations: classpath:mapper/*.xml
+  # 实体类包路径
+  type-aliases-package: com.job.common
+  configuration:
+    map-underscore-to-camel-case: true # 下划线转驼峰
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 打印SQL日志（开发用）
+  global-config:
+    db-config:
+      id-type: assign_id # 使用雪花ID，兼容 id BIGINT NOT NULL 的建表方式
+      logic-delete-field: isDeleted # 逻辑删除字段使用实体属性名
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+sa-token:
+  # 前端请求头或 Cookie 中携带的 token 名称。
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: true

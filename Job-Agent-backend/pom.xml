@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Spring Boot 3.5.x 父工程，统一管理 Spring 全家桶版本 -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.7</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.job</groupId>
+    <artifactId>Job-Agent-backend</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Job-Agent-backend</name>
+    <description>Job-Agent 智能求职助手后端父工程</description>
+
+    <!-- 后端多模块单体结构，模块名和目录名保持一致 -->
+    <modules>
+        <module>Job-Agent-Bootstrap</module>
+        <module>Job-Agent-Framework</module>
+        <module>Job-Agent-Infra-Ai</module>
+        <module>Job-Agent-Mcp-Tools</module>
+    </modules>
+
+    <properties>
+        <!-- Java 版本：Spring Boot 3 和 LangChain4j 均要求 JDK 17 起步 -->
+        <java.version>17</java.version>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
+
+        <!-- 工程编码：保证中文注释、Prompt 和接口文档内容不乱码 -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Apache Tika：简历 PDF、Word 等文件文本抽取 -->
+        <tika.version>3.2.3</tika.version>
+
+        <!-- Apache POI：Word、Excel 等 Office 文档处理 -->
+        <poi.version>5.4.1</poi.version>
+
+        <!-- Apache PDFBox：PDF 简历文本抽取和解析兜底 -->
+        <pdfbox.version>3.0.5</pdfbox.version>
+
+        <!-- MyBatis-Plus：业务表 ORM、分页和条件构造器 -->
+        <mybatis-plus.version>3.5.12</mybatis-plus.version>
+
+        <!-- Sa-Token：登录认证、会话管理和权限控制 -->
+        <sa-token.version>1.43.0</sa-token.version>
+
+        <!-- LangChain4j 核心依赖版本：LLM、Embedding、AI Services、Tool 调用 -->
+        <langchain4j.version>1.15.1</langchain4j.version>
+
+        <!-- LangChain4j Spring Boot 3 Starter 版本：用于自动装配 ChatModel、Tool、RAG 等能力 -->
+        <langchain4j.spring-boot.version>1.15.1-beta25</langchain4j.spring-boot.version>
+
+        <!-- SpringDoc OpenAPI：Swagger UI 接口文档 -->
+        <springdoc.version>2.6.0</springdoc.version>
+
+        <!-- MinIO：简历文件、头像等对象存储 -->
+        <minio.version>8.5.7</minio.version>
+
+        <!-- Hutool：常用工具类，减少样板代码 -->
+        <hutool.version>5.8.37</hutool.version>
+
+        <!-- MapStruct：DTO、VO、Entity 之间的类型转换 -->
+        <mapstruct.version>1.6.3</mapstruct.version>
+
+        <!-- Lombok 与 MapStruct 协同处理器，避免注解处理顺序问题 -->
+        <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+    </properties>
+
+    <!-- 统一管理依赖版本，子模块声明依赖时一般不再写 version -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- 内部模块：后台管理模块版本统一 -->
+            <dependency>
+                <groupId>com.job</groupId>
+                <artifactId>Job-Agent-Admin</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 内部模块：启动入口模块版本统一 -->
+            <dependency>
+                <groupId>com.job</groupId>
+                <artifactId>Job-Agent-Bootstrap</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 内部模块：核心业务领域模块版本统一 -->
+            <dependency>
+                <groupId>com.job</groupId>
+                <artifactId>Job-Agent-Domain</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 内部模块：通用框架能力模块版本统一 -->
+            <dependency>
+                <groupId>com.job</groupId>
+                <artifactId>Job-Agent-Framework</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 内部模块：AI 基础设施模块版本统一 -->
+            <dependency>
+                <groupId>com.job</groupId>
+                <artifactId>Job-Agent-Infra-Ai</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- 内部模块：Agent 工具模块版本统一 -->
+            <dependency>
+                <groupId>com.job</groupId>
+                <artifactId>Job-Agent-Mcp-Tools</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- Apache Tika BOM：统一管理 Tika、PDFBox 等文档解析相关依赖版本 -->
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-bom</artifactId>
+                <version>${tika.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- LangChain4j BOM：统一管理非 Spring Boot Starter 的 LangChain4j 核心依赖版本 -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-bom</artifactId>
+                <version>${langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- MyBatis-Plus Boot3 Starter：适配 Spring Boot 3 的 ORM 启动器 -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+
+            <!-- MyBatis-Plus JSqlParser：分页插件和复杂 SQL 解析需要 -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-jsqlparser</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+
+            <!-- Sa-Token Boot3 Starter：登录、鉴权和权限注解支持 -->
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-spring-boot3-starter</artifactId>
+                <version>${sa-token.version}</version>
+            </dependency>
+
+            <!-- Sa-Token Redis Jackson：将登录态和权限会话存入 Redis -->
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-redis-jackson</artifactId>
+                <version>${sa-token.version}</version>
+            </dependency>
+
+            <!-- LangChain4j Spring Boot Starter：AI Services、RAG、Tools 自动装配 -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-spring-boot-starter</artifactId>
+                <version>${langchain4j.spring-boot.version}</version>
+            </dependency>
+
+            <!-- LangChain4j OpenAI Starter：OpenAI 或 OpenAI 兼容模型的 ChatModel、EmbeddingModel 自动装配 -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-open-ai-spring-boot-starter</artifactId>
+                <version>${langchain4j.spring-boot.version}</version>
+            </dependency>
+
+            <!-- LangChain4j Ollama Starter：本地模型接入，可用于模型路由和降级 -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-ollama-spring-boot-starter</artifactId>
+                <version>${langchain4j.spring-boot.version}</version>
+            </dependency>
+
+            <!-- LangChain4j Reactor：AI Service 返回 Flux 时使用，便于 SSE 流式输出 -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-reactor</artifactId>
+                <version>${langchain4j.spring-boot.version}</version>
+            </dependency>
+
+            <!-- SpringDoc OpenAPI UI：生成 Swagger 页面和 OpenAPI 文档 -->
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+
+            <!-- MinIO SDK：用于简历文件、头像等对象存储操作 -->
+            <dependency>
+                <groupId>io.minio</groupId>
+                <artifactId>minio</artifactId>
+                <version>${minio.version}</version>
+            </dependency>
+
+            <!-- Apache POI OOXML：读取 DOCX 简历和后续可能的 Excel 导入模板 -->
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>${poi.version}</version>
+            </dependency>
+
+            <!-- Apache PDFBox：直接处理 PDF 文本抽取时使用 -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
+            </dependency>
+
+            <!-- Hutool 工具包：字符串、集合、日期、JSON、ID 等通用工具 -->
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-all</artifactId>
+                <version>${hutool.version}</version>
+            </dependency>
+
+            <!-- MapStruct 注解：用于对象转换接口声明 -->
+            <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct</artifactId>
+                <version>${mapstruct.version}</version>
+            </dependency>
+
+            <!-- MapStruct 注解处理器：编译期生成对象转换实现类 -->
+            <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct-processor</artifactId>
+                <version>${mapstruct.version}</version>
+            </dependency>
+
+            <!-- Lombok MapStruct Binding：解决 Lombok 与 MapStruct 编译期协作问题 -->
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok-mapstruct-binding</artifactId>
+                <version>${lombok-mapstruct-binding.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

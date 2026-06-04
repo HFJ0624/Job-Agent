@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.job</groupId>
+        <artifactId>Job-Agent-backend</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>Job-Agent-Infra-Ai</artifactId>
+    <name>Job-Agent-Infra-Ai</name>
+    <description>AI 基础设施层：模型调用、Embedding、Prompt、记忆、RAG、解析和 Agent 编排</description>
+
+    <dependencies>
+        <!-- 内部模块：复用通用异常、Trace、SSE、Redis 和工具类 -->
+        <dependency>
+            <groupId>com.job</groupId>
+            <artifactId>Job-Agent-Framework</artifactId>
+        </dependency>
+
+        <!-- 内部模块：读取简历、岗位、公司、会话等业务数据用于 AI 分析和记忆持久化 -->
+        <dependency>
+            <groupId>com.job</groupId>
+            <artifactId>Job-Agent-Domain</artifactId>
+        </dependency>
+
+        <!-- Spring 基础容器：AI 服务、工厂、路由器和 Pipeline 节点注册为 Bean -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- Spring Web：OpenAI Starter 默认使用 RestClient，部分解析和 SSE 适配也需要 Web 能力 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- 参数校验：模型配置、Prompt 参数和 Agent 请求对象校验 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- MyBatis-Plus Boot3：Prompt、模型配置、会话记忆和 Agent Trace 持久化 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+
+        <!-- MySQL 驱动：AI 会话、消息、Prompt 和调用日志持久化使用 -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- LangChain4j 核心：AI Services、Tool 调用、ChatMemory、Embedding 和 RAG 基础能力 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+        </dependency>
+
+        <!-- LangChain4j Spring Boot Starter：自动装配 AI Services、Tools、RAG 组件 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- LangChain4j OpenAI Starter：接入 OpenAI 或 OpenAI 兼容模型供应商 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai-spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- LangChain4j Ollama Starter：接入本地模型，支撑开发调试和失败降级 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-ollama-spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- LangChain4j Reactor：AI Service 流式返回 Flux，便于对接 SSE 流式输出 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-reactor</artifactId>
+        </dependency>
+
+        <!-- Apache Tika Core：简历文件类型识别和通用文本抽取入口 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+        </dependency>
+
+        <!-- Apache Tika 标准解析器：支持 PDF、DOCX、HTML、TXT 等简历格式解析 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+        </dependency>
+
+        <!-- Apache PDFBox：对 PDF 简历做更细粒度的文本抽取和异常兜底 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+        </dependency>
+
+        <!-- Apache POI OOXML：解析 DOCX 简历和后续 Office 文档内容 -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+        </dependency>
+
+        <!-- Hutool：AI 模块中的 JSON、日期、集合、字符串和 ID 工具 -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-all</artifactId>
+        </dependency>
+
+        <!-- MapStruct：AI 结果对象、业务对象和持久化对象转换 -->
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+        </dependency>
+
+        <!-- Lombok：简化模型配置、Prompt 上下文、Agent 请求结果对象代码 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- 配置元数据处理器：为模型路由、Prompt、供应商密钥等配置生成 IDE 提示 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Spring Boot Test：AI 服务编排、Prompt 渲染、解析 Pipeline 和模型路由测试 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

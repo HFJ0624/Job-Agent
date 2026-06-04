@@ -1,0 +1,36 @@
+{
+  "name": "job-agent-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Job-Agent 前端工作区：用户端和管理员后台",
+  "workspaces": [
+    "apps/user",
+    "apps/admin"
+  ],
+  "scripts": {
+    "dev:user": "npm run dev -w @job-agent/user",
+    "dev:admin": "npm run dev -w @job-agent/admin",
+    "build": "npm run build -w @job-agent/user && npm run build -w @job-agent/admin",
+    "build:user": "npm run build -w @job-agent/user",
+    "build:admin": "npm run build -w @job-agent/admin",
+    "preview:user": "npm run preview -w @job-agent/user",
+    "preview:admin": "npm run preview -w @job-agent/admin"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "2.3.1",
+    "@vueuse/core": "10.11.1",
+    "element-plus": "2.8.8",
+    "pinia": "2.1.7",
+    "vue": "3.4.38",
+    "vue-router": "4.3.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "4.5.2",
+    "typescript": "5.4.5",
+    "vite": "4.5.14",
+    "vue-tsc": "1.8.27"
+  },
+  "engines": {
+    "node": ">=16.14.0"
+  }
+}
