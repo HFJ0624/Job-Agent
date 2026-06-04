@@ -1,4 +1,4 @@
-package com.job.common.dto.user;
+package com.job.common.vo.user;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.job.common.entity.user.JobUser;
@@ -13,7 +13,7 @@ import java.util.Date;
  * 日期:2026/6/2 10:45
  */
 @Data
-public class UserResponse {
+public class UserVO {
 
     /**
      * 用户 ID。
@@ -88,9 +88,9 @@ public class UserResponse {
      * @param user 数据库用户实体
      * @return 返回给前端的用户信息，不包含 password
      */
-    public static UserResponse from(JobUser user) {
+    public static UserVO from(JobUser user) {
         // 1. 响应对象不提供 password 字段，避免密码哈希泄露到前端。
-        UserResponse response = new UserResponse();
+        UserVO response = new UserVO();
         response.setId(user.getId());
         response.setUsername(user.getUsername());
         response.setNickname(user.getNickname());

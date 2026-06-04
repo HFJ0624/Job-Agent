@@ -10,6 +10,7 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.env.Environment;
+import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -60,6 +61,26 @@ public class GlobalExceptionHandler {
                 .map(this::formatFieldError)
                 .collect(Collectors.joining("；"));
         printError("请求体参数校验异常", ResultCodeEnum.PARAM_ERROR.getCode(), message, exception, request, false);
+        return Result.build(null, ResultCodeEnum.PARAM_ERROR.getCode(), message);
+    }
+
+    /**
+     * 处理表单参数绑定校验异常。
+     * P表示参数描述，主要对应 multipart/form-data 里的 @ModelAttribute DTO 校验失败。
+     *
+     * @param exception 表单绑定异常对象
+     * @param request 当前请求对象
+     * @return 返回参数错误响应
+     */
+    @ExceptionHandler(BindException.class)
+    public Result<Object> handleBindException(BindException exception, HttpServletRequest request) {
+        // 1. multipart 表单没有 JSON 请求体，校验失败时会进入这里。
+        String message = exception.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(this::formatFieldError)
+                .collect(Collectors.joining("；"));
+        printError("表单参数校验异常", ResultCodeEnum.PARAM_ERROR.getCode(), message, exception, request, false);
         return Result.build(null, ResultCodeEnum.PARAM_ERROR.getCode(), message);
     }
 

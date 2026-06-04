@@ -70,3 +70,52 @@ export interface FileUploadResponse {
   objectName: string;
   originalFilename: string;
 }
+
+/**
+ * 简历信息，对应后端 ResumeVO。
+ */
+export interface ResumeInfo {
+  id: string;
+  userId: string;
+  resumeName: string;
+  fileUrl: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  rawText?: string;
+  parsedJson?: string;
+  score?: number;
+  status: string;
+  isDefault: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 用户地址信息，对应后端 UserAddressVO。
+ */
+export interface UserAddressInfo {
+  id: string;
+  userId: string;
+  addressName?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  detailAddress?: string;
+  longitude?: number;
+  latitude?: number;
+  isDefault?: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface SaveUserAddressPayload {
+  id?: string;
+  addressName?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  detailAddress?: string;
+  longitude?: string;
+  latitude?: string;
+}

@@ -1,7 +1,7 @@
-package com.job.bootstrap.controller;
+package com.job.bootstrap.controller.admin;
 
 import com.job.bootstrap.config.MinioProperties;
-import com.job.common.dto.file.FileUploadResponse;
+import com.job.common.vo.file.FileUploadVO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.exception.BizException;
@@ -52,7 +52,7 @@ public class FileController {
      * @return 返回头像访问地址和 MinIO 对象名
      */
     @PostMapping("/avatar")
-    public Result<FileUploadResponse> uploadAvatar(@RequestParam("file") MultipartFile file) {
+    public Result<FileUploadVO> uploadAvatar(@RequestParam("file") MultipartFile file) {
         try {
             // 1. 校验头像文件，避免空文件、超大文件或非图片文件上传。
             validateAvatar(file);
@@ -70,7 +70,7 @@ public class FileController {
                     .build());
 
             // 4. 返回可保存到用户 avatarUrl 字段的访问地址。
-            FileUploadResponse response = new FileUploadResponse(
+            FileUploadVO response = new FileUploadVO(
                     buildFileUrl(objectName),
                     objectName,
                     file.getOriginalFilename()

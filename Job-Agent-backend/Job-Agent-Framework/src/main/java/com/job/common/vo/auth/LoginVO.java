@@ -1,6 +1,6 @@
-package com.job.common.dto.auth;
+package com.job.common.vo.auth;
 
-import com.job.common.dto.user.UserResponse;
+import com.job.common.vo.user.UserVO;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class LoginResponse {
+public class LoginVO {
 
     /**
      * Token 名称，默认是 satoken。
@@ -28,5 +28,5 @@ public class LoginResponse {
     /**
      * 当前登录用户信息，不包含 password。
      */
-    private UserResponse user;
+    private UserVO user;
 }

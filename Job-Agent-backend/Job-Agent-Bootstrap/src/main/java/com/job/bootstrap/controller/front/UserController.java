@@ -1,11 +1,11 @@
-package com.job.bootstrap.controller;
+package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.bootstrap.service.JobUserService;
-import com.job.common.dto.user.UpdateUserProfileRequest;
-import com.job.common.dto.user.UserPageRequest;
-import com.job.common.dto.user.UserResponse;
+import com.job.common.dto.user.UpdateUserProfileDTO;
+import com.job.common.dto.user.UserPageDTO;
+import com.job.common.vo.user.UserVO;
 import com.job.common.entity.base.PageResult;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
@@ -43,13 +43,13 @@ public class UserController {
      * @return 返回修改后的用户信息
      */
     @PutMapping("/profile")
-    public Result<UserResponse> updateProfile(@Valid @RequestBody UpdateUserProfileRequest request) {
+    public Result<UserVO> updateProfile(@Valid @RequestBody UpdateUserProfileDTO request) {
         // 1. 通过 Sa-Token 获取当前登录用户 ID，确保只能修改自己的资料。
         Long userId = StpUtil.getLoginIdAsLong();
 
         // 2. 调用 Service 完成资料校验和更新。
         JobUser user = jobUserService.updateProfile(userId, request.toEntity());
-        return Result.build(UserResponse.from(user), ResultCodeEnum.SUCCESS);
+        return Result.build(UserVO.from(user), ResultCodeEnum.SUCCESS);
     }
 
     /**
@@ -60,7 +60,7 @@ public class UserController {
      * @return 返回用户分页数据
      */
     @GetMapping("/page")
-    public Result<PageResult<UserResponse>> page(@Valid UserPageRequest request) {
+    public Result<PageResult<UserVO>> page(@Valid UserPageDTO request) {
         // 1. 查询数据库分页对象。
         IPage<JobUser> userPage = jobUserService.pageUsers(
                 request.getPageNo(),
@@ -69,13 +69,13 @@ public class UserController {
         );
 
         // 2. 将实体对象转成响应对象，避免把 password 返回给前端。
-        List<UserResponse> records = userPage.getRecords()
+        List<UserVO> records = userPage.getRecords()
                 .stream()
-                .map(UserResponse::from)
+                .map(UserVO::from)
                 .toList();
 
         // 3. 组装前端分页组件需要的数据结构。
-        PageResult<UserResponse> pageResult = new PageResult<>(
+        PageResult<UserVO> pageResult = new PageResult<>(
                 records,
                 userPage.getTotal(),
                 userPage.getCurrent(),
@@ -91,9 +91,9 @@ public class UserController {
      * @return 返回指定用户信息
      */
     @GetMapping("/{id}")
-    public Result<UserResponse> detail(@PathVariable Long id) {
+    public Result<UserVO> detail(@PathVariable Long id) {
         // 1. 查询用户详情，不存在时由 Service 抛出业务异常。
         JobUser user = jobUserService.getUserRequired(id);
-        return Result.build(UserResponse.from(user), ResultCodeEnum.SUCCESS);
+        return Result.build(UserVO.from(user), ResultCodeEnum.SUCCESS);
     }
 }

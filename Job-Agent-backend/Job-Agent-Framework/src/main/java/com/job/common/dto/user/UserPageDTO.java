@@ -11,7 +11,7 @@ import lombok.Data;
  * 日期:2026/6/2 10:45
  */
 @Data
-public class UserPageRequest {
+public class UserPageDTO {
 
     /**
      * 当前页码，默认第 1 页。

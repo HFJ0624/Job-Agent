@@ -1,4 +1,4 @@
-package com.job.common.dto.file;
+package com.job.common.vo.file;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class FileUploadResponse {
+public class FileUploadVO {
 
     /**
      * 文件访问地址，前端保存到 avatarUrl 字段。

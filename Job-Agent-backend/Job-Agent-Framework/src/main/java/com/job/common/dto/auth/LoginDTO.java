@@ -10,7 +10,7 @@ import lombok.Data;
  * 日期:2026/6/2 10:45
  */
 @Data
-public class LoginRequest {
+public class LoginDTO {
 
     /**
      * 登录账号，可以填写用户名、手机号或邮箱。

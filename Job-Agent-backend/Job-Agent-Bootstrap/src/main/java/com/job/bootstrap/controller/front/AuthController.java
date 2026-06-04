@@ -1,11 +1,11 @@
-package com.job.bootstrap.controller;
+package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.job.bootstrap.service.JobUserService;
-import com.job.common.dto.auth.LoginRequest;
-import com.job.common.dto.auth.LoginResponse;
-import com.job.common.dto.auth.RegisterRequest;
-import com.job.common.dto.user.UserResponse;
+import com.job.common.dto.auth.LoginDTO;
+import com.job.common.vo.auth.LoginVO;
+import com.job.common.dto.auth.RegisterDTO;
+import com.job.common.vo.user.UserVO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.entity.user.JobUser;
@@ -37,12 +37,12 @@ public class AuthController {
      * @return 返回注册成功后的用户信息，不包含密码
      */
     @PostMapping("/register")
-    public Result<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public Result<UserVO> register(@Valid @RequestBody RegisterDTO request) {
         // 1. 把前端 DTO 转成用户实体，并交给 Service 做注册校验和保存。
         JobUser user = jobUserService.register(request.toEntity());
 
         // 2. 统一包装成 Result 返回给前端。
-        return Result.build(UserResponse.from(user), ResultCodeEnum.SUCCESS);
+        return Result.build(UserVO.from(user), ResultCodeEnum.SUCCESS);
     }
 
     /**
@@ -53,7 +53,7 @@ public class AuthController {
      * @return 返回 token 名称、token 值和当前用户信息
      */
     @PostMapping("/login")
-    public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+    public Result<LoginVO> login(@Valid @RequestBody LoginDTO request) {
         // 1. 校验账号密码，Service 会负责密码比对和账号状态判断。
         JobUser user = jobUserService.login(request.getAccount(), request.getPassword());
 
@@ -61,10 +61,10 @@ public class AuthController {
         StpUtil.login(user.getId());
 
         // 3. 把 token 和用户信息返回给前端，前端后续请求需要带上 token。
-        LoginResponse response = new LoginResponse(
+        LoginVO response = new LoginVO(
                 StpUtil.getTokenName(),
                 StpUtil.getTokenValue(),
-                UserResponse.from(user)
+                UserVO.from(user)
         );
         return Result.build(response, ResultCodeEnum.SUCCESS);
     }
@@ -87,12 +87,12 @@ public class AuthController {
      * @return 返回当前登录用户信息，不包含密码
      */
     @GetMapping("/me")
-    public Result<UserResponse> me() {
+    public Result<UserVO> me() {
         // 1. 从 Sa-Token 中取出当前登录用户 ID。
         Long userId = StpUtil.getLoginIdAsLong();
 
         // 2. 根据用户 ID 查询用户详情。
         JobUser user = jobUserService.getUserRequired(userId);
-        return Result.build(UserResponse.from(user), ResultCodeEnum.SUCCESS);
+        return Result.build(UserVO.from(user), ResultCodeEnum.SUCCESS);
     }
 }

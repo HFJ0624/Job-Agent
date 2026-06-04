@@ -1,11 +1,3 @@
-<script setup lang="ts">
-import type { JobItem } from "../data";
-
-defineProps<{
-  job: JobItem;
-}>();
-</script>
-
 <template>
   <article class="job-card">
     <div class="job-main">
@@ -31,3 +23,11 @@ defineProps<{
     </footer>
   </article>
 </template>
+
+<script setup lang="ts">
+import type { JobItem } from "../data";
+
+defineProps<{
+  job: JobItem;
+}>();
+</script>
