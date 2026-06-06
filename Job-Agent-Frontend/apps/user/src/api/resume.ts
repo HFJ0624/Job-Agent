@@ -25,10 +25,60 @@ export function listResumes() {
 }
 
 /**
+ * 修改简历名称。
+ * P表示参数描述，resumeId 是路径参数，resumeName 是新的展示名称。
+ */
+export function updateResumeName(resumeId: string, resumeName: string) {
+  return request<ResumeInfo>(`/front/resume/${resumeId}`, {
+    method: "PUT",
+    body: JSON.stringify({ resumeName })
+  });
+}
+
+/**
+ * 逻辑删除简历。
+ * P表示参数描述，后端只会把 isDeleted 改为 1，不会直接删除 MinIO 文件。
+ */
+export function deleteResume(resumeId: string) {
+  return request<null>(`/front/resume/${resumeId}`, {
+    method: "DELETE"
+  });
+}
+
+/**
+ * 设置默认简历。
+ * P表示参数描述，一个用户只能有一份默认简历，后端会自动取消其它简历默认状态。
+ */
+export function setDefaultResume(resumeId: string) {
+  return request<ResumeInfo>(`/front/resume/${resumeId}/default`, {
+    method: "PUT"
+  });
+}
+
+/**
+ * 解析简历文本。
+ * P表示参数描述，后端会把解析出的文本保存到 rawText 字段，失败原因也会写入 rawText。
+ */
+export function parseResumeText(resumeId: string) {
+  return request<ResumeInfo>(`/front/resume/${resumeId}/parse`, {
+    method: "POST"
+  });
+}
+
+/**
  * 读取简历文件内容。
  * P表示参数描述，这里返回 Blob，页面可以把它转成临时地址后打开。
  */
 export async function downloadResumeFile(resumeId: string) {
+  const file = await fetchResumeFile(resumeId);
+  return file.blob;
+}
+
+/**
+ * 读取简历文件内容和响应类型。
+ * P表示参数描述，抽屉预览需要知道 Content-Type，下载只需要 Blob。
+ */
+export async function fetchResumeFile(resumeId: string) {
   const { tokenName, tokenValue } = getToken();
   const headers = new Headers();
 
@@ -52,5 +102,8 @@ export async function downloadResumeFile(resumeId: string) {
     throw new Error(`简历文件读取失败，HTTP状态码：${response.status}`);
   }
 
-  return response.blob();
+  return {
+    blob: await response.blob(),
+    contentType
+  };
 }

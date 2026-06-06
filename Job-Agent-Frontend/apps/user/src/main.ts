@@ -1,6 +1,8 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
+import ElementPlus from "element-plus";
+import "element-plus/dist/index.css";
 import App from "./App.vue";
 import HomePage from "./pages/HomePage.vue";
 import JobsPage from "./pages/JobsPage.vue";
@@ -29,4 +31,5 @@ const router = createRouter({
   }
 });
 
-createApp(App).use(createPinia()).use(router).mount("#app");
+// 用户端也接入 Element Plus，简历预览抽屉、确认弹窗等交互可以直接使用成熟组件。
+createApp(App).use(createPinia()).use(router).use(ElementPlus).mount("#app");

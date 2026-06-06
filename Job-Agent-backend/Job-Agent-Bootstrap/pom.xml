@@ -82,6 +82,30 @@
             <artifactId>minio</artifactId>
         </dependency>
 
+        <!-- Apache Tika Core：统一入口，自动识别 PDF、DOC、DOCX 等简历文件类型 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+        </dependency>
+
+        <!-- Apache Tika 标准解析器包：提供 Word、PDF 等常见文档的文本抽取实现 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+        </dependency>
+
+        <!-- Apache POI OOXML：Tika 解析 DOCX 简历时会使用到 Office 文档处理能力 -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+        </dependency>
+
+        <!-- Apache PDFBox：Tika 解析 PDF 简历时会使用到 PDF 文本抽取能力 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+        </dependency>
+
         <!-- Lombok：减少启动配置、Controller DTO 等样板代码 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
