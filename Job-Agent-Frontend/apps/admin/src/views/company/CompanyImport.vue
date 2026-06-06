@@ -4,18 +4,18 @@ import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import type { UploadFile, UploadUserFile } from "element-plus";
 import { UploadFilled } from "@element-plus/icons-vue";
-import { importPositionsApi } from "../../api/job";
-import type { PositionImportResult } from "../../api/types";
+import { importCompaniesApi } from "../../api/company";
+import type { CompanyImportResult } from "../../api/types";
 
 const router = useRouter();
 const uploading = ref(false);
 const fileList = ref<UploadUserFile[]>([]);
-const importResult = ref<PositionImportResult | null>(null);
+const importResult = ref<CompanyImportResult | null>(null);
 
 const selectedFile = computed(() => fileList.value[0]?.raw);
 
 function handleFileChange(uploadFile: UploadFile) {
-  // 1. 只保留最新选择的一份 Excel，避免一次导入多个文件导致结果难以判断。
+  // 1. 只保留最新选择的一个文件，避免用户一次导入多个 Excel 导致结果难以判断。
   fileList.value = uploadFile.raw ? [uploadFile as UploadUserFile] : [];
   importResult.value = null;
 }
@@ -31,6 +31,7 @@ async function submitImport() {
     ElMessage.warning("请先选择 Excel 文件");
     return;
   }
+
   if (!isExcelFile(file.name)) {
     ElMessage.warning("只支持 xls 或 xlsx 文件");
     return;
@@ -38,11 +39,11 @@ async function submitImport() {
 
   uploading.value = true;
   try {
-    // 1. 真正的解析、公司匹配、岗位新增或更新都由后端完成。
-    importResult.value = await importPositionsApi(file);
-    ElMessage.success("岗位 Excel 导入完成");
+    // 1. 真正导入动作由后端完成，前端只负责上传文件和展示统计结果。
+    importResult.value = await importCompaniesApi(file);
+    ElMessage.success("公司 Excel 导入完成");
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "岗位 Excel 导入失败");
+    ElMessage.error(error instanceof Error ? error.message : "公司 Excel 导入失败");
   } finally {
     uploading.value = false;
   }
@@ -53,7 +54,7 @@ function isExcelFile(filename: string) {
 }
 
 function goList() {
-  router.push("/job/list");
+  router.push("/company/list");
 }
 </script>
 
@@ -61,13 +62,13 @@ function goList() {
   <el-card shadow="never">
     <template #header>
       <div class="card-header">
-        <span>岗位导入</span>
-        <el-button @click="goList">返回岗位列表</el-button>
+        <span>公司导入</span>
+        <el-button @click="goList">返回公司列表</el-button>
       </div>
     </template>
 
     <el-alert
-      title="Excel 第一行必须是表头。必填：job_title + company_id 或 company_name。推荐字段：company_name、job_title、job_category、city、district、min_salary、max_salary、salary_months、education_req、experience_req、job_description、job_requirement、skill_keywords、work_type、welfare_tags、source、source_url、status。status 填 1/已发布/上架 才会前台可见，默认导入为草稿。"
+      title="Excel 第一行必须是表头，推荐使用截图中的字段：company_name、logo_url、industry、company_size、financing_stage、description、province、city、district、address、longitude、latitude、prospect_score、status。"
       type="info"
       show-icon
       :closable="false"
@@ -87,9 +88,7 @@ function goList() {
       <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
       <div class="el-upload__text">拖拽 Excel 文件到这里，或点击选择文件</div>
       <template #tip>
-        <div class="el-upload__tip">
-          重复的“公司 + 岗位名称 + 城市”会自动更新。只填公司名称时，后端会自动匹配已有公司，匹配不到会创建最小公司记录。
-        </div>
+        <div class="el-upload__tip">重复公司名称会自动更新，不会插入重复公司。单次最多导入 5000 行。</div>
       </template>
     </el-upload>
 
@@ -109,11 +108,11 @@ function goList() {
             <strong>{{ importResult.totalRows }}</strong>
           </div>
           <div>
-            <span>新增岗位</span>
+            <span>新增公司</span>
             <strong>{{ importResult.insertCount }}</strong>
           </div>
           <div>
-            <span>更新岗位</span>
+            <span>更新公司</span>
             <strong>{{ importResult.updateCount }}</strong>
           </div>
           <div>

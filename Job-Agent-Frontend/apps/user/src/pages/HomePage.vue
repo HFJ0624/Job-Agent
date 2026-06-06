@@ -37,7 +37,11 @@
           <RouterLink to="/jobs">查看全部</RouterLink>
         </div>
 
-        <JobCard v-for="job in jobs.slice(0, 3)" :key="job.id" :job="job" />
+        <p v-if="loadingJobs" class="empty-state">正在加载推荐岗位...</p>
+        <p v-else-if="!jobs.length" class="empty-state">暂无已发布岗位，后台发布后会展示在这里。</p>
+        <template v-else>
+          <JobCard v-for="job in jobs" :key="job.id" :job="job" />
+        </template>
       </div>
 
       <aside class="side-column">
@@ -63,8 +67,29 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
+import { pageFrontPositions } from "../api/job";
+import type { PositionInfo } from "../api/types";
 import JobCard from "../components/JobCard.vue";
-import { companies, jobs } from "../data";
+import { companies } from "../data";
 
 const hotFilters = ["Java 后端", "AI 应用", "上海", "15K 以上", "双休", "离家近"];
+const jobs = ref<PositionInfo[]>([]);
+const loadingJobs = ref(false);
+
+async function loadRecommendedJobs() {
+  loadingJobs.value = true;
+  try {
+    // 1. 首页只取前 3 条已发布岗位，完整列表交给 /jobs 页面展示。
+    const page = await pageFrontPositions({ pageNo: 1, pageSize: 3 });
+    jobs.value = page.records;
+  } catch (error) {
+    console.error("[Job-Agent] 首页推荐岗位加载失败", error);
+    jobs.value = [];
+  } finally {
+    loadingJobs.value = false;
+  }
+}
+
+onMounted(loadRecommendedJobs);
 </script>

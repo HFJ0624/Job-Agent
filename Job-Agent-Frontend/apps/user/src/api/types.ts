@@ -119,3 +119,98 @@ export interface SaveUserAddressPayload {
   longitude?: string;
   latitude?: string;
 }
+
+/**
+ * 岗位信息，对应后端 PositionVO。
+ */
+export interface PositionInfo {
+  id: string;
+  companyId: number;
+  companyName?: string;
+  companyLogoUrl?: string;
+  companyIndustry?: string;
+  companySize?: string;
+  financingStage?: string;
+  jobTitle: string;
+  jobCategory?: string;
+  city?: string;
+  district?: string;
+  minSalary?: number;
+  maxSalary?: number;
+  salaryMonths?: number;
+  educationReq?: string;
+  experienceReq?: string;
+  jobDescription?: string;
+  jobRequirement?: string;
+  skillKeywords?: string;
+  workType?: string;
+  welfareTags?: string;
+  source?: string;
+  sourceUrl?: string;
+  status?: number;
+  publishTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 公司信息，对应后端 CompanyVO。
+ */
+export interface CompanyInfo {
+  id: number;
+  companyName: string;
+  logoUrl?: string;
+  industry?: string;
+  companySize?: string;
+  financingStage?: string;
+  description?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  address?: string;
+  longitude?: number;
+  latitude?: number;
+  prospectScore?: number;
+  status?: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 岗位详情信息，对应后端 PositionDetailVO。
+ */
+export interface PositionDetailInfo {
+  position: PositionInfo;
+  company?: CompanyInfo;
+  favorited: boolean;
+  favoriteCount: number;
+}
+
+/**
+ * 收藏状态，对应后端 FavoriteStateVO。
+ */
+export interface FavoriteStateInfo {
+  positionId: number;
+  favorited: boolean;
+  favoriteCount: number;
+}
+
+/**
+ * 立即沟通请求参数，对应后端 JobCommunicationDTO。
+ */
+export interface CommunicatePayload {
+  content?: string;
+}
+
+/**
+ * 立即沟通消息，对应后端 JobMessageVO。
+ */
+export interface JobMessageInfo {
+  id: number;
+  positionId: number;
+  companyId: number;
+  receiverName: string;
+  content: string;
+  status: string;
+  createTime?: string;
+}

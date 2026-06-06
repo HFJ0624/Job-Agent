@@ -57,6 +57,31 @@ export const adminMenus: AdminMenuItem[] = [
   },
   {
     id: 4,
+    path: "/company",
+    name: "CompanyRoot",
+    title: "公司管理",
+    icon: "OfficeBuilding",
+    children: [
+      {
+        id: 41,
+        path: "/company/list",
+        name: "CompanyList",
+        title: "公司列表",
+        icon: "OfficeBuilding",
+        component: "company/CompanyList"
+      },
+      {
+        id: 42,
+        path: "/company/import",
+        name: "CompanyImport",
+        title: "公司导入",
+        icon: "Upload",
+        component: "company/CompanyImport"
+      }
+    ]
+  },
+  {
+    id: 5,
     path: "/community",
     name: "Community",
     title: "社区管理",
@@ -64,7 +89,7 @@ export const adminMenus: AdminMenuItem[] = [
     component: "community/PostManage"
   },
   {
-    id: 5,
+    id: 6,
     path: "/agent/logs",
     name: "AgentLogs",
     title: "Agent 日志",
@@ -72,14 +97,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/TraceLog"
   },
   {
-    id: 6,
+    id: 7,
     path: "/system",
     name: "SystemRoot",
     title: "系统配置",
     icon: "Setting",
     children: [
       {
-        id: 61,
+        id: 71,
         path: "/system/prompts",
         name: "PromptManage",
         title: "Prompt 管理",
@@ -87,7 +112,7 @@ export const adminMenus: AdminMenuItem[] = [
         component: "system/PromptManage"
       },
       {
-        id: 62,
+        id: 72,
         path: "/system/models",
         name: "ModelManage",
         title: "模型配置",

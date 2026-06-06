@@ -6,6 +6,7 @@ import "element-plus/dist/index.css";
 import App from "./App.vue";
 import HomePage from "./pages/HomePage.vue";
 import JobsPage from "./pages/JobsPage.vue";
+import JobDetailPage from "./pages/JobDetailPage.vue";
 import ResumePage from "./pages/ResumePage.vue";
 import AgentPage from "./pages/AgentPage.vue";
 import LoginPage from "./pages/LoginPage.vue";
@@ -20,6 +21,7 @@ const router = createRouter({
     { path: "/", redirect: "/home" },
     { path: "/home", name: "home", component: HomePage },
     { path: "/jobs", name: "jobs", component: JobsPage },
+    { path: "/jobs/:id", name: "job-detail", component: JobDetailPage },
     { path: "/resume", name: "resume", component: ResumePage },
     { path: "/agent", name: "agent", component: AgentPage },
     { path: "/login", name: "login", component: LoginPage },
