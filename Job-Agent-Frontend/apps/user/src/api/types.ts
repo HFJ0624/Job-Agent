@@ -341,3 +341,44 @@ export interface AgentChatMessage {
   role: "USER" | "ASSISTANT";
   content: string;
 }
+
+/**
+ * 用户求职偏好。
+ */
+export interface UserJobPreferenceInfo {
+  id?: number;
+  expectedJobTitle?: string;
+  expectedCity?: string;
+  minSalary?: number;
+  maxSalary?: number;
+  expectedIndustry?: string;
+  expectedCompanySize?: string;
+  expectedFinancingStage?: string;
+  expectedEducation?: string;
+  expectedExperience?: string;
+  expectedWorkType?: string;
+  skillKeywords?: string;
+  remark?: string;
+}
+
+/**
+ * 岗位推荐结果。
+ */
+export interface JobRecommendInfo {
+  jobId: number;
+  jobTitle: string;
+  companyId?: number;
+  companyName?: string;
+  city?: string;
+  district?: string;
+  minSalary?: number;
+  maxSalary?: number;
+  educationReq?: string;
+  experienceReq?: string;
+  skillKeywords?: string;
+  recommendScore: number;
+  recommendLevel: string;
+  matchedSkills: string[];
+  missingSkills: string[];
+  reasons: string[];
+}

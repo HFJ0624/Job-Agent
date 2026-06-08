@@ -33,6 +33,7 @@ async function handleLogout() {
         <RouterLink to="/jobs">职位</RouterLink>
         <RouterLink to="/resume">我的简历</RouterLink>
         <RouterLink to="/agent">AI 助手</RouterLink>
+        <RouterLink to="/job-recommend">智能推荐</RouterLink>
       </nav>
 
       <div class="top-actions">

@@ -2,10 +2,7 @@ package com.job.bootstrap.agent.config;
 
 
 import com.job.agent.JobAgentAssistant;
-import com.job.bootstrap.agent.tools.GreetingGenerateTool;
-import com.job.bootstrap.agent.tools.JobMatchTool;
-import com.job.bootstrap.agent.tools.JobSearchTool;
-import com.job.bootstrap.agent.tools.ResumeAnalyzeTool;
+import com.job.bootstrap.agent.tools.*;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
@@ -41,7 +38,8 @@ public class JobAgentConfig {
             ResumeAnalyzeTool resumeAnalyzeTool,
             JobMatchTool jobMatchTool,
             GreetingGenerateTool greetingGenerateTool,
-            JobSearchTool jobSearchTool
+            JobSearchTool jobSearchTool,
+            JobRecommendTool jobRecommendTool
     ) {
         return AiServices.builder(JobAgentAssistant.class)
                 .chatModel(chatModel)
@@ -50,7 +48,8 @@ public class JobAgentConfig {
                         resumeAnalyzeTool,
                         jobMatchTool,
                         greetingGenerateTool,
-                        jobSearchTool
+                        jobSearchTool,
+                        jobRecommendTool
                 )
                 .build();
     }
