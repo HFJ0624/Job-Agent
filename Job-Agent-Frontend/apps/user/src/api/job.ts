@@ -5,7 +5,8 @@ import type {
   JobMessageInfo,
   PageResult,
   PositionDetailInfo,
-  PositionInfo
+  PositionInfo,
+  JobMatchInfo
 } from "./types";
 
 /**
@@ -65,4 +66,31 @@ export function communicateWithHr(positionId: number | string, payload: Communic
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+/**
+ * 分析指定岗位和指定简历的匹配度。
+ *
+ * @param jobId 岗位ID
+ * @param resumeId 简历ID
+ */
+export function matchJob(jobId: string, resumeId: string) {
+  return request<JobMatchInfo>(`/front/job/${jobId}/match`, {
+    method: "POST",
+    body: JSON.stringify({
+      resumeId
+    })
+  });
+}
+
+/**
+ * 查询指定岗位和指定简历最近一次匹配记录。
+ *
+ * @param jobId 岗位ID
+ * @param resumeId 简历ID
+ */
+export function getLatestJobMatch(jobId: string, resumeId: string) {
+  return request<JobMatchInfo | null>(
+    `/front/job/${jobId}/match-record?resumeId=${resumeId}`
+  );
 }

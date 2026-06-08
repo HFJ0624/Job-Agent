@@ -42,6 +42,12 @@
           </section>
         </article>
 
+         <!-- 加在这里：岗位匹配分析面板 -->
+          <JobMatchPanel
+            v-if="position?.id"
+            :job-id="String(position.id)"
+          />
+
         <section class="company-detail-card">
           <div class="company-title-row">
             <div class="company-logo">
@@ -134,6 +140,7 @@ import { useRoute, useRouter } from "vue-router";
 import { communicateWithHr, getFrontPositionDetail, toggleJobFavorite } from "../api/job";
 import type { JobMessageInfo, PositionDetailInfo, PositionInfo } from "../api/types";
 import { useAuthStore } from "../stores/auth";
+import JobMatchPanel from "../components/JobMatchPanel.vue";
 
 const route = useRoute();
 const router = useRouter();

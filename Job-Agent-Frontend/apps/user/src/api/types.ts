@@ -241,3 +241,31 @@ export interface ResumeScoreInfo {
 
   createTime?: string;
 }
+
+/**
+ * 岗位匹配分析结果。
+ */
+export interface JobMatchInfo {
+  id: number;
+  userId: number;
+  resumeId: number;
+  jobId: number;
+
+  matchScore: number;
+  ruleScore: number;
+  skillScore: number;
+  projectScore: number;
+  conditionScore: number;
+  preferenceScore: number;
+
+  matchLevel: string;
+  recommendApply: boolean;
+
+  matchedSkills: string[];
+  missingSkills: string[];
+  advantages: string[];
+  riskPoints: string[];
+  suggestions: string[];
+
+  createTime?: string;
+}
