@@ -21,12 +21,6 @@
             <artifactId>Job-Agent-Framework</artifactId>
         </dependency>
 
-        <!-- 内部模块：工具通过领域服务访问用户、简历、岗位、公司和收藏数据 -->
-        <dependency>
-            <groupId>com.job</groupId>
-            <artifactId>Job-Agent-Domain</artifactId>
-        </dependency>
-
         <!-- 内部模块：工具调用 AI 能力完成评分、匹配、公司分析和打招呼语生成 -->
         <dependency>
             <groupId>com.job</groupId>

@@ -126,6 +126,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.job</groupId>
+            <artifactId>Job-Agent-Infra-Ai</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

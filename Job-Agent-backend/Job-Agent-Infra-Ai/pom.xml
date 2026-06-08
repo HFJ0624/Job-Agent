@@ -21,12 +21,6 @@
             <artifactId>Job-Agent-Framework</artifactId>
         </dependency>
 
-        <!-- 内部模块：读取简历、岗位、公司、会话等业务数据用于 AI 分析和记忆持久化 -->
-        <dependency>
-            <groupId>com.job</groupId>
-            <artifactId>Job-Agent-Domain</artifactId>
-        </dependency>
-
         <!-- Spring 基础容器：AI 服务、工厂、路由器和 Pipeline 节点注册为 Bean -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
