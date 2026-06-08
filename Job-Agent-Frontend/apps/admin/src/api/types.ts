@@ -29,13 +29,6 @@ export interface LoginResponse {
   user: UserInfo;
 }
 
-export interface PageResult<T> {
-  records: T[];
-  total: number;
-  pageNo: number;
-  pageSize: number;
-}
-
 /**
  * 公司信息，和后端 CompanyVO 字段保持一致。
  */
@@ -156,4 +149,50 @@ export interface PositionImportResult {
   updateCount: number;
   failureCount: number;
   failureMessages: string[];
+}
+
+/**
+ * Agent Trace 日志查询参数。
+ */
+export interface AgentTraceLogQuery {
+  pageNum: number;
+  pageSize: number;
+  traceId?: string;
+  userId?: string | number;
+  conversationId?: string | number;
+  intentCode?: string;
+  toolName?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * Agent Trace 日志展示数据。
+ */
+export interface AgentTraceLogInfo {
+  id: number;
+  traceId: string;
+  userId: number;
+  conversationId?: number;
+  intentCode?: string;
+  toolName?: string;
+  inputData?: string;
+  outputData?: string;
+  status: string;
+  errorMsg?: string;
+  costTime?: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * MyBatis-Plus 分页返回结构。
+ */
+export interface PageResult<T> {
+  records: T[];
+  total: number;
+  size: number;
+  current: number;
+  pages: number;
 }

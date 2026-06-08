@@ -1,6 +1,7 @@
 package com.job.bootstrap.agent.tools;
 
 import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobResumeScoreService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -8,6 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.vo.resume.ResumeScoreVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
+
 /**
  * 作者:hfj
  * 功能:简历分析工具
@@ -23,6 +27,7 @@ public class ResumeAnalyzeTool {
 
     private final JobResumeScoreService jobResumeScoreService;
     private final ObjectMapper objectMapper;
+    private final AgentTraceService agentTraceService;
 
     /**
      * 分析简历。
@@ -36,13 +41,51 @@ public class ResumeAnalyzeTool {
             @P("简历ID，例如 1") Long resumeId,
             @P("目标岗位名称，可以为空，例如 Java 后端开发") String targetPosition
     ) {
-        try {
-            Long userId = AgentUserContext.getRequiredUserId();
+        long start = System.currentTimeMillis();
+        Long userId = AgentUserContext.getRequiredUserId();
 
+        Map<String, Object> input = Map.of(
+                "resumeId", resumeId,
+                "targetPosition", targetPosition
+        );
+
+        try {
             ResumeScoreVO result = jobResumeScoreService.scoreResume(userId, resumeId, targetPosition);
 
-            return objectMapper.writeValueAsString(result);
+            String json = objectMapper.writeValueAsString(result);
+
+            /*
+             * 工具调用成功，记录 Trace。
+             */
+            agentTraceService.saveToolTrace(
+                    userId,
+                    null,
+                    "RESUME_ANALYZE",
+                    "ResumeAnalyzeTool",
+                    input,
+                    result,
+                    "SUCCESS",
+                    null,
+                    System.currentTimeMillis() - start
+            );
+
+            return json;
         } catch (Exception e) {
+            /*
+             * 工具调用失败，也记录 Trace，便于后台排查。
+             */
+            agentTraceService.saveToolTrace(
+                    userId,
+                    null,
+                    "RESUME_ANALYZE",
+                    "ResumeAnalyzeTool",
+                    input,
+                    null,
+                    "FAILED",
+                    e.getMessage(),
+                    System.currentTimeMillis() - start
+            );
+
             return "简历分析失败：" + e.getMessage();
         }
     }

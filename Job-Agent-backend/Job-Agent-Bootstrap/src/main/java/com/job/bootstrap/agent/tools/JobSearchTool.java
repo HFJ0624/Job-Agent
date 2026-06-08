@@ -2,6 +2,8 @@ package com.job.bootstrap.agent.tools;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.common.entity.position.JobPosition;
 import dev.langchain4j.agent.tool.P;
@@ -11,6 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Map;
+
 /**
  * 作者:hfj
  * 功能:岗位搜索工具
@@ -22,6 +26,7 @@ public class JobSearchTool {
 
     private final JobPositionService jobPositionService;
     private final ObjectMapper objectMapper;
+    private final AgentTraceService agentTraceService;
 
     @Tool("根据城市、关键词和最低薪资搜索岗位，返回最多10个岗位")
     public String searchJobs(
@@ -29,6 +34,15 @@ public class JobSearchTool {
             @P("城市，例如 上海、杭州、北京，可以为空") String city,
             @P("最低薪资，单位元，可以为空") Integer minSalary
     ) {
+        long start = System.currentTimeMillis();
+        Long userId = AgentUserContext.getRequiredUserId();
+
+        Map<String, Object> input = Map.of(
+                "keyword", keyword,
+                "city", city,
+                "minSalary",minSalary
+        );
+
         try {
             LambdaQueryWrapper<JobPosition> wrapper = new LambdaQueryWrapper<>();
 
@@ -63,8 +77,38 @@ public class JobSearchTool {
                     .last("limit 10");
 
             List<JobPosition> jobs = jobPositionService.list(wrapper);
+
+            /*
+             * 工具调用成功，记录 Trace。
+             */
+            agentTraceService.saveToolTrace(
+                    userId,
+                    null,
+                    "JOB_SEARCH",
+                    "JobSearchTool",
+                    input,
+                    jobs,
+                    "SUCCESS",
+                    null,
+                    System.currentTimeMillis() - start
+            );
+
             return objectMapper.writeValueAsString(jobs);
         } catch (Exception e) {
+            /*
+             * 工具调用失败，也记录 Trace，便于后台排查。
+             */
+            agentTraceService.saveToolTrace(
+                    userId,
+                    null,
+                    "JOB_SEARCH",
+                    "JobSearchTool",
+                    input,
+                    null,
+                    "FAILED",
+                    e.getMessage(),
+                    System.currentTimeMillis() - start
+            );
             return "岗位搜索失败：" + e.getMessage();
         }
     }
