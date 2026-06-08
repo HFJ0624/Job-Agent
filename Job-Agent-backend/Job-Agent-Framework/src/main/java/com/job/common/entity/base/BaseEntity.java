@@ -1,5 +1,7 @@
 package com.job.common.entity.base;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -19,6 +21,7 @@ public class BaseEntity implements Serializable {
      * 主键 ID。
      */
     @Schema(description = "唯一标识")
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
     /**

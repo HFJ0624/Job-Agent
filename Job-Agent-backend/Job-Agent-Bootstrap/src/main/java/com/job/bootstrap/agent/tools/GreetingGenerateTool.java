@@ -1,6 +1,7 @@
 package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.context.AgentUserContext;
 import com.job.bootstrap.service.JobGreetingService;
 import com.job.common.vo.greeting.GreetingVO;
 import dev.langchain4j.agent.tool.P;
@@ -19,14 +20,18 @@ public class GreetingGenerateTool {
     private final JobGreetingService jobGreetingService;
     private final ObjectMapper objectMapper;
 
-    @Tool("根据用户ID、简历ID、岗位ID和语气风格，生成适合发给HR的打招呼语")
+    /**
+     * 生成 HR 打招呼语。
+     */
+    @Tool("根据简历ID、岗位ID和语气风格，为当前登录用户生成适合发给 HR 的打招呼语")
     public String generateGreeting(
-            @P("当前登录用户ID") Long userId,
-            @P("简历ID") Long resumeId,
-            @P("岗位ID") Long jobId,
+            @P("简历ID，例如 1") Long resumeId,
+            @P("岗位ID，例如 1") Long jobId,
             @P("语气风格，例如 自然、正式、自信、实习生风格、社招风格、简洁直达") String style
-    ) {
+    )  {
         try {
+            Long userId = AgentUserContext.getRequiredUserId();
+
             GreetingVO result = jobGreetingService.generateGreeting(userId, resumeId, jobId, style);
             return objectMapper.writeValueAsString(result);
         } catch (Exception e) {

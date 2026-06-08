@@ -1,6 +1,7 @@
 package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.context.AgentUserContext;
 import com.job.bootstrap.service.JobMatchService;
 import com.job.common.vo.match.JobMatchVO;
 import dev.langchain4j.agent.tool.P;
@@ -19,13 +20,17 @@ public class JobMatchTool {
     private final JobMatchService jobMatchService;
     private final ObjectMapper objectMapper;
 
-    @Tool("根据用户ID、简历ID和岗位ID，计算简历与岗位的匹配度，返回匹配分、匹配技能、缺失技能、风险点和建议")
+    /**
+     * 分析当前登录用户某份简历与岗位的匹配度。
+     */
+    @Tool("根据简历ID和岗位ID，计算当前登录用户的简历与岗位的匹配度，返回匹配分、匹配技能、缺失技能、风险点和建议")
     public String matchJob(
-            @P("当前登录用户ID") Long userId,
-            @P("简历ID") Long resumeId,
-            @P("岗位ID") Long jobId
+            @P("简历ID，例如 1") Long resumeId,
+            @P("岗位ID，例如 1") Long jobId
     ) {
         try {
+            Long userId = AgentUserContext.getRequiredUserId();
+
             JobMatchVO result = jobMatchService.matchJob(userId, resumeId, jobId);
             return objectMapper.writeValueAsString(result);
         } catch (Exception e) {

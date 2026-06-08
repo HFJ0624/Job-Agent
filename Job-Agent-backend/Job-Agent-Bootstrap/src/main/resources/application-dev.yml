@@ -47,7 +47,6 @@ mybatis-plus:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 打印SQL日志（开发用）
   global-config:
     db-config:
-      id-type: assign_id # 使用雪花ID，兼容 id BIGINT NOT NULL 的建表方式
       logic-delete-field: isDeleted # 逻辑删除字段使用实体属性名
       logic-delete-value: 1
       logic-not-delete-value: 0

@@ -1,5 +1,6 @@
 package com.job.bootstrap.agent.tools;
 
+import com.job.bootstrap.agent.context.AgentUserContext;
 import com.job.bootstrap.service.JobResumeScoreService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -23,14 +24,23 @@ public class ResumeAnalyzeTool {
     private final JobResumeScoreService jobResumeScoreService;
     private final ObjectMapper objectMapper;
 
-    @Tool("根据用户ID、简历ID和目标岗位，对简历进行整体评分，返回总分、维度分、优势、问题和优化建议")
+    /**
+     * 分析简历。
+     *
+     * @param resumeId 简历ID
+     * @param targetPosition 目标岗位
+     * @return JSON 字符串结果
+     */
+    @Tool("根据简历ID和目标岗位，对当前登录用户的简历进行整体评分，返回总分、维度分、优势、问题和优化建议")
     public String analyzeResume(
-            @P("当前登录用户ID") Long userId,
-            @P("简历ID") Long resumeId,
-            @P("目标岗位名称，可以为空，例如 Java后端开发") String targetPosition
+            @P("简历ID，例如 1") Long resumeId,
+            @P("目标岗位名称，可以为空，例如 Java 后端开发") String targetPosition
     ) {
         try {
+            Long userId = AgentUserContext.getRequiredUserId();
+
             ResumeScoreVO result = jobResumeScoreService.scoreResume(userId, resumeId, targetPosition);
+
             return objectMapper.writeValueAsString(result);
         } catch (Exception e) {
             return "简历分析失败：" + e.getMessage();

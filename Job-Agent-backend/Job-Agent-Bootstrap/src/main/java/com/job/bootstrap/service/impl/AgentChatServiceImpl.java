@@ -2,6 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.agent.JobAgentAssistant;
+import com.job.bootstrap.agent.context.AgentUserContext;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
@@ -56,11 +57,14 @@ public class AgentChatServiceImpl implements AgentChatService {
         saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
 
         try {
+            //在调用 Agent 前，把当前登录用户ID放入 ThreadLocal。
+            AgentUserContext.setUserId(userId);
+
             /*
              * 3. 调用 Agent。
              * 注意：conversationId 会作为 memoryId，让 LangChain4j 维护多轮上下文。
              */
-            String answer = jobAgentAssistant.chat(conversation.getId(), buildUserMessage(userId, message));
+            String answer = jobAgentAssistant.chat(conversation.getId(), message);
 
             /*
              * 4. 保存助手消息。
@@ -105,6 +109,9 @@ public class AgentChatServiceImpl implements AgentChatService {
             );
 
             throw e;
+        }finally {
+            //清理 ThreadLocal。
+            AgentUserContext.clear();
         }
     }
 
@@ -154,21 +161,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         message.setTokenCount(0);
         message.setIsDeleted(NOT_DELETED);
         aiMessageMapper.insert(message);
-    }
-
-    /**
-     * 给模型补充 userId。
-     * 说明:
-     * 1. Tool 调用需要 userId。
-     * 2. 模型不能自己猜 userId，所以我们把当前登录用户ID放进消息上下文。
-     */
-    private String buildUserMessage(Long userId, String message) {
-        return """
-                当前登录用户ID：%s
-                
-                用户问题：
-                %s
-                """.formatted(userId, message);
     }
 
     /**
