@@ -72,6 +72,11 @@ public class AgentChatServiceImpl implements AgentChatService {
             saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
 
             /*
+             * AI 回复后更新会话时间，用于前端会话列表排序。
+             */
+            touchConversation(conversation);
+
+            /*
              * 5. 保存 Agent 调用日志。
              */
             saveTrace(
@@ -206,5 +211,16 @@ public class AgentChatServiceImpl implements AgentChatService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    /**
+     * 更新会话的更新时间。
+     * 说明:
+     * 1. 用户继续对话后，左侧会话列表应该把该会话排到最前面。
+     * 2. 所以每次 AI 回复完成后，更新一次 conversation.updateTime。
+     */
+    private void touchConversation(AiConversation conversation) {
+        conversation.setUpdateTime(new java.util.Date());
+        aiConversationMapper.updateById(conversation);
     }
 }

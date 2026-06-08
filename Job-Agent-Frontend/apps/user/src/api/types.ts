@@ -302,3 +302,42 @@ export interface AgentChatMessage {
   role: "USER" | "ASSISTANT";
   content: string;
 }
+
+/**
+ * AI 助手回复结果。
+ */
+export interface AgentChatInfo {
+  conversationId: number;
+  answer: string;
+}
+
+/**
+ * AI 会话列表项。
+ */
+export interface AgentConversationInfo {
+  id: number;
+  title: string;
+  conversationType: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * AI 历史消息。
+ */
+export interface AgentMessageInfo {
+  id: number;
+  conversationId: number;
+  role: "USER" | "ASSISTANT" | "SYSTEM" | "TOOL";
+  content: string;
+  toolName?: string;
+  createTime?: string;
+}
+
+/**
+ * 前端展示用的聊天消息。
+ */
+export interface AgentChatMessage {
+  role: "USER" | "ASSISTANT";
+  content: string;
+}
