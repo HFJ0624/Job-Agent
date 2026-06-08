@@ -6,7 +6,8 @@ import type {
   PageResult,
   PositionDetailInfo,
   PositionInfo,
-  JobMatchInfo
+  JobMatchInfo,
+  GreetingInfo
 } from "./types";
 
 /**
@@ -93,4 +94,21 @@ export function getLatestJobMatch(jobId: string, resumeId: string) {
   return request<JobMatchInfo | null>(
     `/front/job/${jobId}/match-record?resumeId=${resumeId}`
   );
+}
+
+/**
+ * 生成 HR 打招呼语。
+ *
+ * @param jobId 岗位ID
+ * @param resumeId 简历ID
+ * @param style 语气风格
+ */
+export function generateGreeting(jobId: string, resumeId: string, style: string) {
+  return request<GreetingInfo>(`/front/job/${jobId}/greeting`, {
+    method: "POST",
+    body: JSON.stringify({
+      resumeId,
+      style
+    })
+  });
 }

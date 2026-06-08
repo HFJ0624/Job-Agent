@@ -110,9 +110,20 @@
 
           <p class="favorite-count">已有 {{ detail.favoriteCount }} 人收藏该岗位</p>
 
+          <!-- 新增：HR 打招呼语生成组件 -->
+          <JobGreetingPanel
+            v-if="position?.id"
+            :job-id="String(position.id)"
+            @use="messageContent = $event"
+          />
+
           <label class="message-field">
             <span>沟通消息</span>
-            <textarea v-model.trim="messageContent" maxlength="500" placeholder="可以为空，系统会自动生成一句招呼语。" />
+            <textarea
+              v-model.trim="messageContent"
+              maxlength="500"
+              placeholder="可以为空，系统会自动生成一句招呼语。"
+            />
           </label>
 
           <div v-if="latestMessage" class="message-result">
@@ -141,6 +152,7 @@ import { communicateWithHr, getFrontPositionDetail, toggleJobFavorite } from "..
 import type { JobMessageInfo, PositionDetailInfo, PositionInfo } from "../api/types";
 import { useAuthStore } from "../stores/auth";
 import JobMatchPanel from "../components/JobMatchPanel.vue";
+import JobGreetingPanel from "../components/JobGreetingPanel.vue";
 
 const route = useRoute();
 const router = useRouter();

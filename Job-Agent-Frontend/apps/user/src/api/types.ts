@@ -269,3 +269,20 @@ export interface JobMatchInfo {
 
   createTime?: string;
 }
+
+/**
+ * HR 打招呼语生成结果。
+ */
+export interface GreetingInfo {
+  id: number;
+  userId: number;
+  resumeId: number;
+  jobId: number;
+
+  style: string;
+  content: string;
+  matchedSkills: string[];
+  source: string;
+
+  createTime?: string;
+}

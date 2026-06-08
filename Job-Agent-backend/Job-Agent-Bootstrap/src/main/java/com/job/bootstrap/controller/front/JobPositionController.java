@@ -1,10 +1,13 @@
 package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.job.bootstrap.service.JobGreetingService;
 import com.job.bootstrap.service.JobMatchService;
+import com.job.common.dto.greeting.GreetingGenerateRequestDTO;
 import com.job.common.dto.match.JobMatchRequestDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
+import com.job.common.vo.greeting.GreetingVO;
 import com.job.common.vo.match.JobMatchVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +23,8 @@ import org.springframework.web.bind.annotation.*;
 public class JobPositionController {
 
     private final JobMatchService jobMatchService;
+
+    private final JobGreetingService jobGreetingService;
 
     /**
      * 分析当前用户某份简历与指定岗位的匹配度。
@@ -57,6 +62,32 @@ public class JobPositionController {
         Long userId = StpUtil.getLoginIdAsLong();
 
         JobMatchVO result = jobMatchService.getLatestMatch(userId, resumeId, jobId);
+
+        return Result.build(result, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 根据指定简历和岗位生成 HR 打招呼语。
+     *
+     * @param jobId 岗位ID
+     * @param request 请求参数，包含 resumeId 和 style
+     * @return 生成后的打招呼语
+     */
+    @PostMapping("/{jobId}/greeting")
+    public Result<GreetingVO> generateGreeting(
+            @PathVariable Long jobId,
+            @Valid @RequestBody GreetingGenerateRequestDTO request
+    ) {
+        // 1. 当前用户ID必须从登录态获取，不能由前端传入。
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        // 2. 调用服务生成打招呼语。
+        GreetingVO result = jobGreetingService.generateGreeting(
+                userId,
+                request.getResumeId(),
+                jobId,
+                request.getStyle()
+        );
 
         return Result.build(result, ResultCodeEnum.SUCCESS);
     }
