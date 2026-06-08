@@ -13,6 +13,7 @@ import LoginPage from "./pages/LoginPage.vue";
 import RegisterPage from "./pages/RegisterPage.vue";
 import ProfilePage from "./pages/ProfilePage.vue";
 import JobRecommendPage from "./pages/JobRecommendPage.vue";
+import ApplicationPage from "./pages/ApplicationPage.vue";
 import "./styles.css";
 
 // 用户端先用前端静态路由，后续接后端时只需要把页面里的 mock 数据替换成接口。
@@ -28,7 +29,8 @@ const router = createRouter({
     { path: "/login", name: "login", component: LoginPage },
     { path: "/register", name: "register", component: RegisterPage },
     { path: "/profile", name: "profile", component: ProfilePage },
-    { path: "/job-recommend", name: "job-recommend", component: JobRecommendPage }
+    { path: "/job-recommend", name: "job-recommend", component: JobRecommendPage },
+    { path: "/application", name: "application", component: ApplicationPage },
   ],
   scrollBehavior() {
     return { top: 0 };

@@ -382,3 +382,58 @@ export interface JobRecommendInfo {
   missingSkills: string[];
   reasons: string[];
 }
+
+/**
+ * 求职记录。
+ */
+export interface JobApplicationInfo {
+  id: number;
+  jobId: number;
+  resumeId?: number;
+  companyId?: number;
+
+  companyName?: string;
+  jobTitle?: string;
+  city?: string;
+  salaryText?: string;
+  source?: string;
+
+  status: string;
+  statusText: string;
+  priority?: string;
+  priorityText?: string;
+
+  hrName?: string;
+  hrContact?: string;
+
+  applyTime?: string;
+  interviewTime?: string;
+  nextFollowTime?: string;
+
+  note?: string;
+  lastAction?: string;
+
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 求职记录统计。
+ */
+export interface JobApplicationStatsInfo {
+  totalCount: number;
+  statusCountMap: Record<string, number>;
+  todayFollowCount: number;
+  interviewingCount: number;
+}
+
+/**
+ * 求职记录分页结果。
+ */
+export interface PageResult<T> {
+  records: T[];
+  total: number;
+  size: number;
+  current: number;
+  pages: number;
+}

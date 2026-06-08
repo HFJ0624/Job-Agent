@@ -110,6 +110,14 @@
 
           <p class="favorite-count">已有 {{ detail.favoriteCount }} 人收藏该岗位</p>
 
+          <button
+            class="secondary-button detail-icon-button"
+            type="button"
+            @click="addToApplicationProgress"
+          >
+            加入求职进度
+          </button>
+
           <!-- 新增：HR 打招呼语生成组件 -->
           <JobGreetingPanel
             v-if="position?.id"
@@ -151,8 +159,9 @@ import { useRoute, useRouter } from "vue-router";
 import { communicateWithHr, getFrontPositionDetail, toggleJobFavorite } from "../api/job";
 import type { JobMessageInfo, PositionDetailInfo, PositionInfo } from "../api/types";
 import { useAuthStore } from "../stores/auth";
-import JobMatchPanel from "../components/JobMatchPanel.vue";
-import JobGreetingPanel from "../components/JobGreetingPanel.vue";
+import  JobMatchPanel from "../components/JobMatchPanel.vue";
+import  JobGreetingPanel  from "../components/JobGreetingPanel.vue";
+import { saveApplication } from "../api/application";
 
 const route = useRoute();
 const router = useRouter();
@@ -204,6 +213,32 @@ async function loadDetail() {
     errorMessage.value = error instanceof Error ? error.message : "岗位详情加载失败";
   } finally {
     loading.value = false;
+  }
+}
+
+/**
+ * 将当前岗位加入求职进度。
+ */
+async function addToApplicationProgress() {
+  if (!detail.value || !position.value) {
+    return;
+  }
+
+  if (!ensureLogin()) {
+    return;
+  }
+
+  try {
+    await saveApplication({
+      jobId: positionId.value,
+      status: "INTERESTED",
+      priority: "NORMAL",
+      note: "从岗位详情页加入求职进度"
+    });
+
+    ElMessage.success("已加入求职进度");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "加入求职进度失败");
   }
 }
 
