@@ -214,3 +214,30 @@ export interface JobMessageInfo {
   status: string;
   createTime?: string;
 }
+
+/**
+ * 简历评分结果，对应后端 ResumeScoreVO。
+ */
+export interface ResumeScoreInfo {
+  id: number;
+  resumeId: number;
+  userId: number;
+
+  totalScore: number;
+  level: string;
+
+  basicInfoScore: number;
+  educationScore: number;
+  skillScore: number;
+  projectScore: number;
+  experienceScore: number;
+  expressionScore: number;
+
+  targetPosition?: string;
+
+  advantages: string[];
+  problems: string[];
+  suggestions: string[];
+
+  createTime?: string;
+}

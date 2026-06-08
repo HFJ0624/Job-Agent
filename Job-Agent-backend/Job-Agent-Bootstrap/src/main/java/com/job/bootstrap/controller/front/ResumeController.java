@@ -1,12 +1,15 @@
 package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.job.bootstrap.service.JobResumeScoreService;
 import com.job.bootstrap.service.JobResumeService;
+import com.job.common.dto.resume.ResumeScoreRequestDTO;
 import com.job.common.dto.resume.ResumeUpdateDTO;
 import com.job.common.dto.resume.ResumeUploadDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.entity.resume.JobResume;
+import com.job.common.vo.resume.ResumeScoreVO;
 import com.job.common.vo.resume.ResumeVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +47,8 @@ import java.util.List;
 public class ResumeController {
 
     private final JobResumeService jobResumeService;
+
+    private final JobResumeScoreService jobResumeScoreService;
 
     /**
      * 上传简历。
@@ -188,6 +193,48 @@ public class ResumeController {
             builder.contentLength(resume.getFileSize());
         }
         return builder.body(new InputStreamResource(inputStream));
+    }
+
+    /**
+     * 对我的简历进行评分。
+     * P表示参数描述：如果简历还没有解析文本，Service 会自动先调用解析逻辑。
+     *
+     * @param id 简历ID
+     * @param request 评分请求参数，可传目标岗位
+     * @return 返回简历评分结果
+     */
+    @PostMapping("/{id}/score")
+    public Result<ResumeScoreVO> score(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) ResumeScoreRequestDTO request
+    ) {
+        // 1. 当前用户只能评分自己名下的简历。
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        // 2. request 允许为空，避免前端不传目标岗位时报错。
+        String targetPosition = request == null ? null : request.getTargetPosition();
+
+        // 3. 调用评分服务，生成评分记录并同步更新 resume.score。
+        ResumeScoreVO score = jobResumeScoreService.scoreResume(userId, id, targetPosition);
+
+        return Result.build(score, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 查询我的简历最近一次评分结果。
+     *
+     * @param id 简历ID
+     * @return 返回最近一次评分结果；没有评分记录时 data 为 null
+     */
+    @GetMapping("/{id}/score")
+    public Result<ResumeScoreVO> latestScore(@PathVariable Long id) {
+        // 1. 用户ID从登录态获取，不能从前端传入。
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        // 2. 查询最近一次评分记录。
+        ResumeScoreVO score = jobResumeScoreService.getLatestScore(userId, id);
+
+        return Result.build(score, ResultCodeEnum.SUCCESS);
     }
 
     /**

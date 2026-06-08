@@ -1,5 +1,5 @@
 import { getToken, request } from "./request";
-import type { ApiResult, ResumeInfo } from "./types";
+import type { ApiResult, ResumeInfo, ResumeScoreInfo } from "./types";
 
 /**
  * 上传简历。
@@ -106,4 +106,25 @@ export async function fetchResumeFile(resumeId: string) {
     blob: await response.blob(),
     contentType
   };
+}
+
+/**
+ * 对指定简历进行AI评分。
+ * P表示参数描述：targetPosition 可以为空，后端会按简历整体质量评分。
+ */
+export function scoreResume(resumeId: string, targetPosition?: string) {
+  return request<ResumeScoreInfo>(`/front/resume/${resumeId}/score`, {
+    method: "POST",
+    body: JSON.stringify({
+      targetPosition: targetPosition || ""
+    })
+  });
+}
+
+/**
+ * 查询指定简历最近一次评分结果。
+ * P表示参数描述：如果后端没有评分记录，会返回 null。
+ */
+export function getLatestResumeScore(resumeId: string) {
+  return request<ResumeScoreInfo | null>(`/front/resume/${resumeId}/score`);
 }
