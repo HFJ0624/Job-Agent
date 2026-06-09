@@ -125,6 +125,14 @@
             </option>
           </select>
 
+          <button
+            class="secondary-button"
+            type="button"
+            @click="openInterviewPrepare(item)"
+          >
+            面试准备
+          </button>
+
           <RouterLink class="secondary-button" :to="`/jobs/${item.jobId}`">
             查看岗位
           </RouterLink>
@@ -157,6 +165,73 @@
         下一页
       </button>
     </div>
+
+    <el-drawer
+      v-model="prepareDrawerVisible"
+      direction="rtl"
+      size="46%"
+      :with-header="false"
+    >
+      <section class="prepare-drawer">
+        <header class="prepare-header">
+          <div>
+            <p class="eyebrow">AI 面试准备</p>
+            <h2>{{ currentApplication?.jobTitle || "面试准备" }}</h2>
+            <span>{{ currentApplication?.companyName || "目标公司" }}</span>
+          </div>
+
+          <button class="text-button" type="button" @click="prepareDrawerVisible = false">
+            关闭
+          </button>
+        </header>
+
+        <button
+          class="primary-button large"
+          type="button"
+          :disabled="prepareLoading"
+          @click="handleGenerateInterviewPrepare"
+        >
+          {{ prepareLoading ? "生成中..." : currentPrepare ? "重新生成" : "生成面试准备" }}
+        </button>
+
+        <p v-if="prepareLoading" class="empty-state">正在生成面试准备...</p>
+
+        <div v-if="currentPrepare" class="prepare-result">
+          <section class="prepare-card">
+            <h3>技术面试题</h3>
+            <ol>
+              <li v-for="item in currentPrepare.technicalQuestions" :key="item">{{ item }}</li>
+            </ol>
+          </section>
+
+          <section class="prepare-card">
+            <h3>项目追问题</h3>
+            <ol>
+              <li v-for="item in currentPrepare.projectQuestions" :key="item">{{ item }}</li>
+            </ol>
+          </section>
+
+          <section class="prepare-card">
+            <h3>HR 面试题</h3>
+            <ol>
+              <li v-for="item in currentPrepare.hrQuestions" :key="item">{{ item }}</li>
+            </ol>
+          </section>
+
+          <section class="prepare-card suggestion">
+            <h3>复习建议</h3>
+            <ul>
+              <li v-for="item in currentPrepare.reviewSuggestions" :key="item">{{ item }}</li>
+            </ul>
+          </section>
+
+          <section class="prepare-card">
+            <h3>总结</h3>
+            <p>{{ currentPrepare.summary }}</p>
+          </section>
+        </div>
+      </section>
+    </el-drawer>
   </main>
 </template>
 
@@ -174,6 +249,11 @@ import type {
   JobApplicationInfo,
   JobApplicationStatsInfo
 } from "../api/types";
+import {
+  generateInterviewPrepare,
+  getLatestInterviewPrepare
+} from "../api/interviewPrepare";
+import type { InterviewPrepareInfo } from "../api/types";
 
 /**
  * 状态选项。
@@ -205,6 +285,10 @@ const stats = ref<JobApplicationStatsInfo | null>(null);
 const total = ref(0);
 const loading = ref(false);
 const errorMessage = ref("");
+const prepareDrawerVisible = ref(false);
+const prepareLoading = ref(false);
+const currentPrepare = ref<InterviewPrepareInfo | null>(null);
+const currentApplication = ref<JobApplicationInfo | null>(null);
 
 const totalPages = computed(() => {
   return Math.max(1, Math.ceil(total.value / query.pageSize));
@@ -304,6 +388,48 @@ async function removeApplication(item: JobApplicationInfo) {
     }
 
     ElMessage.error(error instanceof Error ? error.message : "删除失败");
+  }
+}
+
+/**
+ * 打开面试准备抽屉。
+ */
+async function openInterviewPrepare(item: JobApplicationInfo) {
+  currentApplication.value = item;
+  currentPrepare.value = null;
+  prepareDrawerVisible.value = true;
+  prepareLoading.value = true;
+
+  try {
+    currentPrepare.value = await getLatestInterviewPrepare(item.id);
+  } catch (error) {
+    console.error("[Job-Agent] 查询面试准备失败", error);
+  } finally {
+    prepareLoading.value = false;
+  }
+}
+
+/**
+ * 生成面试准备。
+ */
+async function handleGenerateInterviewPrepare() {
+  if (!currentApplication.value) {
+    return;
+  }
+
+  prepareLoading.value = true;
+
+  try {
+    currentPrepare.value = await generateInterviewPrepare({
+      applicationId: currentApplication.value.id,
+      resumeId: currentApplication.value.resumeId
+    });
+
+    ElMessage.success("面试准备已生成");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "面试准备生成失败");
+  } finally {
+    prepareLoading.value = false;
   }
 }
 </script>
@@ -531,5 +657,56 @@ async function removeApplication(item: JobApplicationInfo) {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+.prepare-drawer {
+  min-height: 100%;
+  padding: 24px;
+  background: #f8fafc;
+}
+
+.prepare-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.prepare-header h2 {
+  margin: 4px 0;
+  color: #111827;
+}
+
+.prepare-header span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.prepare-result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.prepare-card {
+  padding: 16px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+}
+
+.prepare-card h3 {
+  margin: 0 0 10px;
+  color: #111827;
+}
+
+.prepare-card li {
+  line-height: 1.8;
+  color: #374151;
+}
+
+.prepare-card.suggestion {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
 }
 </style>

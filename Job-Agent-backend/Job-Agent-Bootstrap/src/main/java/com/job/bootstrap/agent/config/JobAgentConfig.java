@@ -39,7 +39,9 @@ public class JobAgentConfig {
             JobMatchTool jobMatchTool,
             GreetingGenerateTool greetingGenerateTool,
             JobSearchTool jobSearchTool,
-            JobRecommendTool jobRecommendTool
+            JobRecommendTool jobRecommendTool,
+            InterviewPrepareTool interviewPrepareTool
+
     ) {
         return AiServices.builder(JobAgentAssistant.class)
                 .chatModel(chatModel)
@@ -49,7 +51,8 @@ public class JobAgentConfig {
                         jobMatchTool,
                         greetingGenerateTool,
                         jobSearchTool,
-                        jobRecommendTool
+                        jobRecommendTool,
+                        interviewPrepareTool
                 )
                 .build();
     }

@@ -437,3 +437,25 @@ export interface PageResult<T> {
   current: number;
   pages: number;
 }
+
+/**
+ * AI 面试准备结果。
+ */
+export interface InterviewPrepareInfo {
+  id: number;
+  applicationId: number;
+  jobId?: number;
+  resumeId?: number;
+
+  jobTitle?: string;
+  companyName?: string;
+
+  technicalQuestions: string[];
+  projectQuestions: string[];
+  hrQuestions: string[];
+  reviewSuggestions: string[];
+
+  summary?: string;
+  source?: string;
+  createTime?: string;
+}
