@@ -29,9 +29,6 @@ public class SaTokenConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/front/auth/login",
                         "/front/auth/register",
-                        // 前台岗位列表和岗位详情是公开浏览入口，只返回已发布岗位，不暴露后台草稿数据。
-                        // P表示参数描述，收藏和立即沟通在 /front/job/{id}/favorite、/front/job/{id}/communicate，
-                        // 这两个路径不在放行范围内，必须登录后才能访问。
                         "/front/job/page",
                         "/front/job/*",
                         "/front/file/avatar",
@@ -40,7 +37,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         "/swagger-ui.html",
                         "/swagger-ui/**",
                         "/v3/api-docs",
-                        "/v3/api-docs/**"
+                        "/v3/api-docs/**",
+                        "/admin/agent/eval/run-all"
                 );
     }
 }

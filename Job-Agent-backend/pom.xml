@@ -61,7 +61,7 @@
         <langchain4j.spring-boot.version>1.15.1-beta25</langchain4j.spring-boot.version>
 
         <!-- SpringDoc OpenAPI：Swagger UI 接口文档 -->
-        <springdoc.version>2.6.0</springdoc.version>
+        <springdoc.version>2.8.15</springdoc.version>
 
         <!-- MinIO：简历文件、头像等对象存储 -->
         <minio.version>8.5.7</minio.version>
