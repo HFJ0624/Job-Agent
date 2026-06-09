@@ -534,3 +534,157 @@ export interface MockInterviewReviewInfo {
   source?: string;
   createTime?: string;
 }
+
+/**
+ * 求职沟通记录状态。
+ *
+ * 说明:
+ * 这些值要和后端 CommunicationStatus 枚举保持一致。
+ */
+export type CommunicationStatus =
+  | "GREETING_GENERATED"
+  | "COPIED"
+  | "COMMUNICATED"
+  | "REPLIED"
+  | "INTERVIEW_INVITED"
+  | "NO_REPLY"
+  | "CLOSED";
+
+/**
+ * 求职沟通记录。
+ *
+ * 对应后端 JobCommunicationRecordVO。
+ */
+export interface CommunicationRecordInfo {
+  id: number;
+  applicationId?: number;
+
+  /**
+   * 简历ID，内部使用，页面不要直接展示。
+   */
+  resumeId?: number;
+
+  /**
+   * 简历名称，页面展示用。
+   */
+  resumeName?: string;
+
+  /**
+   * 岗位ID，内部使用，页面不要直接展示。
+   */
+  jobId: number;
+
+  /**
+   * 岗位名称。
+   */
+  jobTitle?: string;
+
+  /**
+   * 公司ID。
+   */
+  companyId?: number;
+
+  /**
+   * 公司名称。
+   */
+  companyName?: string;
+
+  /**
+   * 工作城市。
+   */
+  jobCity?: string;
+
+  /**
+   * 最低薪资。
+   */
+  minSalary?: number;
+
+  /**
+   * 最高薪资。
+   */
+  maxSalary?: number;
+
+  /**
+   * 薪资展示文本。
+   */
+  salaryText?: string;
+
+  greetingRecordId?: number;
+
+  platform?: string;
+  externalJobUrl?: string;
+
+  hrName?: string;
+  hrContact?: string;
+
+  greetingText?: string;
+  hrReply?: string;
+
+  communicationStatus: CommunicationStatus;
+  communicationStatusDesc?: string;
+
+  interviewTime?: string;
+  nextFollowTime?: string;
+
+  note?: string;
+
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 沟通记录分页结果。
+ */
+export interface CommunicationPageResult {
+  records: CommunicationRecordInfo[];
+  total: number;
+  pageNo: number;
+  pageSize: number;
+}
+
+/**
+ * 沟通记录统计。
+ */
+export interface CommunicationStatsInfo {
+  totalCount: number;
+  greetingGeneratedCount: number;
+  copiedCount: number;
+  communicatedCount: number;
+  repliedCount: number;
+  interviewInvitedCount: number;
+  noReplyCount: number;
+  closedCount: number;
+}
+
+/**
+ * 新增沟通记录请求参数。
+ */
+export interface CommunicationCreatePayload {
+  applicationId?: number;
+  resumeId?: number;
+  jobId: number;
+  greetingRecordId?: number;
+  platform?: string;
+  externalJobUrl?: string;
+  hrName?: string;
+  hrContact?: string;
+  greetingText?: string;
+  note?: string;
+}
+
+/**
+ * 保存 HR 回复请求参数。
+ */
+export interface CommunicationReplyPayload {
+  hrReply: string;
+  note?: string;
+}
+
+/**
+ * 标记面试邀约请求参数。
+ */
+export interface CommunicationInterviewPayload {
+  interviewTime?: string;
+  nextFollowTime?: string;
+  note?: string;
+}

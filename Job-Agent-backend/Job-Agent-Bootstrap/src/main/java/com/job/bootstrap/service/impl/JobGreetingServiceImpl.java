@@ -43,6 +43,7 @@ public class JobGreetingServiceImpl
     private final JobMatchService jobMatchService;
     private final ObjectMapper objectMapper;
     private final JobCompanyService jobCompanyService;
+    private final JobCommunicationRecordService jobCommunicationRecordService;
 
     /**
      * 生成 HR 打招呼语。
@@ -99,6 +100,22 @@ public class JobGreetingServiceImpl
         record.setSource(SOURCE_RULE);
         record.setIsDeleted(NOT_DELETED);
         save(record);
+
+        /*
+         * 生成打招呼语后，自动创建沟通记录。
+         *
+         * 业务意义:
+         * 1. 用户生成话术后，下一步大概率会复制到 Boss 直聘和 HR 沟通。
+         * 2. 所以这里自动创建一条沟通记录，避免生成完话术后业务链路断掉。
+         * 3. 前端“沟通记录”页面可以直接看到这条记录。
+         */
+        jobCommunicationRecordService.createFromGreeting(
+                userId,
+                resumeId,
+                jobId,
+                record.getId(),
+                content
+        );
 
         return GreetingVO.from(record, objectMapper);
     }

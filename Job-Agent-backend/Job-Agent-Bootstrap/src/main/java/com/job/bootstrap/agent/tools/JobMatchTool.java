@@ -32,7 +32,8 @@ public class JobMatchTool {
             根据用户简历ID和岗位ID，分析简历与岗位的匹配度。
             当用户询问“是否适合岗位”“岗位匹配度”“是否建议投递”“岗位差距分析”时使用本工具。
             注意：userId 由系统上下文自动注入，不需要模型提供。
-            """)
+            """
+    )
     public String matchJob(
             @P("用户选择的简历ID，必须由用户输入或前端上下文提供，不能编造") Long resumeId,
             @P("用户选择的岗位ID，必须由用户输入或前端上下文提供，不能编造") Long jobId

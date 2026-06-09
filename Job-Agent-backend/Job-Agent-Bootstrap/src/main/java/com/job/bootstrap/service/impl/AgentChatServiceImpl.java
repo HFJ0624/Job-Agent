@@ -21,11 +21,13 @@ import java.util.UUID;
 /**
  * 作者:hfj
  * 功能:AI 助手聊天服务实现
- * 设计说明:
- * 1. 本类是 Agent 对话入口。
- * 2. 负责创建会话、保存用户消息、调用大模型 Agent、保存助手回复。
- * 3. 不负责具体工具逻辑，具体业务能力交给 Tool 类。
- * 4. 不直接写 AgentTraceLogMapper，而是统一调用 AgentTraceService。
+ * 职责：
+ * 1. 获取或创建 AI 会话。
+ * 2. 保存用户消息。
+ * 3. 设置 AgentRuntimeContext。
+ * 4. 调用 LangChain4j Agent。
+ * 5. 保存助手回复。
+ * 6. 保存主链路 Trace。
  * 日期: 2026/6/8 15:20
  */
 @Service
@@ -147,6 +149,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     System.currentTimeMillis() - start
             );
 
+            //返回结果
             AgentChatVO vo = new AgentChatVO();
             vo.setConversationId(conversation.getId());
             vo.setAnswer(answer);

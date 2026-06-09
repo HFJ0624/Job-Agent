@@ -41,7 +41,9 @@ public class GreetingGenerateTool {
             根据用户简历和岗位生成 HR 打招呼语。
             当用户要求“生成打招呼语”“HR 开场白”“沟通话术”时使用本工具。
             style 可以是: 礼貌、简洁、积极、正式。
-            """)
+            resumeId 和 jobId 必须由用户输入或前端上下文提供，不能编造。
+            """
+    )
     public String generateGreeting(
             @P("用户选择的简历ID，不能编造") Long resumeId,
             @P("用户选择的岗位ID，不能编造") Long jobId,

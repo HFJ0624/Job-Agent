@@ -35,6 +35,7 @@ async function handleLogout() {
         <RouterLink to="/agent">AI 助手</RouterLink>
         <RouterLink to="/job-recommend">智能推荐</RouterLink>
         <RouterLink to="/application">求职进度</RouterLink>
+        <RouterLink to="/communication">沟通记录</RouterLink>
       </nav>
 
       <div class="top-actions">

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.job.bootstrap.mapper.JobCommunicationRecordMapper">
+
+    <!--
+        作者: hfj
+        功能: 求职沟通记录多表查询字段片段
+
+        设计说明:
+        1. jcr = job_communication_record 沟通记录表
+        2. r   = resume 简历表
+        3. jp  = job_position 岗位表
+        4. c   = company 公司表
+
+        注意:
+        如果你数据库字段名和这里不一致，比如 deleted / is_deleted，
+        按你真实表字段改一下即可。
+    -->
+    <sql id="CommunicationSelectColumns">
+        jcr.id AS id,
+        jcr.application_id AS applicationId,
+        jcr.resume_id AS resumeId,
+        r.resume_name AS resumeName,
+
+        jcr.job_id AS jobId,
+        jp.company_id AS companyId,
+        jp.job_title AS jobTitle,
+        jp.city AS jobCity,
+        jp.min_salary AS minSalary,
+        jp.max_salary AS maxSalary,
+
+        c.company_name AS companyName,
+
+        jcr.greeting_record_id AS greetingRecordId,
+        jcr.platform AS platform,
+        jcr.external_job_url AS externalJobUrl,
+        jcr.hr_name AS hrName,
+        jcr.hr_contact AS hrContact,
+        jcr.greeting_text AS greetingText,
+        jcr.hr_reply AS hrReply,
+        jcr.communication_status AS communicationStatus,
+        jcr.interview_time AS interviewTime,
+        jcr.next_follow_time AS nextFollowTime,
+        jcr.note AS note,
+        jcr.create_time AS createTime,
+        jcr.update_time AS updateTime
+    </sql>
+
+    <!--
+        分页查询沟通记录。
+
+        为什么用 LEFT JOIN？
+        1. 沟通记录一定存在。
+        2. 简历、岗位、公司可能后续被删除或缺失。
+        3. 用 LEFT JOIN 可以保证沟通记录仍然能展示出来，不会因为关联数据缺失整条记录消失。
+    -->
+    <select id="selectCommunicationPage"
+            resultType="com.job.common.vo.communication.JobCommunicationRecordVO">
+        SELECT
+        <include refid="CommunicationSelectColumns"/>
+        FROM job_communication_record jcr
+
+        LEFT JOIN resume r
+        ON r.id = jcr.resume_id
+        AND r.user_id = jcr.user_id
+
+        LEFT JOIN job_position jp
+        ON jp.id = jcr.job_id
+
+        LEFT JOIN company c
+        ON c.id = jp.company_id
+
+        WHERE jcr.user_id = #{userId}
+        AND jcr.is_deleted = 0
+        AND jp.is_deleted = 0
+        AND c.is_deleted = 0
+
+        <if test="query.status != null and query.status != ''">
+            AND jcr.communication_status = #{query.status}
+        </if>
+
+        <if test="query.platform != null and query.platform != ''">
+            AND jcr.platform = #{query.platform}
+        </if>
+
+        <if test="query.keyword != null and query.keyword != ''">
+            AND (
+            jcr.hr_name LIKE CONCAT('%', #{query.keyword}, '%')
+            OR jcr.hr_reply LIKE CONCAT('%', #{query.keyword}, '%')
+            OR jcr.note LIKE CONCAT('%', #{query.keyword}, '%')
+            OR r.resume_name LIKE CONCAT('%', #{query.keyword}, '%')
+            OR jp.job_title LIKE CONCAT('%', #{query.keyword}, '%')
+            OR c.company_name LIKE CONCAT('%', #{query.keyword}, '%')
+            )
+        </if>
+
+        ORDER BY jcr.update_time DESC, jcr.id DESC
+    </select>
+
+    <!--
+        查询沟通记录详情。
+    -->
+    <select id="selectCommunicationDetail"
+            resultType="com.job.common.vo.communication.JobCommunicationRecordVO">
+        SELECT
+        <include refid="CommunicationSelectColumns"/>
+        FROM job_communication_record jcr
+
+        LEFT JOIN resume r
+        ON r.id = jcr.resume_id
+        AND r.user_id = jcr.user_id
+
+        LEFT JOIN job_position jp
+        ON jp.id = jcr.job_id
+
+        LEFT JOIN company c
+        ON c.id = jp.company_id
+
+        WHERE jcr.user_id = #{userId}
+        AND jcr.id = #{id}
+        AND jcr.is_deleted = 0
+        AND jp.is_deleted = 0
+        AND c.is_deleted = 0
+        LIMIT 1
+    </select>
+
+</mapper>

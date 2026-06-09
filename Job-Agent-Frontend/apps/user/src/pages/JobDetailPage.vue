@@ -134,6 +134,10 @@
             />
           </label>
 
+          <el-button type="primary" @click="$router.push('/communications')">
+            查看沟通记录
+          </el-button>
+
           <div v-if="latestMessage" class="message-result">
             <b>已发送给 {{ latestMessage.receiverName }}</b>
             <p>{{ latestMessage.content }}</p>
