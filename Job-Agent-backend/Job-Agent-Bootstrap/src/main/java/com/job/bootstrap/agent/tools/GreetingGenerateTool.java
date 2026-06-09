@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobGreetingService;
 import com.job.common.vo.greeting.GreetingVO;
@@ -15,6 +15,10 @@ import java.util.Map;
 /**
  * 作者:hfj
  * 功能:HR 打招呼语生成工具
+ * 使用场景:
+ * 1. 用户说“帮我生成一段给 HR 的打招呼语”
+ * 2. 用户说“这个岗位怎么跟 HR 开场”
+ * 3. 用户说“帮我写一段更礼貌的求职开场白”
  * 日期: 2026/6/8 15:14
  */
 @Component
@@ -27,33 +31,50 @@ public class GreetingGenerateTool {
 
     /**
      * 生成 HR 打招呼语。
+     *
+     * @param resumeId 简历ID
+     * @param jobId 岗位ID
+     * @param style 语气风格
+     * @return 打招呼语 JSON
      */
-    @Tool("根据简历ID、岗位ID和语气风格，为当前登录用户生成适合发给 HR 的打招呼语")
+    @Tool("""
+            根据用户简历和岗位生成 HR 打招呼语。
+            当用户要求“生成打招呼语”“HR 开场白”“沟通话术”时使用本工具。
+            style 可以是: 礼貌、简洁、积极、正式。
+            """)
     public String generateGreeting(
-            @P("简历ID，例如 1") Long resumeId,
-            @P("岗位ID，例如 1") Long jobId,
-            @P("语气风格，例如 自然、正式、自信、实习生风格、社招风格、简洁直达") String style
+            @P("用户选择的简历ID，不能编造") Long resumeId,
+            @P("用户选择的岗位ID，不能编造") Long jobId,
+            @P("语气风格，例如 礼貌、简洁、积极、正式，可以为空") String style
     )  {
         long start = System.currentTimeMillis();
-        Long userId = AgentUserContext.getRequiredUserId();
+
+        Long userId = AgentRuntimeContext.getRequiredUserId();
+        Long conversationId = AgentRuntimeContext.getConversationId();
+        String intentCode = AgentRuntimeContext.getIntentCode();
 
         Map<String, Object> input = Map.of(
                 "resumeId", resumeId,
                 "jobId", jobId,
-                "style",style
+                "style", style == null ? "礼貌" : style
         );
 
         try {
-            GreetingVO result = jobGreetingService.generateGreeting(userId, resumeId, jobId, style);
+            GreetingVO result = jobGreetingService.generateGreeting(
+                    userId,
+                    resumeId,
+                    jobId,
+                    style == null ? "礼貌" : style
+            );
 
             /*
              * 工具调用成功，记录 Trace。
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "GREETING_GENERATE",
-                    "GreetingGenerateTool",
+                    conversationId,
+                    intentCode,
+                    "GreetingGenerateTool.generateGreeting",
                     input,
                     result,
                     "SUCCESS",
@@ -68,9 +89,9 @@ public class GreetingGenerateTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "GREETING_GENERATE",
-                    "GreetingGenerateTool",
+                    conversationId,
+                    intentCode,
+                    "GreetingGenerateTool.generateGreeting",
                     input,
                     null,
                     "FAILED",
@@ -78,7 +99,7 @@ public class GreetingGenerateTool {
                     System.currentTimeMillis() - start
             );
 
-            return "打招呼语生成失败：" + e.getMessage();
+            throw new RuntimeException("打招呼语生成工具调用失败: " + e.getMessage(), e);
         }
     }
 }

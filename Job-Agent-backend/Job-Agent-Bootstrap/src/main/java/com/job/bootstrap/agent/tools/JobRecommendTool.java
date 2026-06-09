@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.tools;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.UserJobPreferenceService;
 import com.job.common.dto.preference.JobRecommendQueryDTO;
@@ -45,7 +45,10 @@ public class JobRecommendTool {
             @P("推荐数量，例如 5 或 10") Integer limit
     ) {
         long start = System.currentTimeMillis();
-        Long userId = AgentUserContext.getRequiredUserId();
+
+        Long userId = AgentRuntimeContext.getRequiredUserId();
+        Long conversationId = AgentRuntimeContext.getConversationId();
+        String intentCode = AgentRuntimeContext.getIntentCode();
 
         Map<String, Object> input = Map.of(
                 "keyword", keyword,
@@ -66,9 +69,9 @@ public class JobRecommendTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "JOB_RECOMMEND",
-                    "JobRecommendTool",
+                    conversationId,
+                    intentCode,
+                    "JobRecommendTool.recommendJobs",
                     input,
                     list,
                     "SUCCESS",
@@ -83,16 +86,17 @@ public class JobRecommendTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "JOB_RECOMMEND",
-                    "JobRecommendTool",
+                    conversationId,
+                    intentCode,
+                    "JobRecommendTool.recommendJobs",
                     input,
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
-            return "岗位推荐失败：" + e.getMessage();
+
+            throw new RuntimeException("岗位推荐失败: " + e.getMessage(), e);
         }
     }
 }

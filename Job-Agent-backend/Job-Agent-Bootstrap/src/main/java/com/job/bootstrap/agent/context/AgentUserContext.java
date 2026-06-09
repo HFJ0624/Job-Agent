@@ -3,11 +3,7 @@ package com.job.bootstrap.agent.context;
 /**
  * 作者:hfj
  * 功能:Agent 工具调用用户上下文
- * 说明:
- * 1. Agent 调用工具时，工具方法内部需要知道当前登录用户是谁。
- * 2. userId 不应该让大模型生成，而应该由后端登录态注入。
- * 3. ThreadLocal 可以在一次请求线程内保存当前 userId。
- * 4. 使用完必须 remove，避免线程池复用导致用户串号。
+ * 说明:已替换成AgentRuntimeContext
  * 日期: 2026/6/8 16:33
  */
 public class AgentUserContext {

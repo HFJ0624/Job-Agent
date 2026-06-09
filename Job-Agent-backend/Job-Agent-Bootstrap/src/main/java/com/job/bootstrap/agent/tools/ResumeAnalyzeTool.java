@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.tools;
 
-import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobResumeScoreService;
 import dev.langchain4j.agent.tool.P;
@@ -36,13 +36,20 @@ public class ResumeAnalyzeTool {
      * @param targetPosition 目标岗位
      * @return JSON 字符串结果
      */
-    @Tool("根据简历ID和目标岗位，对当前登录用户的简历进行整体评分，返回总分、维度分、优势、问题和优化建议")
+    @Tool("""
+    根据简历ID和目标岗位，对当前登录用户的简历进行整体评分，返回总分、维度分、优势、问题和优化建议
+        当用户要求“分析简历”“简历分析”“优化简历”“简历问题”“简历评分”时使用本工具。
+        resumeId 必须由用户输入或前端上下文提供，不能编造。
+    """)
     public String analyzeResume(
             @P("简历ID，例如 1") Long resumeId,
             @P("目标岗位名称，可以为空，例如 Java 后端开发") String targetPosition
     ) {
         long start = System.currentTimeMillis();
-        Long userId = AgentUserContext.getRequiredUserId();
+
+        Long userId = AgentRuntimeContext.getRequiredUserId();
+        Long conversationId = AgentRuntimeContext.getConversationId();
+        String intentCode = AgentRuntimeContext.getIntentCode();
 
         Map<String, Object> input = Map.of(
                 "resumeId", resumeId,
@@ -59,9 +66,9 @@ public class ResumeAnalyzeTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "RESUME_ANALYZE",
-                    "ResumeAnalyzeTool",
+                    conversationId,
+                    intentCode,
+                    "ResumeAnalyzeTool.analyzeResume",
                     input,
                     result,
                     "SUCCESS",
@@ -76,9 +83,9 @@ public class ResumeAnalyzeTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "RESUME_ANALYZE",
-                    "ResumeAnalyzeTool",
+                    conversationId,
+                    intentCode,
+                    "ResumeAnalyzeTool.analyzeResume",
                     input,
                     null,
                     "FAILED",
@@ -86,7 +93,7 @@ public class ResumeAnalyzeTool {
                     System.currentTimeMillis() - start
             );
 
-            return "简历分析失败：" + e.getMessage();
+            throw new RuntimeException("简历分析失败: " + e.getMessage(), e);
         }
     }
 }

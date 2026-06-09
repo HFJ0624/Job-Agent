@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.InterviewPrepareService;
 import com.job.common.vo.interview.InterviewPrepareVO;
@@ -15,6 +15,10 @@ import java.util.Map;
 /**
  * 作者:hfj
  * 功能:AI 面试准备工具
+ * 使用场景:
+ * 1. 用户说“帮我准备这个岗位的面试”
+ * 2. 用户说“根据这条投递记录生成面试题”
+ * 3. 用户说“帮我准备 applicationId=1 的面试”
  */
 @Component
 @RequiredArgsConstructor
@@ -25,15 +29,26 @@ public class InterviewPrepareTool {
     private final AgentTraceService agentTraceService;
 
     /**
-     * 根据求职记录生成面试准备。
+     * 生成面试准备内容。
+     *
+     * @param applicationId 投递记录ID
+     * @param resumeId 简历ID，可为空
+     * @return 面试准备结果 JSON
      */
-    @Tool("根据求职记录ID和简历ID，为当前登录用户生成面试准备题、项目追问题、HR问题和复习建议")
+    @Tool("""
+            根据求职投递记录生成面试准备内容。
+            当用户要求“准备面试”“生成面试题”“面试复习资料”时使用本工具。
+            applicationId 必须由用户输入或前端上下文提供，不能编造。
+            """)
     public String prepareInterview(
-            @P("求职记录ID，例如 1") Long applicationId,
-            @P("简历ID，可以为空，例如 1") Long resumeId
+            @P("求职投递记录ID，必须由用户输入或前端上下文提供，不能编造") Long applicationId,
+            @P("简历ID，可为空；如果用户没有提供，可以传 null") Long resumeId
     ) {
         long start = System.currentTimeMillis();
-        Long userId = AgentUserContext.getRequiredUserId();
+
+        Long userId = AgentRuntimeContext.getRequiredUserId();
+        Long conversationId = AgentRuntimeContext.getConversationId();
+        String intentCode = AgentRuntimeContext.getIntentCode();
 
         Map<String, Object> input = Map.of(
                 "applicationId", applicationId,
@@ -42,7 +57,7 @@ public class InterviewPrepareTool {
 
         try {
 
-            InterviewPrepareVO vo = interviewPrepareService.generatePrepare(
+            InterviewPrepareVO result = interviewPrepareService.generatePrepare(
                     userId,
                     applicationId,
                     resumeId
@@ -53,26 +68,26 @@ public class InterviewPrepareTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "INTERVIEW_PREPARE_TOOL",
-                    "InterviewPrepareTool",
+                    conversationId,
+                    intentCode,
+                    "InterviewPrepareTool.prepareInterview",
                     input,
-                    vo,
+                    result,
                     "SUCCESS",
                     null,
                     System.currentTimeMillis() - start
             );
 
-            return objectMapper.writeValueAsString(vo);
+            return objectMapper.writeValueAsString(result);
         } catch (Exception e) {
             /*
              * 工具调用失败，也记录 Trace，便于后台排查。
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "INTERVIEW_PREPARE_TOOL",
-                    "InterviewPrepareTool",
+                    conversationId,
+                    intentCode,
+                    "InterviewPrepareTool.prepareInterview",
                     input,
                     null,
                     "FAILED",
@@ -80,7 +95,7 @@ public class InterviewPrepareTool {
                     System.currentTimeMillis() - start
             );
 
-            return "面试准备生成失败：" + e.getMessage();
+            throw new RuntimeException("面试准备工具调用失败: " + e.getMessage(), e);
         }
     }
 }

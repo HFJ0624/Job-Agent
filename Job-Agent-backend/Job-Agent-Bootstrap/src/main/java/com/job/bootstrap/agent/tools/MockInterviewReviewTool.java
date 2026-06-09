@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.MockInterviewReviewService;
 import com.job.common.vo.interview.MockInterviewReviewVO;
@@ -30,12 +30,19 @@ public class MockInterviewReviewTool {
     /**
      * 生成模拟面试复盘报告。
      */
-    @Tool("根据模拟面试会话ID生成复盘报告，包括总分、表现等级、优势、短板、薄弱题和提升计划")
+    @Tool("""
+        根据模拟面试会话ID生成复盘报告，包括总分、表现等级、优势、短板、薄弱题和提升计划
+        当用户要求“复盘”“面试复盘”“复盘面试”时使用本工具。
+        sessionId 必须由用户输入或前端上下文提供，不能编造。
+        """)
     public String generateMockInterviewReview(
             @P("模拟面试会话ID，例如 1") Long sessionId
     ) {
         long start = System.currentTimeMillis();
-        Long userId = AgentUserContext.getRequiredUserId();
+
+        Long userId = AgentRuntimeContext.getRequiredUserId();
+        Long conversationId = AgentRuntimeContext.getConversationId();
+        String intentCode = AgentRuntimeContext.getIntentCode();
 
         Map<String, Object> input = Map.of(
                 "sessionId", sessionId
@@ -48,9 +55,9 @@ public class MockInterviewReviewTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "MOCK_INTERVIEW_REVIEW",
-                    "MockInterviewReviewTool",
+                    conversationId,
+                    intentCode,
+                    "MockInterviewReviewTool.generateMockInterviewReview",
                     input,
                     vo,
                     "SUCCESS",
@@ -65,9 +72,9 @@ public class MockInterviewReviewTool {
              */
             agentTraceService.saveToolTrace(
                     userId,
-                    null,
-                    "MOCK_INTERVIEW_REVIEW",
-                    "MockInterviewReviewTool",
+                    conversationId,
+                    intentCode,
+                    "MockInterviewReviewTool.generateMockInterviewReview",
                     input,
                     null,
                     "FAILED",
@@ -75,7 +82,7 @@ public class MockInterviewReviewTool {
                     System.currentTimeMillis() - start
             );
 
-            return "模拟面试复盘失败：" + e.getMessage();
+            throw new RuntimeException("模拟面试复盘失败: " + e.getMessage(), e);
         }
     }
 }

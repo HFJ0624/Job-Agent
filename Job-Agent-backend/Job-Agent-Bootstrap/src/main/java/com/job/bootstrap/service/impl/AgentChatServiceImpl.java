@@ -1,13 +1,13 @@
 package com.job.bootstrap.service.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.agent.JobAgentAssistant;
-import com.job.bootstrap.agent.context.AgentUserContext;
-import com.job.bootstrap.mapper.AgentTraceLogMapper;
+import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.intent.AgentIntentCode;
+import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.service.AgentChatService;
-import com.job.common.entity.agent.AgentTraceLog;
+import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
@@ -21,6 +21,11 @@ import java.util.UUID;
 /**
  * 作者:hfj
  * 功能:AI 助手聊天服务实现
+ * 设计说明:
+ * 1. 本类是 Agent 对话入口。
+ * 2. 负责创建会话、保存用户消息、调用大模型 Agent、保存助手回复。
+ * 3. 不负责具体工具逻辑，具体业务能力交给 Tool 类。
+ * 4. 不直接写 AgentTraceLogMapper，而是统一调用 AgentTraceService。
  * 日期: 2026/6/8 15:20
  */
 @Service
@@ -33,57 +38,107 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     private final AiConversationMapper aiConversationMapper;
     private final AiMessageMapper aiMessageMapper;
-    private final AgentTraceLogMapper agentTraceLogMapper;
+
+    /**
+     * LangChain4j AI Service 代理对象。
+     * 后续会在配置类中注册工具，让模型可以调用 Java 方法。
+     */
     private final JobAgentAssistant jobAgentAssistant;
-    private final ObjectMapper objectMapper;
+
+    /**
+     * Agent Trace 统一记录服务。
+     */
+    private final AgentTraceService agentTraceService;
+
+    /**
+     * 意图路由器。
+     * 第一版使用规则识别，后续可以升级为大模型分类。
+     */
+    private final AgentIntentRouter agentIntentRouter;
 
     /**
      * 执行一次 AI 对话。
+     *
+     * @param userId 当前登录用户ID
+     * @param conversationId 会话ID，可以为空
+     * @param message 用户输入
+     * @return Agent 回复
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentChatVO chat(Long userId, Long conversationId, String message) {
         long start = System.currentTimeMillis();
+
+        /*
+         * 1. 每次用户发起一次对话，生成一个 traceId。
+         *    这个 traceId 会贯穿:
+         *    - 主对话日志
+         *    - 工具调用日志
+         *    - 异常日志
+         */
         String traceId = UUID.randomUUID().toString().replace("-", "");
 
         /*
-         * 1. 如果前端没有传 conversationId，则自动创建一个新会话。
+         * 2. 识别用户意图。
+         *    当前只是规则识别，作用是:
+         *    - Trace 日志可以分类
+         *    - 后续可以根据意图走不同 Agent 编排流程
+         */
+        AgentIntentCode intentCode = agentIntentRouter.route(message);
+
+        /*
+         * 3. 获取或创建会话。
+         *    conversationId 为空时自动创建新会话。
          */
         AiConversation conversation = getOrCreateConversation(userId, conversationId, message);
 
         /*
-         * 2. 保存用户消息。
+         * 4. 保存用户消息。
          */
         saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
 
         try {
-            //在调用 Agent 前，把当前登录用户ID放入 ThreadLocal。
-            AgentUserContext.setUserId(userId);
+            /*
+             * 5. 设置 Agent 运行时上下文。
+             *    重点:
+             *    - userId 不让大模型传
+             *    - conversationId 不让大模型传
+             *    - traceId 不让大模型传
+             *    - 工具内部通过 AgentRuntimeContext 获取
+             */
+            AgentRuntimeContext.set(
+                    userId,
+                    conversation.getId(),
+                    traceId,
+                    intentCode.name()
+            );
 
             /*
-             * 3. 调用 Agent。
-             * 注意：conversationId 会作为 memoryId，让 LangChain4j 维护多轮上下文。
+             * 6. 调用 Agent。
+             *    conversation.getId() 作为 memoryId，用于绑定多轮对话上下文。
              */
             String answer = jobAgentAssistant.chat(conversation.getId(), message);
 
             /*
-             * 4. 保存助手消息。
+             * 7. 保存助手消息。
              */
             saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
 
             /*
-             * AI 回复后更新会话时间，用于前端会话列表排序。
+             * 8. 更新会话时间。
+             *    这样前端会话列表可以按最近聊天排序。
              */
             touchConversation(conversation);
 
             /*
-             * 5. 保存 Agent 调用日志。
+             * 9. 保存主对话 Trace。
+             *    工具调用 Trace 会在 Tool 内部单独保存。
              */
-            saveTrace(
+            agentTraceService.saveTrace(
                     traceId,
                     userId,
                     conversation.getId(),
-                    "AGENT_CHAT",
+                    intentCode.name(),
                     null,
                     Map.of("message", message),
                     Map.of("answer", answer),
@@ -96,15 +151,17 @@ public class AgentChatServiceImpl implements AgentChatService {
             vo.setConversationId(conversation.getId());
             vo.setAnswer(answer);
             return vo;
+
         } catch (Exception e) {
             /*
-             * 6. 异常也要记录，方便后台排查。
+             * 10. 异常也必须落 Trace。
+             *     企业级 Agent 项目中，失败链路比成功链路更重要。
              */
-            saveTrace(
+            agentTraceService.saveTrace(
                     traceId,
                     userId,
                     conversation.getId(),
-                    "AGENT_CHAT",
+                    intentCode.name(),
                     null,
                     Map.of("message", message),
                     null,
@@ -114,9 +171,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             );
 
             throw e;
-        }finally {
-            //清理 ThreadLocal。
-            AgentUserContext.clear();
+
+        } finally {
+            /*
+             * 11. 清理 ThreadLocal。
+             *     这是必须做的，否则线程池复用时可能串用户。
+             */
+            AgentRuntimeContext.clear();
         }
     }
 
@@ -127,6 +188,10 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (conversationId != null) {
             AiConversation exist = aiConversationMapper.selectById(conversationId);
 
+            /*
+             * 只允许用户访问自己的会话。
+             * 这一步是用户数据隔离，防止越权访问。
+             */
             if (exist != null && userId.equals(exist.getUserId())) {
                 return exist;
             }
@@ -154,7 +219,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     /**
-     * 保存一条消息。
+     * 保存一条聊天消息。
      */
     private void saveMessage(Long conversationId, Long userId, String role, String content, String toolName) {
         AiMessage message = new AiMessage();
@@ -169,55 +234,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     /**
-     * 保存 Agent Trace。
-     */
-    private void saveTrace(
-            String traceId,
-            Long userId,
-            Long conversationId,
-            String intentCode,
-            String toolName,
-            Object input,
-            Object output,
-            String status,
-            String errorMsg,
-            Long costTime
-    ) {
-        AgentTraceLog log = new AgentTraceLog();
-        log.setTraceId(traceId);
-        log.setUserId(userId);
-        log.setConversationId(conversationId);
-        log.setIntentCode(intentCode);
-        log.setToolName(toolName);
-        log.setInputData(toJson(input));
-        log.setOutputData(toJson(output));
-        log.setStatus(status);
-        log.setErrorMsg(errorMsg);
-        log.setCostTime(costTime);
-        log.setIsDeleted(NOT_DELETED);
-        agentTraceLogMapper.insert(log);
-    }
-
-    /**
-     * 对象转 JSON。
-     */
-    private String toJson(Object value) {
-        if (value == null) {
-            return null;
-        }
-
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception e) {
-            return "{}";
-        }
-    }
-
-    /**
-     * 更新会话的更新时间。
-     * 说明:
-     * 1. 用户继续对话后，左侧会话列表应该把该会话排到最前面。
-     * 2. 所以每次 AI 回复完成后，更新一次 conversation.updateTime。
+     * 更新会话更新时间。
      */
     private void touchConversation(AiConversation conversation) {
         conversation.setUpdateTime(new java.util.Date());
