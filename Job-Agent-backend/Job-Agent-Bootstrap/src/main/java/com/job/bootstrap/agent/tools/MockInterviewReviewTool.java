@@ -1,0 +1,81 @@
+package com.job.bootstrap.agent.tools;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.context.AgentUserContext;
+import com.job.bootstrap.service.AgentTraceService;
+import com.job.bootstrap.service.MockInterviewReviewService;
+import com.job.common.vo.interview.MockInterviewReviewVO;
+import dev.langchain4j.agent.tool.P;
+import dev.langchain4j.agent.tool.Tool;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+import java.util.Map;
+
+/**
+ * 作者:hfj
+ * 功能:模拟面试复盘工具
+ * 说明:
+ * 1. Agent 可以通过该工具对某轮模拟面试进行复盘。
+ * 2. userId 从 AgentUserContext 获取，避免让大模型生成用户ID。
+ */
+@Component
+@RequiredArgsConstructor
+public class MockInterviewReviewTool {
+
+    private final MockInterviewReviewService mockInterviewReviewService;
+    private final ObjectMapper objectMapper;
+    private final AgentTraceService agentTraceService;
+
+    /**
+     * 生成模拟面试复盘报告。
+     */
+    @Tool("根据模拟面试会话ID生成复盘报告，包括总分、表现等级、优势、短板、薄弱题和提升计划")
+    public String generateMockInterviewReview(
+            @P("模拟面试会话ID，例如 1") Long sessionId
+    ) {
+        long start = System.currentTimeMillis();
+        Long userId = AgentUserContext.getRequiredUserId();
+
+        Map<String, Object> input = Map.of(
+                "sessionId", sessionId
+        );
+        try {
+            MockInterviewReviewVO vo = mockInterviewReviewService.generateReview(userId, sessionId);
+
+            /*
+             * 工具调用成功，记录 Trace。
+             */
+            agentTraceService.saveToolTrace(
+                    userId,
+                    null,
+                    "MOCK_INTERVIEW_REVIEW",
+                    "MockInterviewReviewTool",
+                    input,
+                    vo,
+                    "SUCCESS",
+                    null,
+                    System.currentTimeMillis() - start
+            );
+
+            return objectMapper.writeValueAsString(vo);
+        } catch (Exception e) {
+            /*
+             * 工具调用失败，也记录 Trace，便于后台排查。
+             */
+            agentTraceService.saveToolTrace(
+                    userId,
+                    null,
+                    "MOCK_INTERVIEW_REVIEW",
+                    "MockInterviewReviewTool",
+                    input,
+                    null,
+                    "FAILED",
+                    e.getMessage(),
+                    System.currentTimeMillis() - start
+            );
+
+            return "模拟面试复盘失败：" + e.getMessage();
+        }
+    }
+}

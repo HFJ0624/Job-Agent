@@ -125,21 +125,34 @@
             </option>
           </select>
 
-          <button
-            class="secondary-button"
-            type="button"
-            @click="openInterviewPrepare(item)"
-          >
-            面试准备
-          </button>
+           <div class="button-group">
+            <button
+              class="secondary-button"
+              type="button"
+              @click="openInterviewPrepare(item)"
+            >
+              面试准备
+            </button>
 
-          <RouterLink class="secondary-button" :to="`/jobs/${item.jobId}`">
-            查看岗位
-          </RouterLink>
+            <button
+              class="secondary-button"
+              type="button"
+              @click="openMockInterview(item)"
+            >
+              模拟面试
+            </button>
+          </div>
 
-          <button class="danger-button" type="button" @click="removeApplication(item)">
-            删除
-          </button>
+          <div class="button-group">
+            <RouterLink class="secondary-button" :to="`/jobs/${item.jobId}`">
+                        查看岗位
+                      </RouterLink>
+
+            <button class="danger-button" type="button" @click="removeApplication(item)">
+              删除
+            </button>
+          </div>
+          
         </div>
       </article>
     </section>
@@ -232,6 +245,256 @@
         </div>
       </section>
     </el-drawer>
+
+    <el-drawer
+        v-model="mockDrawerVisible"
+        direction="rtl"
+        size="48%"
+        :with-header="false"
+      >
+        <section class="mock-drawer">
+          <header class="mock-header">
+            <div>
+              <p class="eyebrow">AI 模拟面试</p>
+              <h2>{{ currentMockApplication?.jobTitle || "模拟面试" }}</h2>
+              <span>{{ currentMockApplication?.companyName || "目标公司" }}</span>
+            </div>
+
+            <button class="text-button" type="button" @click="mockDrawerVisible = false">
+              关闭
+            </button>
+          </header>
+
+          <div v-if="!mockSession" class="mock-start-card">
+            <p>本轮模拟面试会基于你的求职记录和面试准备内容生成问题，并对回答进行评分。</p>
+
+            <button
+              class="primary-button large"
+              type="button"
+              :disabled="mockLoading"
+              @click="handleStartMockInterview"
+            >
+              {{ mockLoading ? "启动中..." : "开始模拟面试" }}
+            </button>
+          </div>
+
+          <div v-else class="mock-session-card">
+            <div class="mock-progress">
+              <span>进度：{{ mockSession.currentIndex }} / {{ mockSession.totalQuestionCount }}</span>
+              <span>状态：{{ mockSession.status === "FINISHED" ? "已完成" : "进行中" }}</span>
+            </div>
+
+            <section v-if="currentQuestion" class="mock-question-card">
+              <p class="question-type">{{ currentQuestion.questionType }}</p>
+              <h3>{{ currentQuestion.questionContent }}</h3>
+
+              <textarea
+                v-model.trim="mockAnswerText"
+                placeholder="请输入你的回答，建议按照 背景-方案-职责-结果 的结构展开。"
+              />
+
+              <button
+                class="primary-button large"
+                type="button"
+                :disabled="mockLoading"
+                @click="handleSubmitMockAnswer"
+              >
+                {{ mockLoading ? "评分中..." : "提交回答并评分" }}
+              </button>
+            </section>
+
+            <section v-if="latestAnswer" class="mock-feedback-card">
+              <h3>本题评分：{{ latestAnswer.score }} 分 · {{ latestAnswer.level }}</h3>
+
+              <h4>优点</h4>
+              <ul>
+                <li v-for="item in latestAnswer.strengths" :key="item">{{ item }}</li>
+              </ul>
+
+              <h4>问题</h4>
+              <ul>
+                <li v-for="item in latestAnswer.problems" :key="item">{{ item }}</li>
+              </ul>
+
+              <h4>建议</h4>
+              <ul>
+                <li v-for="item in latestAnswer.suggestions" :key="item">{{ item }}</li>
+              </ul>
+            </section>
+
+            <section v-if="mockSession.status === 'FINISHED'" class="mock-summary-card">
+              <h3>本轮总分：{{ mockSession.totalScore || 0 }} 分</h3>
+              <p>{{ mockSession.summary }}</p>
+            </section>
+
+            <button
+              v-if="mockSession.status !== 'FINISHED'"
+              class="secondary-button"
+              type="button"
+              :disabled="mockLoading"
+              @click="handleFinishMockInterview"
+            >
+              结束本轮模拟
+            </button>
+          </div>
+        </section>
+      </el-drawer>
+
+      <el-drawer
+        v-model="mockDrawerVisible"
+        direction="rtl"
+        size="48%"
+        :with-header="false"
+      >
+        <section class="mock-drawer">
+          <header class="mock-header">
+            <div>
+              <p class="eyebrow">AI 模拟面试</p>
+              <h2>{{ currentMockApplication?.jobTitle || "模拟面试" }}</h2>
+              <span>{{ currentMockApplication?.companyName || "目标公司" }}</span>
+            </div>
+
+            <button class="text-button" type="button" @click="mockDrawerVisible = false">
+              关闭
+            </button>
+          </header>
+
+          <div v-if="!mockSession" class="mock-start-card">
+            <p>本轮模拟面试会基于你的求职记录和面试准备内容生成问题，并对回答进行评分。</p>
+
+            <button
+              class="primary-button large"
+              type="button"
+              :disabled="mockLoading"
+              @click="handleStartMockInterview"
+            >
+              {{ mockLoading ? "启动中..." : "开始模拟面试" }}
+            </button>
+          </div>
+
+          <div v-else class="mock-session-card">
+            <div class="mock-progress">
+              <span>进度：{{ mockSession.currentIndex }} / {{ mockSession.totalQuestionCount }}</span>
+              <span>状态：{{ mockSession.status === "FINISHED" ? "已完成" : "进行中" }}</span>
+            </div>
+
+            <section v-if="currentQuestion" class="mock-question-card">
+              <p class="question-type">{{ currentQuestion.questionType }}</p>
+              <h3>{{ currentQuestion.questionContent }}</h3>
+
+              <textarea
+                v-model.trim="mockAnswerText"
+                placeholder="请输入你的回答，建议按照 背景-方案-职责-结果 的结构展开。"
+              />
+
+              <button
+                class="primary-button large"
+                type="button"
+                :disabled="mockLoading"
+                @click="handleSubmitMockAnswer"
+              >
+                {{ mockLoading ? "评分中..." : "提交回答并评分" }}
+              </button>
+            </section>
+
+            <section v-if="latestAnswer" class="mock-feedback-card">
+              <h3>本题评分：{{ latestAnswer.score }} 分 · {{ latestAnswer.level }}</h3>
+
+              <h4>优点</h4>
+              <ul>
+                <li v-for="item in latestAnswer.strengths" :key="item">{{ item }}</li>
+              </ul>
+
+              <h4>问题</h4>
+              <ul>
+                <li v-for="item in latestAnswer.problems" :key="item">{{ item }}</li>
+              </ul>
+
+              <h4>建议</h4>
+              <ul>
+                <li v-for="item in latestAnswer.suggestions" :key="item">{{ item }}</li>
+              </ul>
+            </section>
+
+            <!-- 原来的本轮总结卡片 -->
+            <section v-if="mockSession.status === 'FINISHED'" class="mock-summary-card">
+              <h3>本轮总分：{{ mockSession.totalScore || 0 }} 分</h3>
+              <p>{{ mockSession.summary }}</p>
+            </section>
+
+            <!-- 新增：模拟面试复盘报告，放在本轮总结后面 -->
+            <section v-if="mockSession.status === 'FINISHED'" class="mock-review-card">
+              <div class="mock-review-top">
+                <div>
+                  <h3>模拟面试复盘报告</h3>
+                  <p>根据本轮回答评分，分析优势、短板和下一步提升计划。</p>
+                </div>
+
+                <button
+                  class="primary-button"
+                  type="button"
+                  :disabled="reviewLoading"
+                  @click="handleGenerateMockReview"
+                >
+                  {{ reviewLoading ? "生成中..." : mockReview ? "重新生成" : "生成复盘" }}
+                </button>
+              </div>
+
+              <div v-if="mockReview" class="mock-review-result">
+                <div class="review-score-card">
+                  <strong>{{ mockReview.totalScore }} 分</strong>
+                  <span>{{ mockReview.reviewLevel }}</span>
+                  <small>已回答 {{ mockReview.answeredCount }} 题</small>
+                </div>
+
+                <section class="review-section">
+                  <h4>优势总结</h4>
+                  <p>{{ mockReview.strengthSummary }}</p>
+                </section>
+
+                <section class="review-section warning">
+                  <h4>短板总结</h4>
+                  <p>{{ mockReview.weaknessSummary }}</p>
+                </section>
+
+                <section class="review-section">
+                  <h4>能力标签</h4>
+                  <div class="tag-row">
+                    <span v-for="tag in mockReview.abilityTags" :key="tag">
+                      {{ tag }}
+                    </span>
+                  </div>
+                </section>
+
+                <section class="review-section warning">
+                  <h4>薄弱题目</h4>
+                  <ul>
+                    <li v-for="item in mockReview.weakQuestions" :key="item">
+                      {{ item }}
+                    </li>
+                  </ul>
+                </section>
+
+                <section class="review-section suggestion">
+                  <h4>提升计划</h4>
+                  <pre>{{ mockReview.improvementPlan }}</pre>
+                </section>
+              </div>
+            </section>
+
+            <!-- 结束按钮放在复盘报告后面 -->
+            <button
+              v-if="mockSession.status !== 'FINISHED'"
+              class="secondary-button"
+              type="button"
+              :disabled="mockLoading"
+              @click="handleFinishMockInterview"
+            >
+              结束本轮模拟
+            </button>
+          </div>
+        </section>
+      </el-drawer>
   </main>
 </template>
 
@@ -254,6 +517,25 @@ import {
   getLatestInterviewPrepare
 } from "../api/interviewPrepare";
 import type { InterviewPrepareInfo } from "../api/types";
+import {
+  finishMockInterview,
+  getCurrentMockQuestion,
+  getMockInterviewDetail,
+  startMockInterview,
+  submitMockAnswer
+} from "../api/mockInterview";
+import type {
+  MockInterviewAnswerInfo,
+  MockInterviewQuestionInfo,
+  MockInterviewSessionInfo
+} from "../api/types";
+
+import {
+  generateMockInterviewReview,
+  getLatestMockInterviewReview
+} from "../api/mockInterviewReview";
+
+import type { MockInterviewReviewInfo } from "../api/types";
 
 /**
  * 状态选项。
@@ -289,6 +571,23 @@ const prepareDrawerVisible = ref(false);
 const prepareLoading = ref(false);
 const currentPrepare = ref<InterviewPrepareInfo | null>(null);
 const currentApplication = ref<JobApplicationInfo | null>(null);
+const mockDrawerVisible = ref(false);
+const mockLoading = ref(false);
+const mockAnswerText = ref("");
+const currentMockApplication = ref<JobApplicationInfo | null>(null);
+const mockSession = ref<MockInterviewSessionInfo | null>(null);
+const currentQuestion = ref<MockInterviewQuestionInfo | null>(null);
+const latestAnswer = ref<MockInterviewAnswerInfo | null>(null);
+
+/**
+ * 当前模拟面试复盘报告。
+ */
+const mockReview = ref<MockInterviewReviewInfo | null>(null);
+
+/**
+ * 复盘报告生成加载状态。
+ */
+const reviewLoading = ref(false);
 
 const totalPages = computed(() => {
   return Math.max(1, Math.ceil(total.value / query.pageSize));
@@ -430,6 +729,148 @@ async function handleGenerateInterviewPrepare() {
     ElMessage.error(error instanceof Error ? error.message : "面试准备生成失败");
   } finally {
     prepareLoading.value = false;
+  }
+}
+
+/**
+ * 打开模拟面试抽屉。
+ */
+async function openMockInterview(item: JobApplicationInfo) {
+  currentMockApplication.value = item;
+  mockDrawerVisible.value = true;
+  mockSession.value = null;
+  currentQuestion.value = null;
+  latestAnswer.value = null;
+  mockAnswerText.value = "";
+}
+
+/**
+ * 开始模拟面试。
+ */
+async function handleStartMockInterview() {
+  if (!currentMockApplication.value) {
+    return;
+  }
+
+  mockLoading.value = true;
+  
+  try {
+    mockSession.value = await startMockInterview({
+      applicationId: currentMockApplication.value.id,
+      resumeId: currentMockApplication.value.resumeId,
+      questionCount: 6
+    });
+
+    currentQuestion.value = await getCurrentMockQuestion(mockSession.value.id);
+    ElMessage.success("模拟面试已开始");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "模拟面试启动失败");
+  } finally {
+    mockLoading.value = false;
+  }
+}
+
+/**
+ * 手动结束模拟面试。
+ */
+async function handleFinishMockInterview() {
+  if (!mockSession.value) {
+    return;
+  }
+
+  mockLoading.value = true;
+
+  try {
+    mockSession.value = await finishMockInterview(mockSession.value.id);
+    currentQuestion.value = null;
+
+    /**
+     * 面试结束后，先尝试加载历史复盘。
+     * 如果没有，用户可以点击按钮生成。
+     */
+    await loadLatestMockReview();
+
+    ElMessage.success("模拟面试已结束");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "结束模拟面试失败");
+  } finally {
+    mockLoading.value = false;
+  }
+}
+
+/**
+ * 查询当前模拟面试最近一次复盘报告。
+ */
+async function loadLatestMockReview() {
+  if (!mockSession.value) {
+    return;
+  }
+
+  try {
+    mockReview.value = await getLatestMockInterviewReview(mockSession.value.id);
+  } catch (error) {
+    /**
+     * 没有复盘报告不是严重错误，不打断用户流程。
+     */
+    console.error("[Job-Agent] 查询模拟面试复盘失败", error);
+  }
+}
+
+/**
+ * 生成模拟面试复盘报告。
+ */
+async function handleGenerateMockReview() {
+  if (!mockSession.value) {
+    return;
+  }
+
+  reviewLoading.value = true;
+
+  try {
+    mockReview.value = await generateMockInterviewReview(mockSession.value.id);
+    ElMessage.success("模拟面试复盘已生成");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "复盘报告生成失败");
+  } finally {
+    reviewLoading.value = false;
+  }
+}
+
+/**
+ * 提交当前问题回答。
+ */
+async function handleSubmitMockAnswer() {
+  if (!mockSession.value || !currentQuestion.value) {
+    return;
+  }
+
+  if (!mockAnswerText.value.trim()) {
+    ElMessage.warning("请先输入回答内容");
+    return;
+  }
+
+  mockLoading.value = true;
+
+  try {
+    latestAnswer.value = await submitMockAnswer(mockSession.value.id, {
+      questionId: currentQuestion.value.id,
+      answerContent: mockAnswerText.value
+    });
+
+    mockAnswerText.value = "";
+
+    mockSession.value = await getMockInterviewDetail(mockSession.value.id);
+    currentQuestion.value = await getCurrentMockQuestion(mockSession.value.id);
+
+    if (!currentQuestion.value) {
+      ElMessage.success("本轮模拟面试已完成");
+    } else {
+      ElMessage.success("回答已评分，进入下一题");
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "提交回答失败");
+  } finally {
+    mockLoading.value = false;
   }
 }
 </script>
@@ -708,5 +1149,92 @@ async function handleGenerateInterviewPrepare() {
 .prepare-card.suggestion {
   background: #f0fdf4;
   border-color: #bbf7d0;
+}
+.mock-drawer {
+  min-height: 100%;
+  padding: 24px;
+  background: #f8fafc;
+}
+
+.mock-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.mock-header h2 {
+  margin: 4px 0;
+  color: #111827;
+}
+
+.mock-header span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.mock-start-card,
+.mock-session-card,
+.mock-question-card,
+.mock-feedback-card,
+.mock-summary-card {
+  padding: 16px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 14px;
+}
+
+.mock-progress {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #374151;
+  margin-bottom: 12px;
+}
+
+.question-type {
+  color: #2563eb;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.mock-question-card h3 {
+  color: #111827;
+  line-height: 1.6;
+}
+
+.mock-question-card textarea {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  padding: 12px;
+  margin: 12px 0;
+  border-radius: 12px;
+  border: 1px solid #d1d5db;
+  font: inherit;
+}
+
+.mock-feedback-card h3,
+.mock-summary-card h3 {
+  color: #111827;
+  margin-top: 0;
+}
+
+.mock-feedback-card h4 {
+  margin: 12px 0 6px;
+  color: #374151;
+}
+
+.mock-feedback-card li {
+  line-height: 1.8;
+  color: #374151;
+}
+.button-group {
+  display: flex;
+  /* 可选：设置按钮之间的间距 */
+  gap: 8px;
+  /* 可选：让按钮宽度平分 */
+  /* justify-content: space-between; */
 }
 </style>

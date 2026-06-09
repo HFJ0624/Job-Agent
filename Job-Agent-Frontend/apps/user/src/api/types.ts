@@ -459,3 +459,78 @@ export interface InterviewPrepareInfo {
   source?: string;
   createTime?: string;
 }
+
+/**
+ * 模拟面试题目。
+ */
+export interface MockInterviewQuestionInfo {
+  id: number;
+  sessionId: number;
+  questionType: string;
+  questionContent: string;
+  sortNo: number;
+  answered: number;
+}
+
+/**
+ * 模拟面试回答评分。
+ */
+export interface MockInterviewAnswerInfo {
+  id: number;
+  sessionId: number;
+  questionId: number;
+  answerContent: string;
+  score: number;
+  level: string;
+  strengths: string[];
+  problems: string[];
+  suggestions: string[];
+}
+
+/**
+ * 模拟面试会话。
+ */
+export interface MockInterviewSessionInfo {
+  id: number;
+  applicationId: number;
+  interviewPrepareId?: number;
+  jobId?: number;
+  resumeId?: number;
+  jobTitle?: string;
+  companyName?: string;
+  status: string;
+  currentIndex: number;
+  totalQuestionCount: number;
+  totalScore?: number;
+  summary?: string;
+  questions?: MockInterviewQuestionInfo[];
+  answers?: MockInterviewAnswerInfo[];
+  createTime?: string;
+}
+
+/**
+ * 模拟面试复盘报告。
+ */
+export interface MockInterviewReviewInfo {
+  id: number;
+  sessionId: number;
+  applicationId?: number;
+  jobId?: number;
+
+  jobTitle?: string;
+  companyName?: string;
+
+  totalScore: number;
+  reviewLevel: string;
+  answeredCount: number;
+
+  strengthSummary?: string;
+  weaknessSummary?: string;
+  improvementPlan?: string;
+
+  weakQuestions: string[];
+  abilityTags: string[];
+
+  source?: string;
+  createTime?: string;
+}
