@@ -45,6 +45,8 @@
         jcr.interview_time AS interviewTime,
         jcr.next_follow_time AS nextFollowTime,
         jcr.note AS note,
+        jcr.ai_reply_text AS aiReplyText,
+        jcr.user_reply_text AS userReplyText,
         jcr.create_time AS createTime,
         jcr.update_time AS updateTime
     </sql>

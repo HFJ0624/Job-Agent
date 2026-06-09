@@ -2,21 +2,25 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.job.agent.HrCommunicationAssistant;
+import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
 import com.job.bootstrap.service.JobCommunicationRecordService;
-import com.job.common.dto.communication.JobCommunicationCreateDTO;
-import com.job.common.dto.communication.JobCommunicationInterviewDTO;
-import com.job.common.dto.communication.JobCommunicationQueryDTO;
-import com.job.common.dto.communication.JobCommunicationReplyDTO;
+import com.job.common.dto.communication.*;
+import com.job.common.entity.communication.JobCommunicationMessage;
 import com.job.common.entity.communication.JobCommunicationRecord;
+import com.job.common.vo.communication.JobCommunicationMessageVO;
 import com.job.common.vo.communication.JobCommunicationPageVO;
 import com.job.common.vo.communication.JobCommunicationRecordVO;
 import com.job.common.vo.communication.JobCommunicationStatsVO;
+import com.job.enums.CommunicationMessageType;
 import com.job.enums.CommunicationStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
 
 /**
  * 作者: hfj
@@ -35,6 +39,10 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     private static final int NOT_DELETED = 0;
 
     private final JobCommunicationRecordMapper jobCommunicationRecordMapper;
+
+    private final JobCommunicationMessageMapper jobCommunicationMessageMapper;
+
+    private final HrCommunicationAssistant hrCommunicationAssistant;
 
     /**
      * 分页查询沟通记录。
@@ -71,6 +79,276 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         vo.setPageSize(pageSize);
 
         return vo;
+    }
+
+    @Override
+    public List<JobCommunicationMessageVO> listMessages(Long userId, Long communicationId) {
+        /*
+         * 先校验主记录归属，防止越权查看别人沟通消息。
+         */
+        getUserRecordRequired(userId, communicationId);
+
+        List<JobCommunicationMessage> messages = jobCommunicationMessageMapper.selectList(
+                new LambdaQueryWrapper<JobCommunicationMessage>()
+                        .eq(JobCommunicationMessage::getUserId, userId)
+                        .eq(JobCommunicationMessage::getCommunicationId, communicationId)
+                        .eq(JobCommunicationMessage::getIsDeleted, NOT_DELETED)
+                        .orderByAsc(JobCommunicationMessage::getId)
+        );
+
+        return messages.stream().map(this::toMessageVO).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public JobCommunicationRecordVO updateStatus(
+            Long userId,
+            Long id,
+            CommunicationStatusUpdateDTO dto
+    ) {
+        JobCommunicationRecord record = getUserRecordRequired(userId, id);
+
+        if (!StringUtils.hasText(dto.getCommunicationStatus())) {
+            throw new IllegalArgumentException("沟通状态不能为空");
+        }
+
+        /*
+         * 校验状态是否合法。
+         */
+        CommunicationStatus.valueOf(dto.getCommunicationStatus());
+
+        record.setCommunicationStatus(dto.getCommunicationStatus());
+        record.setInterviewTime(dto.getInterviewTime());
+        record.setNextFollowTime(dto.getNextFollowTime());
+        record.setNote(dto.getNote());
+
+        jobCommunicationRecordMapper.updateById(record);
+
+        /*
+         * 状态流转也保存一条消息流水，方便前端时间线展示。
+         */
+        saveMessage(
+                userId,
+                id,
+                "STATUS_CHANGE",
+                "状态更新为：" + dto.getCommunicationStatus(),
+                null,
+                dto.getCommunicationStatus()
+        );
+
+        return getDetail(userId, id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public JobCommunicationRecordVO markUserReplySent(
+            Long userId,
+            Long id,
+            UserReplySentDTO dto
+    ) {
+        JobCommunicationRecord record = getUserRecordRequired(userId, id);
+
+        /*
+         * 如果用户没有传最终发送内容，就默认使用 AI 生成的回复。
+         */
+        String finalReply = StringUtils.hasText(dto.getUserReplyText())
+                ? dto.getUserReplyText()
+                : record.getAiReplyText();
+
+        if (!StringUtils.hasText(finalReply)) {
+            throw new IllegalArgumentException("没有可发送给HR的回复内容");
+        }
+
+        /*
+         * 保存用户发送给 HR 的消息流水。
+         */
+        saveMessage(
+                userId,
+                id,
+                CommunicationMessageType.USER_TO_HR.name(),
+                finalReply,
+                null,
+                CommunicationStatus.USER_REPLIED.name()
+        );
+
+        record.setUserReplyText(finalReply);
+        record.setCommunicationStatus(CommunicationStatus.USER_REPLIED.name());
+
+        jobCommunicationRecordMapper.updateById(record);
+
+        return getDetail(userId, id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public JobCommunicationRecordVO saveHrReplyAndGenerateReply(
+            Long userId,
+            Long id,
+            HrReplyGenerateDTO dto
+    ) {
+        /*
+         * 1. 查询并校验沟通记录是否属于当前用户。
+         */
+        JobCommunicationRecord record = getUserRecordRequired(userId, id);
+
+        if (!StringUtils.hasText(dto.getHrReply())) {
+            throw new IllegalArgumentException("HR回复内容不能为空");
+        }
+
+        /*
+         * 2. 保存 HR 回复消息流水。
+         *    这样以后可以看到每一轮 HR 说了什么。
+         */
+        saveMessage(
+                userId,
+                id,
+                CommunicationMessageType.HR_TO_USER.name(),
+                dto.getHrReply(),
+                null,
+                CommunicationStatus.REPLIED.name()
+        );
+
+        /*
+         * 3. 更新主记录中的最新 HR 回复。
+         */
+        record.setHrReply(dto.getHrReply());
+
+        /*
+         * 4. 用户可以手动选择当前状态。
+         *    如果没选，就默认 HR 已回复。
+         */
+        String selectedStatus = StringUtils.hasText(dto.getProgressStatus())
+                ? dto.getProgressStatus()
+                : CommunicationStatus.REPLIED.name();
+
+        /*
+         * 5. 生成 AI 回复。
+         */
+        String aiReply = generateAiReply(record, dto);
+
+        /*
+         * 6. 保存 AI 回复消息流水。
+         */
+        saveMessage(
+                userId,
+                id,
+                CommunicationMessageType.AI_SUGGESTION.name(),
+                aiReply,
+                dto.getReplyStyle(),
+                CommunicationStatus.AI_REPLY_GENERATED.name()
+        );
+
+        /*
+         * 7. 更新主记录。
+         *
+         * 说明:
+         * 如果用户选择了 INTERVIEW_INVITED，说明 HR 回复中已经约面试。
+         * 这时状态保留为 INTERVIEW_INVITED。
+         *
+         * 否则默认变成 AI_REPLY_GENERATED，表示系统已经生成建议回复。
+         */
+        record.setAiReplyText(aiReply);
+        record.setNote(dto.getNote());
+
+        if (CommunicationStatus.INTERVIEW_INVITED.name().equals(selectedStatus)) {
+            record.setCommunicationStatus(CommunicationStatus.INTERVIEW_INVITED.name());
+        } else if (CommunicationStatus.CLOSED.name().equals(selectedStatus)) {
+            record.setCommunicationStatus(CommunicationStatus.CLOSED.name());
+        } else {
+            record.setCommunicationStatus(CommunicationStatus.AI_REPLY_GENERATED.name());
+        }
+
+        jobCommunicationRecordMapper.updateById(record);
+
+        return getDetail(userId, id);
+    }
+
+    /**
+     * 根据沟通记录和 HR 回复生成 AI 建议回复。
+     *
+     * @param record 沟通主记录
+     * @param dto HR 回复生成 DTO
+     * @return AI 回复正文
+     */
+    private String generateAiReply(JobCommunicationRecord record, HrReplyGenerateDTO dto) {
+        /*
+         * 先查询带岗位名称、公司名称、简历名称的详情。
+         * 这样 prompt 里可以提供更完整上下文。
+         */
+        JobCommunicationRecordVO detail = jobCommunicationRecordMapper.selectCommunicationDetail(
+                record.getUserId(),
+                record.getId()
+        );
+
+        fillDisplayFields(detail);
+
+        String replyStyle = StringUtils.hasText(dto.getReplyStyle())
+                ? dto.getReplyStyle()
+                : "自然礼貌";
+
+        String userRequirement = StringUtils.hasText(dto.getUserRequirement())
+                ? dto.getUserRequirement()
+                : "无额外要求";
+
+        /*
+         * 组装 Prompt。
+         *
+         * 这里不要把所有简历原文都塞进去，第一版先用简历名称、岗位、公司、
+         * 打招呼语、HR 回复即可。
+         *
+         * 后续你做 RAG 后，可以召回简历项目经历和岗位 JD 关键要求。
+         */
+        String prompt = """
+            请根据以下求职沟通上下文，生成一段适合回复 HR 的中文消息。
+            
+            【公司】
+            %s
+            
+            【岗位】
+            %s
+            
+            【城市】
+            %s
+            
+            【薪资】
+            %s
+            
+            【使用简历】
+            %s
+            
+            【之前发给 HR 的打招呼语】
+            %s
+            
+            【HR 最新回复】
+            %s
+            
+            【回复风格】
+            %s
+            
+            【用户额外要求】
+            %s
+            
+            请直接输出要发给 HR 的回复正文，控制在 80-150 字之间。
+            """.formatted(
+                nullToDefault(detail.getCompanyName(), "未知公司"),
+                nullToDefault(detail.getJobTitle(), "未知岗位"),
+                nullToDefault(detail.getJobCity(), "未知城市"),
+                nullToDefault(detail.getSalaryText(), "薪资面议"),
+                nullToDefault(detail.getResumeName(), "未关联简历"),
+                nullToDefault(record.getGreetingText(), "无"),
+                dto.getHrReply(),
+                replyStyle,
+                userRequirement
+        );
+
+        return hrCommunicationAssistant.generateReply(prompt);
+    }
+
+    /**
+     * 空值兜底。
+     */
+    private String nullToDefault(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value : defaultValue;
     }
 
     /**
@@ -388,5 +666,70 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         } catch (Exception e) {
             return status;
         }
+    }
+
+    /**
+     * 保存沟通消息流水。
+     */
+    private void saveMessage(
+            Long userId,
+            Long communicationId,
+            String senderType,
+            String content,
+            String replyStyle,
+            String statusAfter
+    ) {
+        JobCommunicationMessage message = new JobCommunicationMessage();
+
+        message.setUserId(userId);
+        message.setCommunicationId(communicationId);
+        message.setSenderType(senderType);
+        message.setMessageContent(content);
+        message.setReplyStyle(replyStyle);
+        message.setStatusAfter(statusAfter);
+        message.setIsDeleted(NOT_DELETED);
+
+        jobCommunicationMessageMapper.insert(message);
+    }
+
+    /**
+     * 消息实体转 VO。
+     */
+    private JobCommunicationMessageVO toMessageVO(JobCommunicationMessage message) {
+        JobCommunicationMessageVO vo = new JobCommunicationMessageVO();
+
+        vo.setId(message.getId());
+        vo.setCommunicationId(message.getCommunicationId());
+        vo.setSenderType(message.getSenderType());
+        vo.setSenderTypeDesc(getMessageTypeDesc(message.getSenderType()));
+        vo.setMessageContent(message.getMessageContent());
+        vo.setReplyStyle(message.getReplyStyle());
+        vo.setStatusAfter(message.getStatusAfter());
+        vo.setCreateTime(message.getCreateTime());
+
+        return vo;
+    }
+
+    /**
+     * 消息类型中文。
+     */
+    private String getMessageTypeDesc(String senderType) {
+        if (CommunicationMessageType.HR_TO_USER.name().equals(senderType)) {
+            return "HR回复";
+        }
+
+        if (CommunicationMessageType.AI_SUGGESTION.name().equals(senderType)) {
+            return "AI建议回复";
+        }
+
+        if (CommunicationMessageType.USER_TO_HR.name().equals(senderType)) {
+            return "已发送给HR";
+        }
+
+        if ("STATUS_CHANGE".equals(senderType)) {
+            return "状态变更";
+        }
+
+        return senderType;
     }
 }

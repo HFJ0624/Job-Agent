@@ -5,7 +5,11 @@ import type {
     CommunicationPageResult,
     CommunicationRecordInfo,
     CommunicationReplyPayload,
-    CommunicationStatsInfo
+    CommunicationStatsInfo,
+    CommunicationMessageInfo,
+    CommunicationStatusUpdatePayload,
+    HrReplyGeneratePayload,
+    UserReplySentPayload
 } from "./types";
 
 /**
@@ -115,4 +119,50 @@ export function closeCommunication(id: number | string) {
     return request<CommunicationRecordInfo>(`/front/communication/${id}/close`, {
         method: "POST"
     });
+}
+
+/**
+ * 保存 HR 回复并生成 AI 建议回复。
+ */
+export function generateHrReply(
+    id: number | string,
+    payload: HrReplyGeneratePayload
+) {
+    return request<CommunicationRecordInfo>(`/front/communication/${id}/hr-reply/generate`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+/**
+ * 标记用户已把回复发送给 HR。
+ */
+export function markUserReplySent(
+    id: number | string,
+    payload: UserReplySentPayload
+) {
+    return request<CommunicationRecordInfo>(`/front/communication/${id}/user-reply/sent`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+/**
+ * 手动更新沟通状态。
+ */
+export function updateCommunicationStatus(
+    id: number | string,
+    payload: CommunicationStatusUpdatePayload
+) {
+    return request<CommunicationRecordInfo>(`/front/communication/${id}/status`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+/**
+ * 查询沟通消息流水。
+ */
+export function listCommunicationMessages(id: number | string) {
+    return request<CommunicationMessageInfo[]>(`/front/communication/${id}/messages`);
 }

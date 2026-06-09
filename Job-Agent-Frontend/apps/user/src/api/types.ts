@@ -626,6 +626,8 @@ export interface CommunicationRecordInfo {
   interviewTime?: string;
   nextFollowTime?: string;
 
+  aiReplyText?: string;
+  userReplyText?: string;
   note?: string;
 
   createTime?: string;
@@ -684,6 +686,48 @@ export interface CommunicationReplyPayload {
  * 标记面试邀约请求参数。
  */
 export interface CommunicationInterviewPayload {
+  interviewTime?: string;
+  nextFollowTime?: string;
+  note?: string;
+}
+
+/**
+ * 沟通消息流水。
+ */
+export interface CommunicationMessageInfo {
+  id: number;
+  communicationId: number;
+  senderType: string;
+  senderTypeDesc?: string;
+  messageContent: string;
+  replyStyle?: string;
+  statusAfter?: string;
+  createTime?: string;
+}
+
+/**
+ * 保存 HR 回复并生成 AI 回复请求。
+ */
+export interface HrReplyGeneratePayload {
+  hrReply: string;
+  progressStatus?: string;
+  replyStyle?: string;
+  userRequirement?: string;
+  note?: string;
+}
+
+/**
+ * 用户已发送回复请求。
+ */
+export interface UserReplySentPayload {
+  userReplyText?: string;
+}
+
+/**
+ * 更新沟通状态请求。
+ */
+export interface CommunicationStatusUpdatePayload {
+  communicationStatus: string;
   interviewTime?: string;
   nextFollowTime?: string;
   note?: string;

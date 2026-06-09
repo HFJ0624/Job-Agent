@@ -53,6 +53,18 @@ public enum CommunicationStatus {
     NO_REPLY("暂无回复"),
 
     /**
+     * AI 已经根据 HR 回复生成建议回复。
+     * 说明:
+     * 用户还没有确认是否复制发送给 HR。
+     */
+    AI_REPLY_GENERATED("已生成回复"),
+
+    /**
+     * 用户已把 AI 回复或自定义回复发送给 HR。
+     */
+    USER_REPLIED("已回复HR"),
+
+    /**
      * 已关闭。
      * 说明:
      * 用户不再跟进这个岗位。

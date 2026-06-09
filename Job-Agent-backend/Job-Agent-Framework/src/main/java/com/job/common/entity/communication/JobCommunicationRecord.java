@@ -101,4 +101,14 @@ public class JobCommunicationRecord extends BaseEntity {
      * 备注。
      */
     private String note;
+
+    /**
+     * AI 生成给 HR 的最新回复建议。
+     */
+    private String aiReplyText;
+
+    /**
+     * 用户最终发送给 HR 的回复内容。
+     */
+    private String userReplyText;
 }

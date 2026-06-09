@@ -7,7 +7,8 @@
           <div class="hero-label">求职沟通记录</div>
           <h1>管理你的 HR 沟通进度</h1>
           <p>
-            记录打招呼语、HR 回复、面试邀约和后续跟进，把 Boss 直聘等平台的沟通过程沉淀到 Job-Agent。
+            记录打招呼语、HR 回复、AI 建议回复、面试邀约和后续跟进，
+            把 Boss 直聘等平台的沟通过程沉淀到 Job-Agent。
           </p>
         </div>
 
@@ -16,7 +17,7 @@
         </el-button>
       </section>
 
-      <!-- 顶部核心统计：和求职进度页一样做 3 个大卡片 -->
+      <!-- 顶部核心统计 -->
       <section class="top-stats">
         <div class="top-stat-card">
           <span>总记录</span>
@@ -34,7 +35,7 @@
         </div>
       </section>
 
-      <!-- 状态筛选卡片：对齐求职进度页下面那一组状态卡 -->
+      <!-- 状态筛选卡片 -->
       <section class="status-grid">
         <button
           v-for="item in statusCards"
@@ -48,14 +49,14 @@
         </button>
       </section>
 
-      <!-- 查询区域：保持和求职进度页一致的白色卡片 -->
+      <!-- 查询区域 -->
       <section class="filter-card">
         <div class="filter-item">
           <label>关键词</label>
           <el-input
             v-model="query.keyword"
             clearable
-            placeholder="搜索 HR、回复、备注"
+            placeholder="搜索 HR、公司、岗位、回复、备注"
             @keyup.enter="handleSearch"
           />
         </div>
@@ -80,7 +81,7 @@
         </el-button>
       </section>
 
-      <!-- 沟通记录列表：不用表格，改成和求职进度一样的卡片列表 -->
+      <!-- 沟通记录卡片列表 -->
       <section v-loading="loading" class="record-list">
         <el-empty
           v-if="!loading && records.length === 0"
@@ -95,9 +96,12 @@
           <!-- 左侧主要信息 -->
           <div class="record-main">
             <div class="record-title-row">
-              <h3>
-                {{ record.jobTitle || "岗位信息已失效" }}
-              </h3>
+              <!-- 不再展示岗位ID，而是展示岗位名称 -->
+              <h3>{{ record.jobTitle || "岗位信息已失效" }}</h3>
+
+              <el-tag size="small" type="success">
+                {{ record.companyName || "未知公司" }}
+              </el-tag>
 
               <el-tag
                 size="small"
@@ -111,14 +115,14 @@
               </el-tag>
             </div>
 
+            <!-- 展示用户真正关心的信息，不展示数据库 ID -->
             <p class="record-meta">
-              <span>公司：{{ record.companyName || "未知公司" }}</span>
-              <span>城市：{{ record.jobCity || "未知城市" }}</span>
+              <span>城市：{{ record.jobCity || "-" }}</span>
               <span>薪资：{{ record.salaryText || "薪资面议" }}</span>
+              <span>简历：{{ record.resumeName || "未关联简历" }}</span>
             </p>
 
             <p class="record-meta">
-              <span>简历：{{ record.resumeName || "未关联简历" }}</span>
               <span>HR：{{ record.hrName || "未填写" }}</span>
               <span>更新时间：{{ formatTime(record.updateTime) || "-" }}</span>
             </p>
@@ -133,14 +137,20 @@
               <span>{{ record.hrReply || "暂无回复" }}</span>
             </p>
 
+            <p class="record-progress">
+              AI 回复：
+              <span>{{ record.aiReplyText || "暂未生成 AI 回复" }}</span>
+            </p>
+
             <p class="record-action">
               最近动作：
               <span>{{ latestActionText(record) }}</span>
             </p>
           </div>
 
-          <!-- 右侧操作区：对齐求职进度页按钮风格 -->
+          <!-- 右侧操作区 -->
           <div class="record-actions">
+            <!-- 状态流转选择框 -->
             <el-select
               :model-value="record.communicationStatus"
               size="small"
@@ -150,7 +160,9 @@
               <el-option label="已生成话术" value="GREETING_GENERATED" />
               <el-option label="已复制" value="COPIED" />
               <el-option label="已沟通" value="COMMUNICATED" />
-              <el-option label="已回复" value="REPLIED" />
+              <el-option label="HR已回复" value="REPLIED" />
+              <el-option label="已生成回复" value="AI_REPLY_GENERATED" />
+              <el-option label="已回复HR" value="USER_REPLIED" />
               <el-option label="邀约面试" value="INTERVIEW_INVITED" />
               <el-option label="暂无回复" value="NO_REPLY" />
               <el-option label="已关闭" value="CLOSED" />
@@ -162,11 +174,23 @@
               </el-button>
 
               <el-button size="small" type="success" plain @click="openReplyDialog(record)">
-                录入回复
+                HR回复
+              </el-button>
+
+              <el-button size="small" type="warning" plain @click="copyAiReplyFromRecord(record)">
+                复制AI
+              </el-button>
+
+              <el-button size="small" type="success" plain @click="markReplySentFromRecord(record)">
+                已发HR
               </el-button>
 
               <el-button size="small" type="primary" plain @click="openInterviewDialog(record)">
                 面试邀约
+              </el-button>
+
+              <el-button size="small" type="info" plain @click="openDetail(record)">
+                详情
               </el-button>
 
               <el-button size="small" type="info" plain @click="goJobDetail(record)">
@@ -180,7 +204,7 @@
           </div>
         </article>
 
-        <!-- 分页：卡片式页面底部分页 -->
+        <!-- 分页 -->
         <div v-if="records.length > 0" class="pagination-wrapper">
           <el-pagination
             v-model:current-page="query.pageNo"
@@ -193,36 +217,159 @@
       </section>
     </div>
 
-    <!-- HR 回复弹窗 -->
-    <el-dialog v-model="replyDialogVisible" title="录入 HR 回复" width="520px">
+    <!-- 沟通详情抽屉 -->
+    <el-drawer
+      v-model="detailVisible"
+      title="沟通详情"
+      size="560px"
+    >
+      <template v-if="currentRecord">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="岗位">
+            {{ currentRecord.jobTitle || "岗位信息已失效" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="公司">
+            {{ currentRecord.companyName || "未知公司" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="城市">
+            {{ currentRecord.jobCity || "-" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="薪资">
+            {{ currentRecord.salaryText || "薪资面议" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="使用简历">
+            {{ currentRecord.resumeName || "未关联简历" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="平台">
+            {{ platformText(currentRecord.platform) }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="状态">
+            <el-tag :type="statusTagType(currentRecord.communicationStatus)">
+              {{ currentRecord.communicationStatusDesc || statusText(currentRecord.communicationStatus) }}
+            </el-tag>
+          </el-descriptions-item>
+
+          <el-descriptions-item label="面试时间">
+            {{ formatTime(currentRecord.interviewTime) || "-" }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-divider />
+
+        <h4>沟通消息流水</h4>
+
+        <el-empty
+          v-if="messages.length === 0"
+          description="暂无消息流水"
+        />
+
+        <el-timeline v-else>
+          <el-timeline-item
+            v-for="message in messages"
+            :key="message.id"
+            :timestamp="formatTime(message.createTime)"
+            :type="messageTimelineType(message.senderType)"
+          >
+            <div class="message-card">
+              <div class="message-title">
+                {{ message.senderTypeDesc || messageTypeText(message.senderType) }}
+              </div>
+
+              <div class="message-content">
+                {{ message.messageContent }}
+              </div>
+
+              <div v-if="message.replyStyle" class="message-meta">
+                回复风格：{{ message.replyStyle }}
+              </div>
+            </div>
+          </el-timeline-item>
+        </el-timeline>
+      </template>
+    </el-drawer>
+
+    <!-- HR 回复 + AI 生成回复弹窗 -->
+    <el-dialog
+      v-model="replyDialogVisible"
+      title="录入 HR 回复并生成回复"
+      width="640px"
+    >
       <el-form label-position="top">
         <el-form-item label="HR 回复内容">
           <el-input
             v-model="replyForm.hrReply"
             type="textarea"
             :rows="5"
-            placeholder="例如：明天下午 3 点方便面试吗？"
+            placeholder="把 Boss 直聘、拉勾、猎聘等平台 HR 回复复制到这里"
           />
         </el-form-item>
 
-        <el-form-item label="备注">
+        <el-form-item label="当前求职进展">
+          <el-select v-model="replyForm.progressStatus" style="width: 100%">
+            <el-option label="HR已回复" value="REPLIED" />
+            <el-option label="邀约面试" value="INTERVIEW_INVITED" />
+            <el-option label="暂无回复" value="NO_REPLY" />
+            <el-option label="已关闭" value="CLOSED" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="回复风格">
+          <el-select v-model="replyForm.replyStyle" style="width: 100%">
+            <el-option label="自然" value="自然" />
+            <el-option label="礼貌" value="礼貌" />
+            <el-option label="积极" value="积极" />
+            <el-option label="简洁" value="简洁" />
+            <el-option label="正式" value="正式" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="额外要求">
           <el-input
-            v-model="replyForm.note"
+            v-model="replyForm.userRequirement"
             type="textarea"
             :rows="3"
-            placeholder="可选：记录后续跟进事项"
+            placeholder="例如：帮我委婉表达明天下午不方便，或者帮我问清楚面试形式"
           />
+        </el-form-item>
+
+        <el-form-item label="AI 建议回复">
+          <div class="ai-reply-box">
+            {{ replyForm.aiReplyText || "点击下方“生成回复”后，这里会显示 AI 建议回复。" }}
+          </div>
         </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="replyDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitReply">保存</el-button>
+        <el-button @click="replyDialogVisible = false">
+          取消
+        </el-button>
+
+        <el-button type="primary" :loading="replyGenerating" @click="submitReply">
+          生成回复
+        </el-button>
+
+        <el-button type="success" @click="copyAiReplyFromDialog">
+          复制回复
+        </el-button>
+
+        <el-button type="warning" @click="markReplySentFromDialog">
+          已发送给HR
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 面试邀约弹窗 -->
-    <el-dialog v-model="interviewDialogVisible" title="标记面试邀约" width="520px">
+    <el-dialog
+      v-model="interviewDialogVisible"
+      title="标记面试邀约"
+      width="520px"
+    >
       <el-form label-position="top">
         <el-form-item label="面试时间">
           <el-date-picker
@@ -253,8 +400,13 @@
       </el-form>
 
       <template #footer>
-        <el-button @click="interviewDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitInterview">保存</el-button>
+        <el-button @click="interviewDialogVisible = false">
+          取消
+        </el-button>
+
+        <el-button type="primary" @click="submitInterview">
+          保存
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -266,14 +418,18 @@ import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   closeCommunication,
+  generateHrReply,
   getCommunicationStats,
+  listCommunicationMessages,
   markCommunicationCommunicated,
   markCommunicationCopied,
   markCommunicationInterview,
+  markUserReplySent,
   pageCommunications,
-  saveCommunicationReply
+  updateCommunicationStatus
 } from "../api/communication";
 import type {
+  CommunicationMessageInfo,
   CommunicationRecordInfo,
   CommunicationStatsInfo
 } from "../api/types";
@@ -282,8 +438,7 @@ import type {
  * 路由对象。
  *
  * 用途：
- * 1. 点击“查看岗位”时跳转岗位详情页。
- * 2. 让沟通记录和岗位详情形成业务闭环。
+ * 点击“查看岗位”时跳转岗位详情页。
  */
 const router = useRouter();
 
@@ -293,9 +448,24 @@ const router = useRouter();
 const loading = ref(false);
 
 /**
+ * AI 回复生成按钮 loading。
+ */
+const replyGenerating = ref(false);
+
+/**
  * 沟通记录列表。
  */
 const records = ref<CommunicationRecordInfo[]>([]);
+
+/**
+ * 沟通消息流水。
+ */
+const messages = ref<CommunicationMessageInfo[]>([]);
+
+/**
+ * 当前打开详情的记录。
+ */
+const currentRecord = ref<CommunicationRecordInfo | null>(null);
 
 /**
  * 分页总数。
@@ -304,11 +474,6 @@ const total = ref(0);
 
 /**
  * 查询条件。
- *
- * 说明：
- * 1. status 对应后端 communicationStatus。
- * 2. platform 对应 BOSS、LAGOU、LIEPIN 等。
- * 3. keyword 用于搜索 HR、回复、备注。
  */
 const query = reactive({
   pageNo: 1,
@@ -320,8 +485,16 @@ const query = reactive({
 
 /**
  * 统计数据。
+ *
+ * 这里额外兼容 aiReplyGeneratedCount、userRepliedCount。
+ * 如果你后端暂时没加这两个字段，页面也不会报错。
  */
-const stats = reactive<CommunicationStatsInfo>({
+const stats = reactive<
+  CommunicationStatsInfo & {
+    aiReplyGeneratedCount?: number;
+    userRepliedCount?: number;
+  }
+>({
   totalCount: 0,
   greetingGeneratedCount: 0,
   copiedCount: 0,
@@ -329,32 +502,72 @@ const stats = reactive<CommunicationStatsInfo>({
   repliedCount: 0,
   interviewInvitedCount: 0,
   noReplyCount: 0,
-  closedCount: 0
+  closedCount: 0,
+  aiReplyGeneratedCount: 0,
+  userRepliedCount: 0
 });
 
 /**
- * HR 回复弹窗状态。
+ * 详情抽屉。
+ */
+const detailVisible = ref(false);
+
+/**
+ * HR 回复弹窗。
  */
 const replyDialogVisible = ref(false);
 
 /**
- * 面试邀约弹窗状态。
+ * 面试邀约弹窗。
  */
 const interviewDialogVisible = ref(false);
 
 /**
- * HR 回复表单。
+ * HR 回复 + AI 回复表单。
  */
 const replyForm = reactive({
   id: 0,
+
+  /**
+   * HR 回复内容。
+   */
   hrReply: "",
-  note: ""
+
+  /**
+   * 用户选择的当前求职进展。
+   */
+  progressStatus: "REPLIED",
+
+  /**
+   * AI 回复风格。
+   */
+  replyStyle: "自然",
+
+  /**
+   * 用户额外要求。
+   */
+  userRequirement: "",
+
+  /**
+   * 备注。
+   */
+  note: "",
+
+  /**
+   * AI 生成的建议回复。
+   */
+  aiReplyText: ""
 });
 
 /**
  * 面试邀约表单。
  */
-const interviewForm = reactive({
+const interviewForm = reactive<{
+  id: number;
+  interviewTime: string | Date | undefined;
+  nextFollowTime: string | Date | undefined;
+  note: string;
+}>({
   id: 0,
   interviewTime: "",
   nextFollowTime: "",
@@ -363,9 +576,6 @@ const interviewForm = reactive({
 
 /**
  * 状态卡片数据。
- *
- * 这个结构是为了让沟通记录页和求职进度页一样：
- * 上面是统计卡，下面是可点击的状态筛选卡。
  */
 const statusCards = computed(() => [
   {
@@ -384,24 +594,24 @@ const statusCards = computed(() => [
     count: stats.communicatedCount
   },
   {
-    label: "已回复",
+    label: "HR已回复",
     value: "REPLIED",
     count: stats.repliedCount
+  },
+  {
+    label: "已生成回复",
+    value: "AI_REPLY_GENERATED",
+    count: stats.aiReplyGeneratedCount || 0
+  },
+  {
+    label: "已回复HR",
+    value: "USER_REPLIED",
+    count: stats.userRepliedCount || 0
   },
   {
     label: "邀约面试",
     value: "INTERVIEW_INVITED",
     count: stats.interviewInvitedCount
-  },
-  {
-    label: "暂无回复",
-    value: "NO_REPLY",
-    count: stats.noReplyCount
-  },
-  {
-    label: "已关闭",
-    value: "CLOSED",
-    count: stats.closedCount
   },
   {
     label: "全部",
@@ -424,6 +634,12 @@ async function loadStats() {
   stats.interviewInvitedCount = data.interviewInvitedCount || 0;
   stats.noReplyCount = data.noReplyCount || 0;
   stats.closedCount = data.closedCount || 0;
+
+  /**
+   * 兼容后端新增字段。
+   */
+  stats.aiReplyGeneratedCount = (data as any).aiReplyGeneratedCount || 0;
+  stats.userRepliedCount = (data as any).userRepliedCount || 0;
 }
 
 /**
@@ -479,12 +695,21 @@ function resetSearch() {
 }
 
 /**
+ * 打开详情抽屉，并加载该沟通记录的消息流水。
+ */
+async function openDetail(record: CommunicationRecordInfo) {
+  currentRecord.value = record;
+  detailVisible.value = true;
+
+  messages.value = await listCommunicationMessages(record.id);
+}
+
+/**
  * 复制打招呼语。
  *
  * 业务逻辑：
- * 1. 复制话术到剪贴板。
- * 2. 调用后端接口把状态标记为 COPIED。
- * 3. 用户可以去 Boss 直聘粘贴发送。
+ * 1. 用户复制 AI 生成的开场白。
+ * 2. 系统标记状态为 COPIED。
  */
 async function copyGreeting(record: CommunicationRecordInfo) {
   if (!record.greetingText) {
@@ -502,11 +727,155 @@ async function copyGreeting(record: CommunicationRecordInfo) {
 }
 
 /**
- * 处理状态下拉框变化。
+ * 打开 HR 回复弹窗。
+ */
+function openReplyDialog(record: CommunicationRecordInfo) {
+  replyForm.id = record.id;
+  replyForm.hrReply = record.hrReply || "";
+  replyForm.progressStatus = record.communicationStatus || "REPLIED";
+  replyForm.replyStyle = "自然";
+  replyForm.userRequirement = "";
+  replyForm.note = record.note || "";
+  replyForm.aiReplyText = record.aiReplyText || "";
+
+  replyDialogVisible.value = true;
+}
+
+/**
+ * 保存 HR 回复并生成 AI 建议回复。
+ */
+async function submitReply() {
+  if (!replyForm.hrReply.trim()) {
+    ElMessage.warning("请输入 HR 回复内容");
+    return;
+  }
+
+  replyGenerating.value = true;
+
+  try {
+    const data = await generateHrReply(replyForm.id, {
+      hrReply: replyForm.hrReply,
+      progressStatus: replyForm.progressStatus,
+      replyStyle: replyForm.replyStyle,
+      userRequirement: replyForm.userRequirement,
+      note: replyForm.note
+    });
+
+    replyForm.aiReplyText = data.aiReplyText || "";
+
+    ElMessage.success("AI 回复已生成");
+
+    await loadPage();
+  } finally {
+    replyGenerating.value = false;
+  }
+}
+
+/**
+ * 复制弹窗里的 AI 回复。
+ */
+async function copyAiReplyFromDialog() {
+  if (!replyForm.aiReplyText) {
+    ElMessage.warning("请先生成 AI 回复");
+    return;
+  }
+
+  await navigator.clipboard.writeText(replyForm.aiReplyText);
+
+  ElMessage.success("AI 回复已复制，可以粘贴到招聘平台发送给 HR");
+}
+
+/**
+ * 复制卡片里的 AI 回复。
+ */
+async function copyAiReplyFromRecord(record: CommunicationRecordInfo) {
+  if (!record.aiReplyText) {
+    ElMessage.warning("当前记录还没有生成 AI 回复");
+    return;
+  }
+
+  await navigator.clipboard.writeText(record.aiReplyText);
+
+  ElMessage.success("AI 回复已复制");
+}
+
+/**
+ * 在弹窗中标记已发送给 HR。
+ */
+async function markReplySentFromDialog() {
+  if (!replyForm.aiReplyText) {
+    ElMessage.warning("请先生成 AI 回复");
+    return;
+  }
+
+  await markUserReplySent(replyForm.id, {
+    userReplyText: replyForm.aiReplyText
+  });
+
+  ElMessage.success("已标记为已回复 HR");
+
+  replyDialogVisible.value = false;
+
+  await loadPage();
+}
+
+/**
+ * 在卡片中标记已发送给 HR。
+ */
+async function markReplySentFromRecord(record: CommunicationRecordInfo) {
+  const replyText = record.aiReplyText || record.userReplyText;
+
+  if (!replyText) {
+    ElMessage.warning("当前记录没有可发送给 HR 的回复内容");
+    return;
+  }
+
+  await markUserReplySent(record.id, {
+    userReplyText: replyText
+  });
+
+  ElMessage.success("已标记为已回复 HR");
+
+  await loadPage();
+}
+
+/**
+ * 打开面试邀约弹窗。
+ */
+function openInterviewDialog(record: CommunicationRecordInfo) {
+  interviewForm.id = record.id;
+  interviewForm.interviewTime = record.interviewTime || "";
+  interviewForm.nextFollowTime = record.nextFollowTime || "";
+  interviewForm.note = record.note || "";
+
+  interviewDialogVisible.value = true;
+}
+
+/**
+ * 保存面试邀约。
+ */
+async function submitInterview() {
+  await markCommunicationInterview(interviewForm.id, {
+    interviewTime: normalizeDateTime(interviewForm.interviewTime),
+    nextFollowTime: normalizeDateTime(interviewForm.nextFollowTime),
+    note: interviewForm.note
+  });
+
+  ElMessage.success("已标记面试邀约");
+
+  interviewDialogVisible.value = false;
+
+  await loadPage();
+}
+
+/**
+ * 状态下拉框变化。
  *
  * 说明：
- * 当前第一版只处理几个关键状态。
- * 后续你可以补充 NO_REPLY、CLOSED 的专门接口。
+ * 1. REPLIED 需要打开弹窗录入 HR 回复并生成 AI 回复。
+ * 2. INTERVIEW_INVITED 需要打开面试邀约弹窗。
+ * 3. USER_REPLIED 需要确认已有 AI 回复。
+ * 4. NO_REPLY / CLOSED 可以直接走状态更新。
  */
 async function handleStatusChange(record: CommunicationRecordInfo, status: string) {
   if (status === record.communicationStatus) {
@@ -522,75 +891,30 @@ async function handleStatusChange(record: CommunicationRecordInfo, status: strin
   } else if (status === "REPLIED") {
     openReplyDialog(record);
     return;
+  } else if (status === "AI_REPLY_GENERATED") {
+    openReplyDialog(record);
+    return;
+  } else if (status === "USER_REPLIED") {
+    await markReplySentFromRecord(record);
+    return;
   } else if (status === "INTERVIEW_INVITED") {
     openInterviewDialog(record);
     return;
+  } else if (status === "NO_REPLY") {
+    await updateCommunicationStatus(record.id, {
+      communicationStatus: "NO_REPLY",
+      note: record.note
+    });
+    ElMessage.success("已标记暂无回复");
   } else if (status === "CLOSED") {
     await handleClose(record);
     return;
   } else {
-    ElMessage.info("该状态暂未开放直接切换");
-    return;
+    await updateCommunicationStatus(record.id, {
+      communicationStatus: status,
+      note: record.note
+    });
   }
-
-  await loadPage();
-}
-
-/**
- * 打开 HR 回复弹窗。
- */
-function openReplyDialog(record: CommunicationRecordInfo) {
-  replyForm.id = record.id;
-  replyForm.hrReply = record.hrReply || "";
-  replyForm.note = record.note || "";
-  replyDialogVisible.value = true;
-}
-
-/**
- * 保存 HR 回复。
- */
-async function submitReply() {
-  if (!replyForm.hrReply.trim()) {
-    ElMessage.warning("请输入 HR 回复内容");
-    return;
-  }
-
-  await saveCommunicationReply(replyForm.id, {
-    hrReply: replyForm.hrReply,
-    note: replyForm.note
-  });
-
-  ElMessage.success("HR 回复已保存");
-
-  replyDialogVisible.value = false;
-
-  await loadPage();
-}
-
-/**
- * 打开面试邀约弹窗。
- */
-function openInterviewDialog(record: CommunicationRecordInfo) {
-  interviewForm.id = record.id;
-  interviewForm.interviewTime = record.interviewTime || "";
-  interviewForm.nextFollowTime = record.nextFollowTime || "";
-  interviewForm.note = record.note || "";
-  interviewDialogVisible.value = true;
-}
-
-/**
- * 保存面试邀约。
- */
-async function submitInterview() {
-  await markCommunicationInterview(interviewForm.id, {
-    interviewTime: interviewForm.interviewTime || undefined,
-    nextFollowTime: interviewForm.nextFollowTime || undefined,
-    note: interviewForm.note
-  });
-
-  ElMessage.success("已标记面试邀约");
-
-  interviewDialogVisible.value = false;
 
   await loadPage();
 }
@@ -618,6 +942,9 @@ async function handleClose(record: CommunicationRecordInfo) {
 
 /**
  * 跳转岗位详情页。
+ *
+ * 注意：
+ * jobId 是内部跳转参数，可以使用，但页面上不直接展示。
  */
 function goJobDetail(record: CommunicationRecordInfo) {
   router.push(`/jobs/${record.jobId}`);
@@ -640,7 +967,15 @@ function latestActionText(record: CommunicationRecordInfo) {
   }
 
   if (record.communicationStatus === "REPLIED") {
-    return "HR 已回复，建议根据回复判断是否需要跟进";
+    return "HR 已回复，建议生成一段回复给 HR";
+  }
+
+  if (record.communicationStatus === "AI_REPLY_GENERATED") {
+    return "AI 已生成建议回复，等待复制发送给 HR";
+  }
+
+  if (record.communicationStatus === "USER_REPLIED") {
+    return "已回复 HR，等待后续反馈";
   }
 
   if (record.communicationStatus === "INTERVIEW_INVITED") {
@@ -671,6 +1006,10 @@ function statusTagType(status: string) {
       return "success";
     case "REPLIED":
       return "warning";
+    case "AI_REPLY_GENERATED":
+      return "warning";
+    case "USER_REPLIED":
+      return "success";
     case "INTERVIEW_INVITED":
       return "success";
     case "NO_REPLY":
@@ -690,7 +1029,9 @@ function statusText(status: string) {
     GREETING_GENERATED: "已生成话术",
     COPIED: "已复制",
     COMMUNICATED: "已沟通",
-    REPLIED: "已回复",
+    REPLIED: "HR已回复",
+    AI_REPLY_GENERATED: "已生成回复",
+    USER_REPLIED: "已回复HR",
     INTERVIEW_INVITED: "邀约面试",
     NO_REPLY: "暂无回复",
     CLOSED: "已关闭"
@@ -715,14 +1056,77 @@ function platformText(platform?: string) {
 }
 
 /**
+ * 消息类型中文。
+ */
+function messageTypeText(type: string) {
+  const map: Record<string, string> = {
+    HR_TO_USER: "HR回复",
+    AI_SUGGESTION: "AI建议回复",
+    USER_TO_HR: "已发送给HR",
+    STATUS_CHANGE: "状态变更"
+  };
+
+  return map[type] || type;
+}
+
+/**
+ * 消息时间线类型。
+ */
+function messageTimelineType(type: string) {
+  if (type === "HR_TO_USER") {
+    return "warning";
+  }
+
+  if (type === "AI_SUGGESTION") {
+    return "primary";
+  }
+
+  if (type === "USER_TO_HR") {
+    return "success";
+  }
+
+  return "info";
+}
+
+/**
  * 格式化时间。
  */
-function formatTime(value?: string) {
+function formatTime(value?: string | Date) {
   if (!value) {
     return "";
   }
 
+  if (value instanceof Date) {
+    return formatDate(value);
+  }
+
   return value.replace("T", " ").slice(0, 16);
+}
+
+/**
+ * Date 转 yyyy-MM-dd HH:mm:ss。
+ */
+function formatDate(date: Date) {
+  const pad = (num: number) => String(num).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/**
+ * 提交给后端前统一处理时间。
+ */
+function normalizeDateTime(value?: string | Date) {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value instanceof Date) {
+    return formatDate(value);
+  }
+
+  return value;
 }
 
 onMounted(() => {
@@ -769,8 +1173,10 @@ onMounted(() => {
 
 .hero-card p {
   margin: 8px 0 0;
+  max-width: 680px;
   font-size: 14px;
   color: #667085;
+  line-height: 1.7;
 }
 
 .refresh-btn {
@@ -908,6 +1314,7 @@ onMounted(() => {
 .record-title-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
 }
@@ -949,7 +1356,7 @@ onMounted(() => {
 }
 
 .record-actions {
-  width: 160px;
+  width: 184px;
   flex-shrink: 0;
 }
 
@@ -975,9 +1382,51 @@ onMounted(() => {
   padding: 18px 0 0;
 }
 
+.ai-reply-box {
+  min-height: 96px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f7f8fa;
+  border: 1px solid #e5e7eb;
+  color: #344054;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.message-card {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.message-title {
+  margin-bottom: 6px;
+  font-weight: 700;
+  color: #101828;
+}
+
+.message-content {
+  color: #475467;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.message-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #667085;
+}
+
 @media (max-width: 980px) {
   .page-container {
     width: calc(100% - 28px);
+  }
+
+  .hero-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
   }
 
   .top-stats {

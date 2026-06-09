@@ -2,11 +2,9 @@ package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.job.bootstrap.service.JobCommunicationRecordService;
-import com.job.common.dto.communication.JobCommunicationCreateDTO;
-import com.job.common.dto.communication.JobCommunicationInterviewDTO;
-import com.job.common.dto.communication.JobCommunicationQueryDTO;
-import com.job.common.dto.communication.JobCommunicationReplyDTO;
+import com.job.common.dto.communication.*;
 import com.job.common.entity.base.Result;
+import com.job.common.vo.communication.JobCommunicationMessageVO;
 import com.job.common.vo.communication.JobCommunicationPageVO;
 import com.job.common.vo.communication.JobCommunicationRecordVO;
 import com.job.common.vo.communication.JobCommunicationStatsVO;
@@ -14,6 +12,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 作者: hfj
@@ -153,5 +153,82 @@ public class FrontJobCommunicationController {
         JobCommunicationRecordVO vo = jobCommunicationRecordService.closeCommunication(userId, id);
 
         return Result.build(vo, 200, "已关闭");
+    }
+
+    /**
+     * 保存 HR 回复并生成 AI 建议回复。
+     *
+     * 使用场景:
+     * 用户从 Boss 直聘复制 HR 回复后，粘贴到系统里。
+     * 系统保存 HR 回复，并生成一段可复制给 HR 的回复建议。
+     */
+    @Operation(summary = "保存HR回复并生成AI建议回复")
+    @PostMapping("/{id}/hr-reply/generate")
+    public Result<JobCommunicationRecordVO> saveHrReplyAndGenerateReply(
+            @PathVariable Long id,
+            @RequestBody HrReplyGenerateDTO dto
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        JobCommunicationRecordVO vo = jobCommunicationRecordService.saveHrReplyAndGenerateReply(
+                userId,
+                id,
+                dto
+        );
+
+        return Result.build(vo, 200, "AI回复已生成");
+    }
+
+    /**
+     * 标记用户已发送回复给 HR。
+     */
+    @Operation(summary = "标记已发送回复给HR")
+    @PostMapping("/{id}/user-reply/sent")
+    public Result<JobCommunicationRecordVO> markUserReplySent(
+            @PathVariable Long id,
+            @RequestBody UserReplySentDTO dto
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        JobCommunicationRecordVO vo = jobCommunicationRecordService.markUserReplySent(
+                userId,
+                id,
+                dto
+        );
+
+        return Result.build(vo, 200, "已标记发送给HR");
+    }
+
+    /**
+     * 手动更新沟通状态。
+     */
+    @Operation(summary = "手动更新沟通状态")
+    @PostMapping("/{id}/status")
+    public Result<JobCommunicationRecordVO> updateStatus(
+            @PathVariable Long id,
+            @RequestBody CommunicationStatusUpdateDTO dto
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        JobCommunicationRecordVO vo = jobCommunicationRecordService.updateStatus(
+                userId,
+                id,
+                dto
+        );
+
+        return Result.build(vo, 200, "状态更新成功");
+    }
+
+    /**
+     * 查询沟通消息流水。
+     */
+    @Operation(summary = "查询沟通消息流水")
+    @GetMapping("/{id}/messages")
+    public Result<List<JobCommunicationMessageVO>> listMessages(@PathVariable Long id) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        List<JobCommunicationMessageVO> list = jobCommunicationRecordService.listMessages(userId, id);
+
+        return Result.build(list, 200, "查询成功");
     }
 }

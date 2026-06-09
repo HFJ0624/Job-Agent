@@ -1,12 +1,12 @@
 package com.job.bootstrap.service;
 
-import com.job.common.dto.communication.JobCommunicationCreateDTO;
-import com.job.common.dto.communication.JobCommunicationInterviewDTO;
-import com.job.common.dto.communication.JobCommunicationQueryDTO;
-import com.job.common.dto.communication.JobCommunicationReplyDTO;
+import com.job.common.dto.communication.*;
+import com.job.common.vo.communication.JobCommunicationMessageVO;
 import com.job.common.vo.communication.JobCommunicationPageVO;
 import com.job.common.vo.communication.JobCommunicationRecordVO;
 import com.job.common.vo.communication.JobCommunicationStatsVO;
+
+import java.util.List;
 
 /**
  * 作者: hfj
@@ -69,4 +69,24 @@ public interface JobCommunicationRecordService {
      * 查询统计数据。
      */
     JobCommunicationStatsVO getStats(Long userId);
+
+    /**
+     * 保存 HR 回复并生成 AI 建议回复。
+     */
+    JobCommunicationRecordVO saveHrReplyAndGenerateReply(Long userId, Long id, HrReplyGenerateDTO dto);
+
+    /**
+     * 标记用户已把回复发送给 HR。
+     */
+    JobCommunicationRecordVO markUserReplySent(Long userId, Long id, UserReplySentDTO dto);
+
+    /**
+     * 手动更新沟通状态。
+     */
+    JobCommunicationRecordVO updateStatus(Long userId, Long id, CommunicationStatusUpdateDTO dto);
+
+    /**
+     * 查询某条沟通记录下的消息流水。
+     */
+    List<JobCommunicationMessageVO> listMessages(Long userId, Long communicationId);
 }
