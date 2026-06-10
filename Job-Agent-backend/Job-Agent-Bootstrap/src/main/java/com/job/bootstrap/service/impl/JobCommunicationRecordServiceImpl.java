@@ -7,7 +7,9 @@ import com.job.agent.HrCommunicationAssistant;
 import com.job.agent.InterviewInviteExtractorAssistant;
 import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
+import com.job.bootstrap.service.JobApplicationService;
 import com.job.bootstrap.service.JobCommunicationRecordService;
+import com.job.bootstrap.service.JobReminderService;
 import com.job.common.dto.communication.*;
 import com.job.common.entity.communication.JobCommunicationMessage;
 import com.job.common.entity.communication.JobCommunicationRecord;
@@ -46,6 +48,10 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     private final HrCommunicationAssistant hrCommunicationAssistant;
 
     private final InterviewInviteExtractorAssistant interviewInviteExtractorAssistant;
+
+    private final JobReminderService jobReminderService;
+
+    private final JobApplicationService jobApplicationService;
 
     private final ObjectMapper objectMapper;
 
@@ -140,6 +146,8 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
                 null,
                 dto.getCommunicationStatus()
         );
+
+        jobReminderService.syncFromCommunicationRecord(userId,record);
 
         return getDetail(userId, id);
     }
@@ -384,14 +392,10 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
             Long id,
             InterviewInviteConfirmDTO dto
     ) {
-        /*
-         * 1. 查询并校验记录归属。
-         */
         JobCommunicationRecord record = getUserRecordRequired(userId, id);
 
         /*
-         * 2. 用户确认后的面试信息才是最终可信数据。
-         *    所以这里覆盖 AI 预填结果。
+         * 1. 保存用户确认后的面试信息。
          */
         record.setInterviewTime(dto.getInterviewTime());
         record.setInterviewMethod(
@@ -407,14 +411,14 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         record.setNote(dto.getNote());
 
         /*
-         * 3. 确认后状态进入邀约面试。
+         * 2. 状态进入面试邀约。
          */
         record.setCommunicationStatus(CommunicationStatus.INTERVIEW_INVITED.name());
 
         jobCommunicationRecordMapper.updateById(record);
 
         /*
-         * 4. 保存状态流水。
+         * 3. 保存消息流水。
          */
         saveMessage(
                 userId,
@@ -426,13 +430,19 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         );
 
         /*
-         * 5. 后续你可以在这里接 InterviewPrepareService。
+         * 4. 同步创建提醒。
          *
-         * 例如：
-         * interviewPrepareService.generatePrepare(userId, record.getApplicationId(), record.getResumeId());
-         *
-         * 第一版先不自动调用，避免用户还没确认好信息就生成。
+         * 如果 interviewTime 不为空，会创建面试提醒。
+         * 如果 nextFollowTime 不为空，会创建跟进提醒。
          */
+        jobReminderService.syncFromCommunicationRecord(userId, record);
+
+        jobApplicationService.syncInterviewProgress(
+                userId,
+                record.getApplicationId(),
+                record.getInterviewTime(),
+                record.getNextFollowTime()
+        );
 
         return getDetail(userId, id);
     }
@@ -724,6 +734,9 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         /*
          * 更新后重新走详情关联查询，保证返回 resumeName、jobTitle、companyName。
          */
+
+        jobReminderService.syncFromCommunicationRecord(userId,record);
+
         return getDetail(userId, id);
     }
 

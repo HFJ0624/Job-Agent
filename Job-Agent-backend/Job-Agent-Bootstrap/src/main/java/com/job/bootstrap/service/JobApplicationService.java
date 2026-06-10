@@ -7,6 +7,8 @@ import com.job.common.dto.application.JobApplicationStatusUpdateDTO;
 import com.job.common.vo.application.JobApplicationStatsVO;
 import com.job.common.vo.application.JobApplicationVO;
 
+import java.util.Date;
+
 /**
  * 作者:hfj
  * 功能:求职投递记录服务
@@ -56,4 +58,13 @@ public interface JobApplicationService {
      * @return 统计结果
      */
     JobApplicationStatsVO getStats(Long userId);
+
+    /***
+     *
+     * @param userId 用户id
+     * @param applicationId 面试求职id
+     * @param interviewTime 面试时间
+     * @param nextFollowTime 下次跟进时间
+     */
+    void syncInterviewProgress(Long userId, Long applicationId, Date interviewTime, Date nextFollowTime);
 }

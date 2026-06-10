@@ -17,6 +17,7 @@ import com.job.common.vo.application.JobApplicationVO;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.*;
@@ -212,6 +213,44 @@ public class JobApplicationServiceImpl implements JobApplicationService {
          * BaseEntity 使用 @TableLogic 时，deleteById 会执行逻辑删除。
          */
         jobApplicationRecordMapper.deleteById(record.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void syncInterviewProgress(
+            Long userId,
+            Long applicationId,
+            Date interviewTime,
+            Date nextFollowTime
+    ) {
+        if (applicationId == null) {
+            return;
+        }
+
+        JobApplicationRecord application = jobApplicationRecordMapper.selectById(applicationId);
+
+        if (application == null) {
+            return;
+        }
+
+        if (!userId.equals(application.getUserId())) {
+            throw new SecurityException("无权更新该求职进度");
+        }
+
+        /*
+         * 如果已经有面试时间，说明进入面试阶段。
+         */
+        if (interviewTime != null) {
+            application.setStatus("INTERVIEWING");
+            application.setInterviewTime(interviewTime);
+            application.setLastAction("确认面试邀约");
+        }
+
+        if (nextFollowTime != null) {
+            application.setNextFollowTime(nextFollowTime);
+        }
+
+        jobApplicationRecordMapper.updateById(application);
     }
 
     /**

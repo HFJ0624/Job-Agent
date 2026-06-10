@@ -781,3 +781,63 @@ export interface InterviewInviteConfirmPayload {
   nextFollowTime?: string;
   note?: string;
 }
+
+/**
+ * 求职提醒信息。
+ */
+export interface JobReminderInfo {
+  id: number;
+  applicationId?: number;
+  communicationId?: number;
+  resumeId?: number;
+  resumeName?: string;
+  jobId?: number;
+  jobTitle?: string;
+  companyId?: number;
+  companyName?: string;
+  reminderType: string;
+  reminderTypeDesc?: string;
+  reminderTitle: string;
+  reminderContent?: string;
+  eventTime?: string;
+  remindTime: string;
+  advanceMinutes?: number;
+  reminderStatus: string;
+  reminderStatusDesc?: string;
+  isRead?: number;
+  overdue?: boolean;
+  minutesLeft?: number;
+  doneTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 提醒分页结果。
+ */
+export interface ReminderPageResult {
+  records: JobReminderInfo[];
+  total: number;
+  pageNo: number;
+  pageSize: number;
+}
+
+/**
+ * 提醒统计。
+ */
+export interface ReminderStatsInfo {
+  pendingCount: number;
+  dueCount: number;
+  todayCount: number;
+  interviewCount: number;
+  followUpCount: number;
+  unreadCount: number;
+}
+
+/**
+ * 延期提醒参数。
+ */
+export interface ReminderPostponePayload {
+  remindTime: string;
+  eventTime?: string;
+}

@@ -495,6 +495,9 @@
           </div>
         </section>
       </el-drawer>
+
+      <ReminderPanel />
+      
   </main>
 </template>
 
@@ -536,6 +539,7 @@ import {
 } from "../api/mockInterviewReview";
 
 import type { MockInterviewReviewInfo } from "../api/types";
+import ReminderPanel from "../components/ReminderPanel.vue";
 
 /**
  * 状态选项。

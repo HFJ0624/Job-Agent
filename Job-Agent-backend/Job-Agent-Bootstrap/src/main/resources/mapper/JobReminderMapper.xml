@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.job.bootstrap.mapper.JobReminderMapper">
+
+    <select id="selectReminderPage"
+            resultType="com.job.common.vo.reminder.JobReminderVO">
+        SELECT
+        jr.id AS id,
+        jr.application_id AS applicationId,
+        jr.communication_id AS communicationId,
+        jr.resume_id AS resumeId,
+        r.resume_name AS resumeName,
+
+        jr.job_id AS jobId,
+        jp.job_title AS jobTitle,
+        jp.company_id AS companyId,
+        c.company_name AS companyName,
+
+        jr.reminder_type AS reminderType,
+        jr.reminder_title AS reminderTitle,
+        jr.reminder_content AS reminderContent,
+        jr.event_time AS eventTime,
+        jr.remind_time AS remindTime,
+        jr.advance_minutes AS advanceMinutes,
+        jr.reminder_status AS reminderStatus,
+        jr.is_read AS isRead,
+        jr.done_time AS doneTime,
+        jr.create_time AS createTime,
+        jr.update_time AS updateTime
+        FROM job_reminder jr
+
+        LEFT JOIN resume r
+        ON r.id = jr.resume_id
+        AND r.user_id = jr.user_id
+
+        LEFT JOIN job_position jp
+        ON jp.id = jr.job_id
+
+        LEFT JOIN company c
+        ON c.id = jp.company_id
+
+        WHERE jr.user_id = #{userId}
+        AND jr.is_deleted = 0
+
+        <if test="query.reminderType != null and query.reminderType != ''">
+            AND jr.reminder_type = #{query.reminderType}
+        </if>
+
+        <if test="query.reminderStatus != null and query.reminderStatus != ''">
+            AND jr.reminder_status = #{query.reminderStatus}
+        </if>
+
+        <if test="query.startTime != null">
+            AND jr.remind_time &gt;= #{query.startTime}
+        </if>
+
+        <if test="query.endTime != null">
+            AND jr.remind_time &lt;= #{query.endTime}
+        </if>
+
+        <if test="query.keyword != null and query.keyword != ''">
+            AND (
+            jr.reminder_title LIKE CONCAT('%', #{query.keyword}, '%')
+            OR jr.reminder_content LIKE CONCAT('%', #{query.keyword}, '%')
+            OR jp.job_title LIKE CONCAT('%', #{query.keyword}, '%')
+            OR c.company_name LIKE CONCAT('%', #{query.keyword}, '%')
+            OR r.resume_name LIKE CONCAT('%', #{query.keyword}, '%')
+            )
+        </if>
+
+        ORDER BY
+        CASE
+        WHEN jr.reminder_status = 'PENDING' THEN 0
+        ELSE 1
+        END,
+        jr.remind_time ASC,
+        jr.id DESC
+    </select>
+
+</mapper>
