@@ -147,6 +147,46 @@ public class JobCommunicationRecordVO {
      */
     private String userReplyText;
 
+    /**
+     * 面试方式。
+     */
+    private String interviewMethod;
+
+    /**
+     * 面试方式中文。
+     */
+    private String interviewMethodDesc;
+
+    /**
+     * 面试地点。
+     */
+    private String interviewLocation;
+
+    /**
+     * 线上面试平台。
+     */
+    private String interviewPlatform;
+
+    /**
+     * 会议链接。
+     */
+    private String meetingLink;
+
+    /**
+     * 面试联系人。
+     */
+    private String interviewContact;
+
+    /**
+     * AI 提取结果 JSON。
+     */
+    private String interviewExtractJson;
+
+    /**
+     * AI 提取置信度。
+     */
+    private Double interviewExtractConfidence;
+
     private Date createTime;
 
     private Date updateTime;

@@ -47,6 +47,13 @@
         jcr.note AS note,
         jcr.ai_reply_text AS aiReplyText,
         jcr.user_reply_text AS userReplyText,
+        jcr.interview_method AS interviewMethod,
+        jcr.interview_location AS interviewLocation,
+        jcr.interview_platform AS interviewPlatform,
+        jcr.meeting_link AS meetingLink,
+        jcr.interview_contact AS interviewContact,
+        jcr.interview_extract_json AS interviewExtractJson,
+        jcr.interview_extract_confidence AS interviewExtractConfidence,
         jcr.create_time AS createTime,
         jcr.update_time AS updateTime
     </sql>

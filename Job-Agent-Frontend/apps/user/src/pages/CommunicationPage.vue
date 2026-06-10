@@ -96,7 +96,7 @@
           <!-- 左侧主要信息 -->
           <div class="record-main">
             <div class="record-title-row">
-              <!-- 不再展示岗位ID，而是展示岗位名称 -->
+              <!-- 不展示数据库 ID，展示用户可读的岗位名称 -->
               <h3>{{ record.jobTitle || "岗位信息已失效" }}</h3>
 
               <el-tag size="small" type="success">
@@ -115,7 +115,7 @@
               </el-tag>
             </div>
 
-            <!-- 展示用户真正关心的信息，不展示数据库 ID -->
+            <!-- 展示用户真正关心的信息，不展示 resumeId / jobId -->
             <p class="record-meta">
               <span>城市：{{ record.jobCity || "-" }}</span>
               <span>薪资：{{ record.salaryText || "薪资面议" }}</span>
@@ -140,6 +140,20 @@
             <p class="record-progress">
               AI 回复：
               <span>{{ record.aiReplyText || "暂未生成 AI 回复" }}</span>
+            </p>
+
+            <p
+              v-if="record.communicationStatus === 'INTERVIEW_INVITED'"
+              class="record-progress"
+            >
+              面试：
+              <span>
+                {{ formatTime(record.interviewTime) || "时间待确认" }}
+                /
+                {{ record.interviewMethodDesc || methodText(record.interviewMethod) || "方式待确认" }}
+                /
+                {{ record.interviewLocation || record.interviewPlatform || "地点待确认" }}
+              </span>
             </p>
 
             <p class="record-action">
@@ -221,7 +235,7 @@
     <el-drawer
       v-model="detailVisible"
       title="沟通详情"
-      size="560px"
+      size="580px"
     >
       <template v-if="currentRecord">
         <el-descriptions :column="1" border>
@@ -257,6 +271,25 @@
 
           <el-descriptions-item label="面试时间">
             {{ formatTime(currentRecord.interviewTime) || "-" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="面试方式">
+            {{ currentRecord.interviewMethodDesc || methodText(currentRecord.interviewMethod) || "-" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="面试地点 / 平台">
+            {{ currentRecord.interviewLocation || currentRecord.interviewPlatform || "-" }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="会议链接">
+            <a
+              v-if="currentRecord.meetingLink"
+              :href="currentRecord.meetingLink"
+              target="_blank"
+            >
+              打开会议链接
+            </a>
+            <span v-else>-</span>
           </el-descriptions-item>
         </el-descriptions>
 
@@ -364,19 +397,81 @@
       </template>
     </el-dialog>
 
-    <!-- 面试邀约弹窗 -->
+    <!-- 面试邀约信息提取与确认弹窗 -->
     <el-dialog
       v-model="interviewDialogVisible"
-      title="标记面试邀约"
-      width="520px"
+      title="提取并确认面试邀约"
+      width="660px"
     >
       <el-form label-position="top">
+        <el-form-item label="HR 回复内容">
+          <el-input
+            v-model="interviewForm.hrReply"
+            type="textarea"
+            :rows="4"
+            placeholder="这里显示 HR 回复内容，也可以手动粘贴 HR 最新回复"
+          />
+        </el-form-item>
+
+        <el-button
+          type="primary"
+          :loading="interviewExtracting"
+          @click="handleExtractInterview"
+        >
+          AI 提取面试信息
+        </el-button>
+
+        <div v-if="interviewForm.reason" class="extract-result-box">
+          <div>提取说明：{{ interviewForm.reason }}</div>
+          <div>置信度：{{ interviewForm.confidence || 0 }}%</div>
+          <div v-if="interviewForm.confirmQuestion">
+            待确认事项：{{ interviewForm.confirmQuestion }}
+          </div>
+        </div>
+
         <el-form-item label="面试时间">
           <el-date-picker
             v-model="interviewForm.interviewTime"
             type="datetime"
             placeholder="选择面试时间"
             style="width: 100%"
+          />
+        </el-form-item>
+
+        <el-form-item label="面试方式">
+          <el-select v-model="interviewForm.interviewMethod" style="width: 100%">
+            <el-option label="线上面试" value="ONLINE" />
+            <el-option label="线下面试" value="OFFLINE" />
+            <el-option label="电话面试" value="PHONE" />
+            <el-option label="未知" value="UNKNOWN" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="面试地点 / 平台">
+          <el-input
+            v-model="interviewForm.interviewLocation"
+            placeholder="例如：腾讯会议 / 公司地址 / 电话面试"
+          />
+        </el-form-item>
+
+        <el-form-item label="线上平台">
+          <el-input
+            v-model="interviewForm.interviewPlatform"
+            placeholder="例如：腾讯会议、飞书、Zoom"
+          />
+        </el-form-item>
+
+        <el-form-item label="会议链接">
+          <el-input
+            v-model="interviewForm.meetingLink"
+            placeholder="如果 HR 提供会议链接，填写在这里"
+          />
+        </el-form-item>
+
+        <el-form-item label="联系人">
+          <el-input
+            v-model="interviewForm.interviewContact"
+            placeholder="例如：HR姓名、手机号、微信、邮箱"
           />
         </el-form-item>
 
@@ -394,7 +489,7 @@
             v-model="interviewForm.note"
             type="textarea"
             :rows="3"
-            placeholder="例如：线上面试，重点准备项目和 Redis"
+            placeholder="例如：需要确认会议链接，重点准备 Redis 和项目经历"
           />
         </el-form-item>
       </el-form>
@@ -405,7 +500,7 @@
         </el-button>
 
         <el-button type="primary" @click="submitInterview">
-          保存
+          确认保存
         </el-button>
       </template>
     </el-dialog>
@@ -418,12 +513,13 @@ import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   closeCommunication,
+  confirmInterviewInvite,
+  extractInterviewInvite,
   generateHrReply,
   getCommunicationStats,
   listCommunicationMessages,
   markCommunicationCommunicated,
   markCommunicationCopied,
-  markCommunicationInterview,
   markUserReplySent,
   pageCommunications,
   updateCommunicationStatus
@@ -451,6 +547,11 @@ const loading = ref(false);
  * AI 回复生成按钮 loading。
  */
 const replyGenerating = ref(false);
+
+/**
+ * 面试邀约信息提取 loading。
+ */
+const interviewExtracting = ref(false);
 
 /**
  * 沟通记录列表。
@@ -486,8 +587,8 @@ const query = reactive({
 /**
  * 统计数据。
  *
- * 这里额外兼容 aiReplyGeneratedCount、userRepliedCount。
- * 如果你后端暂时没加这两个字段，页面也不会报错。
+ * 这里兼容 aiReplyGeneratedCount、userRepliedCount。
+ * 如果后端暂时没加这两个字段，页面也不会报错。
  */
 const stats = reactive<
   CommunicationStatsInfo & {
@@ -560,18 +661,36 @@ const replyForm = reactive({
 });
 
 /**
- * 面试邀约表单。
+ * 面试邀约提取与确认表单。
  */
 const interviewForm = reactive<{
   id: number;
+  hrReply: string;
   interviewTime: string | Date | undefined;
+  interviewMethod: string;
+  interviewLocation: string;
+  interviewPlatform: string;
+  meetingLink: string;
+  interviewContact: string;
   nextFollowTime: string | Date | undefined;
   note: string;
+  confidence?: number;
+  reason?: string;
+  confirmQuestion?: string;
 }>({
   id: 0,
+  hrReply: "",
   interviewTime: "",
+  interviewMethod: "UNKNOWN",
+  interviewLocation: "",
+  interviewPlatform: "",
+  meetingLink: "",
+  interviewContact: "",
   nextFollowTime: "",
-  note: ""
+  note: "",
+  confidence: 0,
+  reason: "",
+  confirmQuestion: ""
 });
 
 /**
@@ -841,27 +960,85 @@ async function markReplySentFromRecord(record: CommunicationRecordInfo) {
 
 /**
  * 打开面试邀约弹窗。
+ *
+ * 说明：
+ * 1. 优先使用已有 HR 回复。
+ * 2. 如果用户没有录入 HR 回复，也允许在弹窗中手动粘贴。
  */
 function openInterviewDialog(record: CommunicationRecordInfo) {
   interviewForm.id = record.id;
+  interviewForm.hrReply = record.hrReply || "";
   interviewForm.interviewTime = record.interviewTime || "";
+  interviewForm.interviewMethod = record.interviewMethod || "UNKNOWN";
+  interviewForm.interviewLocation = record.interviewLocation || "";
+  interviewForm.interviewPlatform = record.interviewPlatform || "";
+  interviewForm.meetingLink = record.meetingLink || "";
+  interviewForm.interviewContact = record.interviewContact || "";
   interviewForm.nextFollowTime = record.nextFollowTime || "";
   interviewForm.note = record.note || "";
+  interviewForm.confidence = record.interviewExtractConfidence || 0;
+  interviewForm.reason = "";
+  interviewForm.confirmQuestion = "";
 
   interviewDialogVisible.value = true;
 }
 
 /**
- * 保存面试邀约。
+ * 调用后端 AI，从 HR 回复中提取面试邀约信息。
+ */
+async function handleExtractInterview() {
+  if (!interviewForm.hrReply.trim()) {
+    ElMessage.warning("当前记录没有 HR 回复内容，无法提取面试信息");
+    return;
+  }
+
+  interviewExtracting.value = true;
+
+  try {
+    const data = await extractInterviewInvite(interviewForm.id, {
+      hrReply: interviewForm.hrReply
+    });
+
+    if (!data.interviewInvited) {
+      ElMessage.warning("AI 暂未识别到明确的面试邀约，请手动填写或确认 HR 回复内容");
+    } else {
+      ElMessage.success("面试邀约信息已提取，请确认后保存");
+    }
+
+    /**
+     * 将 AI 提取结果回填到表单。
+     * 用户可以继续手动修改，最终点击“确认保存”。
+     */
+    interviewForm.interviewTime = data.interviewTime || "";
+    interviewForm.interviewMethod = data.interviewMethod || "UNKNOWN";
+    interviewForm.interviewLocation = data.interviewLocation || "";
+    interviewForm.interviewPlatform = data.interviewPlatform || "";
+    interviewForm.meetingLink = data.meetingLink || "";
+    interviewForm.interviewContact = data.interviewContact || "";
+    interviewForm.confidence = data.confidence || 0;
+    interviewForm.reason = data.reason || "";
+    interviewForm.confirmQuestion = data.confirmQuestion || "";
+  } finally {
+    interviewExtracting.value = false;
+  }
+}
+
+/**
+ * 用户确认并保存面试邀约信息。
  */
 async function submitInterview() {
-  await markCommunicationInterview(interviewForm.id, {
+  await confirmInterviewInvite(interviewForm.id, {
     interviewTime: normalizeDateTime(interviewForm.interviewTime),
+    interviewMethod: interviewForm.interviewMethod,
+    interviewLocation: interviewForm.interviewLocation,
+    interviewPlatform: interviewForm.interviewPlatform,
+    meetingLink: interviewForm.meetingLink,
+    interviewContact: interviewForm.interviewContact,
     nextFollowTime: normalizeDateTime(interviewForm.nextFollowTime),
     note: interviewForm.note
   });
 
-  ElMessage.success("已标记面试邀约");
+  ElMessage.success("面试邀约信息已保存");
 
   interviewDialogVisible.value = false;
 
@@ -873,7 +1050,7 @@ async function submitInterview() {
  *
  * 说明：
  * 1. REPLIED 需要打开弹窗录入 HR 回复并生成 AI 回复。
- * 2. INTERVIEW_INVITED 需要打开面试邀约弹窗。
+ * 2. INTERVIEW_INVITED 需要打开面试邀约提取弹窗。
  * 3. USER_REPLIED 需要确认已有 AI 回复。
  * 4. NO_REPLY / CLOSED 可以直接走状态更新。
  */
@@ -1041,6 +1218,20 @@ function statusText(status: string) {
 }
 
 /**
+ * 面试方式中文。
+ */
+function methodText(method?: string) {
+  const map: Record<string, string> = {
+    ONLINE: "线上面试",
+    OFFLINE: "线下面试",
+    PHONE: "电话面试",
+    UNKNOWN: "未知"
+  };
+
+  return method ? map[method] || method : "";
+}
+
+/**
  * 平台中文。
  */
 function platformText(platform?: string) {
@@ -1063,7 +1254,9 @@ function messageTypeText(type: string) {
     HR_TO_USER: "HR回复",
     AI_SUGGESTION: "AI建议回复",
     USER_TO_HR: "已发送给HR",
-    STATUS_CHANGE: "状态变更"
+    STATUS_CHANGE: "状态变更",
+    INTERVIEW_EXTRACT: "面试信息提取",
+    INTERVIEW_CONFIRMED: "面试信息确认"
   };
 
   return map[type] || type;
@@ -1082,6 +1275,14 @@ function messageTimelineType(type: string) {
   }
 
   if (type === "USER_TO_HR") {
+    return "success";
+  }
+
+  if (type === "INTERVIEW_EXTRACT") {
+    return "primary";
+  }
+
+  if (type === "INTERVIEW_CONFIRMED") {
     return "success";
   }
 
@@ -1391,6 +1592,16 @@ onMounted(() => {
   color: #344054;
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.extract-result-box {
+  margin: 12px 0 16px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f0f9ff;
+  border: 1px solid #bfdbfe;
+  color: #344054;
+  line-height: 1.7;
 }
 
 .message-card {

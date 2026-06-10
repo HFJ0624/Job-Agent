@@ -111,4 +111,49 @@ public class JobCommunicationRecord extends BaseEntity {
      * 用户最终发送给 HR 的回复内容。
      */
     private String userReplyText;
+    /**
+     * 面试方式。
+     *
+     * ONLINE / OFFLINE / PHONE / UNKNOWN。
+     */
+    private String interviewMethod;
+
+    /**
+     * 面试地点。
+     *
+     * 线下面试时保存公司地址；
+     * 线上面试时可以保存“腾讯会议”“飞书会议”等平台说明。
+     */
+    private String interviewLocation;
+
+    /**
+     * 线上面试平台。
+     *
+     * 例如：腾讯会议、飞书、Zoom、电话。
+     */
+    private String interviewPlatform;
+
+    /**
+     * 会议链接。
+     */
+    private String meetingLink;
+
+    /**
+     * 面试联系人或联系方式。
+     */
+    private String interviewContact;
+
+    /**
+     * AI 提取的完整面试邀约 JSON。
+     *
+     * 方便后续排查 AI 提取结果，也可以用于前端调试展示。
+     */
+    private String interviewExtractJson;
+
+    /**
+     * AI 提取置信度。
+     *
+     * 0-100。
+     */
+    private Double interviewExtractConfidence;
 }

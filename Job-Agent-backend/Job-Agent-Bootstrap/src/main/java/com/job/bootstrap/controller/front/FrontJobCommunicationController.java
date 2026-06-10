@@ -4,10 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.job.bootstrap.service.JobCommunicationRecordService;
 import com.job.common.dto.communication.*;
 import com.job.common.entity.base.Result;
-import com.job.common.vo.communication.JobCommunicationMessageVO;
-import com.job.common.vo.communication.JobCommunicationPageVO;
-import com.job.common.vo.communication.JobCommunicationRecordVO;
-import com.job.common.vo.communication.JobCommunicationStatsVO;
+import com.job.common.vo.communication.*;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -230,5 +227,59 @@ public class FrontJobCommunicationController {
         List<JobCommunicationMessageVO> list = jobCommunicationRecordService.listMessages(userId, id);
 
         return Result.build(list, 200, "查询成功");
+    }
+
+    /**
+     * 从 HR 回复中提取面试邀约信息。
+     *
+     * 使用场景:
+     * 用户复制 HR 回复，例如：
+     * “你好，明天下午3点方便线上面试吗？”
+     *
+     * 系统自动提取：
+     * 1. 面试时间
+     * 2. 面试方式
+     * 3. 面试地点
+     * 4. 会议链接
+     * 5. 是否需要用户确认
+     */
+    @Operation(summary = "从HR回复中提取面试邀约信息")
+    @PostMapping("/{id}/interview/extract")
+    public Result<InterviewInviteExtractVO> extractInterviewInvite(
+            @PathVariable Long id,
+            @RequestBody InterviewInviteExtractDTO dto
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        InterviewInviteExtractVO vo = jobCommunicationRecordService.extractInterviewInvite(
+                userId,
+                id,
+                dto
+        );
+
+        return Result.build(vo, 200, "提取成功");
+    }
+
+    /**
+     * 用户确认并保存面试邀约信息。
+     *
+     * 说明:
+     * AI 提取结果可能有偏差，所以最终由用户确认保存。
+     */
+    @Operation(summary = "确认并保存面试邀约信息")
+    @PostMapping("/{id}/interview/confirm")
+    public Result<JobCommunicationRecordVO> confirmInterviewInvite(
+            @PathVariable Long id,
+            @RequestBody InterviewInviteConfirmDTO dto
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        JobCommunicationRecordVO vo = jobCommunicationRecordService.confirmInterviewInvite(
+                userId,
+                id,
+                dto
+        );
+
+        return Result.build(vo, 200, "面试邀约信息已确认");
     }
 }

@@ -630,6 +630,15 @@ export interface CommunicationRecordInfo {
   userReplyText?: string;
   note?: string;
 
+  interviewMethod?: string;
+  interviewMethodDesc?: string;
+  interviewLocation?: string;
+  interviewPlatform?: string;
+  meetingLink?: string;
+  interviewContact?: string;
+  interviewExtractJson?: string;
+  interviewExtractConfidence?: number;
+
   createTime?: string;
   updateTime?: string;
 }
@@ -729,6 +738,46 @@ export interface UserReplySentPayload {
 export interface CommunicationStatusUpdatePayload {
   communicationStatus: string;
   interviewTime?: string;
+  nextFollowTime?: string;
+  note?: string;
+}
+/**
+ * 面试邀约信息提取结果。
+ */
+export interface InterviewInviteExtractInfo {
+  interviewInvited: boolean;
+  interviewTime?: string;
+  dateText?: string;
+  timeText?: string;
+  interviewMethod?: string;
+  interviewMethodDesc?: string;
+  interviewLocation?: string;
+  interviewPlatform?: string;
+  meetingLink?: string;
+  interviewContact?: string;
+  needUserConfirm?: boolean;
+  confirmQuestion?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+/**
+ * 面试邀约提取请求。
+ */
+export interface InterviewInviteExtractPayload {
+  hrReply?: string;
+}
+
+/**
+ * 面试邀约确认保存请求。
+ */
+export interface InterviewInviteConfirmPayload {
+  interviewTime?: string;
+  interviewMethod?: string;
+  interviewLocation?: string;
+  interviewPlatform?: string;
+  meetingLink?: string;
+  interviewContact?: string;
   nextFollowTime?: string;
   note?: string;
 }

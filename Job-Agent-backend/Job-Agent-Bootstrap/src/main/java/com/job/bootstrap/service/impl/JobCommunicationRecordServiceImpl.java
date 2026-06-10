@@ -2,24 +2,25 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.agent.HrCommunicationAssistant;
+import com.job.agent.InterviewInviteExtractorAssistant;
 import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
 import com.job.bootstrap.service.JobCommunicationRecordService;
 import com.job.common.dto.communication.*;
 import com.job.common.entity.communication.JobCommunicationMessage;
 import com.job.common.entity.communication.JobCommunicationRecord;
-import com.job.common.vo.communication.JobCommunicationMessageVO;
-import com.job.common.vo.communication.JobCommunicationPageVO;
-import com.job.common.vo.communication.JobCommunicationRecordVO;
-import com.job.common.vo.communication.JobCommunicationStatsVO;
+import com.job.common.vo.communication.*;
 import com.job.enums.CommunicationMessageType;
 import com.job.enums.CommunicationStatus;
+import com.job.enums.InterviewMethod;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -43,6 +44,10 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     private final JobCommunicationMessageMapper jobCommunicationMessageMapper;
 
     private final HrCommunicationAssistant hrCommunicationAssistant;
+
+    private final InterviewInviteExtractorAssistant interviewInviteExtractorAssistant;
+
+    private final ObjectMapper objectMapper;
 
     /**
      * 分页查询沟通记录。
@@ -262,6 +267,175 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
 
         return getDetail(userId, id);
     }
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public InterviewInviteExtractVO extractInterviewInvite(
+            Long userId,
+            Long id,
+            InterviewInviteExtractDTO dto
+    ) {
+        /*
+         * 1. 查询并校验沟通记录归属。
+         *    防止 A 用户通过 communicationId 提取 B 用户的 HR 回复。
+         */
+        JobCommunicationRecord record = getUserRecordRequired(userId, id);
+
+        /*
+         * 2. 获取待提取的 HR 回复文本。
+         *    优先使用请求 DTO 中传入的 hrReply。
+         *    如果没有传，则使用沟通记录里已经保存的 hrReply。
+         */
+        String hrReplyText = null;
+
+        if (dto != null && StringUtils.hasText(dto.getHrReply())) {
+            hrReplyText = dto.getHrReply();
+        } else {
+            hrReplyText = record.getHrReply();
+        }
+
+        if (!StringUtils.hasText(hrReplyText)) {
+            throw new IllegalArgumentException("HR回复内容为空，无法提取面试邀约信息");
+        }
+
+        /*
+         * 3. 构造 Prompt。
+         *    这里把当前日期时间也传给模型。
+         *    这样模型才能把“明天”“周三”“下周一”转换成具体日期。
+         */
+        String nowText = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                .format(new java.util.Date());
+
+        String prompt = """
+            当前系统时间：%s
+            
+            请从下面 HR 回复中提取面试邀约信息：
+            
+            【HR回复】
+            %s
+            
+            请严格按系统要求输出 JSON。
+            """.formatted(nowText, hrReplyText);
+
+        /*
+         * 4. 调用 AI 进行结构化抽取。
+         */
+        String json = interviewInviteExtractorAssistant.extract(prompt);
+
+        /*
+         * 5. 解析 AI 返回的 JSON。
+         *    注意：
+         *    有些模型可能会返回 ```json 包裹，因此这里做一次清洗。
+         */
+        InterviewInviteExtractVO extractVO = parseExtractJson(json);
+
+        /*
+         * 6. 对提取结果做兜底补全。
+         */
+        fillExtractDefault(extractVO);
+
+        /*
+         * 7. 保存 AI 提取原始结果到主记录。
+         *    这样后续排查时，可以看到模型当时提取了什么。
+         */
+        record.setInterviewExtractJson(toJson(extractVO));
+        record.setInterviewExtractConfidence(extractVO.getConfidence());
+
+        /*
+         * 8. 如果 AI 判断存在面试邀约，可以先把部分字段预填到主记录。
+         *    但注意：这里不是最终确认。
+         *    前端仍然应该让用户确认或修改。
+         */
+        if (Boolean.TRUE.equals(extractVO.getInterviewInvited())) {
+            record.setCommunicationStatus(CommunicationStatus.INTERVIEW_INVITED.name());
+            record.setInterviewMethod(extractVO.getInterviewMethod());
+            record.setInterviewLocation(extractVO.getInterviewLocation());
+            record.setInterviewPlatform(extractVO.getInterviewPlatform());
+            record.setMeetingLink(extractVO.getMeetingLink());
+            record.setInterviewContact(extractVO.getInterviewContact());
+
+            /*
+             * 如果 AI 成功给出具体 interviewTime，则尝试解析成 Date 保存。
+             */
+            record.setInterviewTime(parseDate(extractVO.getInterviewTime()));
+        }
+
+        jobCommunicationRecordMapper.updateById(record);
+
+        /*
+         * 9. 保存一条消息流水，表示系统已经提取过面试邀约。
+         *    如果你前面已经做了 job_communication_message，这里可以记录。
+         */
+        saveMessage(
+                userId,
+                id,
+                "INTERVIEW_EXTRACT",
+                "AI已从HR回复中提取面试邀约信息：" + toJson(extractVO),
+                null,
+                record.getCommunicationStatus()
+        );
+
+        return extractVO;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public JobCommunicationRecordVO confirmInterviewInvite(
+            Long userId,
+            Long id,
+            InterviewInviteConfirmDTO dto
+    ) {
+        /*
+         * 1. 查询并校验记录归属。
+         */
+        JobCommunicationRecord record = getUserRecordRequired(userId, id);
+
+        /*
+         * 2. 用户确认后的面试信息才是最终可信数据。
+         *    所以这里覆盖 AI 预填结果。
+         */
+        record.setInterviewTime(dto.getInterviewTime());
+        record.setInterviewMethod(
+                StringUtils.hasText(dto.getInterviewMethod())
+                        ? dto.getInterviewMethod()
+                        : InterviewMethod.UNKNOWN.name()
+        );
+        record.setInterviewLocation(dto.getInterviewLocation());
+        record.setInterviewPlatform(dto.getInterviewPlatform());
+        record.setMeetingLink(dto.getMeetingLink());
+        record.setInterviewContact(dto.getInterviewContact());
+        record.setNextFollowTime(dto.getNextFollowTime());
+        record.setNote(dto.getNote());
+
+        /*
+         * 3. 确认后状态进入邀约面试。
+         */
+        record.setCommunicationStatus(CommunicationStatus.INTERVIEW_INVITED.name());
+
+        jobCommunicationRecordMapper.updateById(record);
+
+        /*
+         * 4. 保存状态流水。
+         */
+        saveMessage(
+                userId,
+                id,
+                "INTERVIEW_CONFIRMED",
+                "用户已确认面试信息，面试时间：" + dto.getInterviewTime(),
+                null,
+                CommunicationStatus.INTERVIEW_INVITED.name()
+        );
+
+        /*
+         * 5. 后续你可以在这里接 InterviewPrepareService。
+         *
+         * 例如：
+         * interviewPrepareService.generatePrepare(userId, record.getApplicationId(), record.getResumeId());
+         *
+         * 第一版先不自动调用，避免用户还没确认好信息就生成。
+         */
+
+        return getDetail(userId, id);
+    }
 
     /**
      * 根据沟通记录和 HR 回复生成 AI 建议回复。
@@ -361,6 +535,11 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
          * 1. 填充状态中文。
          */
         vo.setCommunicationStatusDesc(getStatusDesc(vo.getCommunicationStatus()));
+
+        /*
+         * 填充面试方式中文。
+         */
+        vo.setInterviewMethodDesc(getInterviewMethodDesc(vo.getInterviewMethod()));
 
         /*
          * 2. 填充薪资文本。
@@ -731,5 +910,126 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         }
 
         return senderType;
+    }
+
+    /**
+     * 解析 AI 返回的 JSON。
+     *
+     * @param json AI 返回内容
+     * @return 提取结果
+     */
+    private InterviewInviteExtractVO parseExtractJson(String json) {
+        try {
+            String cleanJson = cleanJson(json);
+            return objectMapper.readValue(cleanJson, InterviewInviteExtractVO.class);
+        } catch (Exception e) {
+            throw new RuntimeException("面试邀约信息解析失败，AI返回内容：" + json, e);
+        }
+    }
+
+    /**
+     * 清洗模型返回内容。
+     *
+     * 有些模型可能返回:
+     * ```json
+     * {...}
+     * ```
+     *
+     * 这里把 markdown 包裹去掉。
+     */
+    private String cleanJson(String text) {
+        if (text == null) {
+            return "{}";
+        }
+
+        String result = text.trim();
+
+        if (result.startsWith("```json")) {
+            result = result.replaceFirst("```json", "");
+        }
+
+        if (result.startsWith("```")) {
+            result = result.replaceFirst("```", "");
+        }
+
+        if (result.endsWith("```")) {
+            result = result.substring(0, result.length() - 3);
+        }
+
+        return result.trim();
+    }
+
+    /**
+     * 给提取结果补默认值。
+     */
+    private void fillExtractDefault(InterviewInviteExtractVO vo) {
+        if (vo.getInterviewInvited() == null) {
+            vo.setInterviewInvited(false);
+        }
+
+        if (!StringUtils.hasText(vo.getInterviewMethod())) {
+            vo.setInterviewMethod(InterviewMethod.UNKNOWN.name());
+            vo.setInterviewMethodDesc(InterviewMethod.UNKNOWN.getDesc());
+        }
+
+        if (vo.getNeedUserConfirm() == null) {
+            vo.setNeedUserConfirm(true);
+        }
+
+        if (vo.getConfidence() == null) {
+            vo.setConfidence(0D);
+        }
+
+        if (!StringUtils.hasText(vo.getReason())) {
+            vo.setReason("AI未提供提取说明");
+        }
+    }
+
+    /**
+     * 字符串转 Date。
+     *
+     * @param value yyyy-MM-dd HH:mm:ss
+     * @return Date
+     */
+    private Date parseDate(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+
+        try {
+            return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(value);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 对象转 JSON。
+     */
+    private String toJson(Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    /**
+     * 获取面试方式中文。
+     */
+    private String getInterviewMethodDesc(String method) {
+        if (!StringUtils.hasText(method)) {
+            return "";
+        }
+
+        try {
+            return InterviewMethod.valueOf(method).getDesc();
+        } catch (Exception e) {
+            return method;
+        }
     }
 }

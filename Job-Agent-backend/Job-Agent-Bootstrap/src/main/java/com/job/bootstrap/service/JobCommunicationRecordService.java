@@ -1,10 +1,7 @@
 package com.job.bootstrap.service;
 
 import com.job.common.dto.communication.*;
-import com.job.common.vo.communication.JobCommunicationMessageVO;
-import com.job.common.vo.communication.JobCommunicationPageVO;
-import com.job.common.vo.communication.JobCommunicationRecordVO;
-import com.job.common.vo.communication.JobCommunicationStatsVO;
+import com.job.common.vo.communication.*;
 
 import java.util.List;
 
@@ -89,4 +86,13 @@ public interface JobCommunicationRecordService {
      * 查询某条沟通记录下的消息流水。
      */
     List<JobCommunicationMessageVO> listMessages(Long userId, Long communicationId);
+    /**
+     * 从 HR 回复中提取面试邀约信息。
+     */
+    InterviewInviteExtractVO extractInterviewInvite(Long userId, Long id, InterviewInviteExtractDTO dto);
+
+    /**
+     * 用户确认并保存面试邀约信息。
+     */
+    JobCommunicationRecordVO confirmInterviewInvite(Long userId, Long id, InterviewInviteConfirmDTO dto);
 }

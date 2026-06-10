@@ -9,7 +9,10 @@ import type {
     CommunicationMessageInfo,
     CommunicationStatusUpdatePayload,
     HrReplyGeneratePayload,
-    UserReplySentPayload
+    UserReplySentPayload,
+    InterviewInviteConfirmPayload,
+    InterviewInviteExtractInfo,
+    InterviewInviteExtractPayload
 } from "./types";
 
 /**
@@ -165,4 +168,29 @@ export function updateCommunicationStatus(
  */
 export function listCommunicationMessages(id: number | string) {
     return request<CommunicationMessageInfo[]>(`/front/communication/${id}/messages`);
+}
+/**
+ * 从 HR 回复中提取面试邀约信息。
+ */
+export function extractInterviewInvite(
+    id: number | string,
+    payload: InterviewInviteExtractPayload
+) {
+    return request<InterviewInviteExtractInfo>(`/front/communication/${id}/interview/extract`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+}
+
+/**
+ * 用户确认并保存面试邀约信息。
+ */
+export function confirmInterviewInvite(
+    id: number | string,
+    payload: InterviewInviteConfirmPayload
+) {
+    return request<CommunicationRecordInfo>(`/front/communication/${id}/interview/confirm`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
 }
