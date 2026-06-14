@@ -546,6 +546,8 @@ export type CommunicationStatus =
   | "COPIED"
   | "COMMUNICATED"
   | "REPLIED"
+  | "AI_REPLY_GENERATED"
+  | "USER_REPLIED"
   | "INTERVIEW_INVITED"
   | "NO_REPLY"
   | "CLOSED";

@@ -79,7 +79,7 @@ function splitTags(value?: string) {
     .filter(Boolean);
 }
 
-function estimateMatchScore(id: number) {
+function estimateMatchScore(id: number | string) {
   // 1. 真实匹配分后续会由 AI 模块计算，这里先给列表一个稳定的展示值。
   return 82 + (Number(id) % 13);
 }

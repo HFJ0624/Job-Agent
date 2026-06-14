@@ -134,7 +134,7 @@
             />
           </label>
 
-          <el-button type="primary" @click="$router.push('/communications')">
+          <el-button type="primary" @click="$router.push('/communication')">
             查看沟通记录
           </el-button>
 
