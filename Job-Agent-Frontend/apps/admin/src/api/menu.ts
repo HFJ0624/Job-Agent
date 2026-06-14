@@ -97,6 +97,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/TraceLog"
   },
   {
+    id: 8,
+    path: "/agent/rag",
+    name: "AgentRag",
+    title: "RAG 知识库",
+    icon: "DataBoard",
+    component: "agent/RagKnowledge"
+  },
+  {
     id: 7,
     path: "/system",
     name: "SystemRoot",

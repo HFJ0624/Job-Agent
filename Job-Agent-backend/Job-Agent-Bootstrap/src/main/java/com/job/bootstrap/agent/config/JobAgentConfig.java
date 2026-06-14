@@ -30,6 +30,7 @@ public class JobAgentConfig {
     private final JobRecommendTool jobRecommendTool;
     private final InterviewPrepareTool interviewPrepareTool;
     private final MockInterviewReviewTool mockInterviewReviewTool;
+    private final RagSearchTool ragSearchTool;
 
     /**
      * 构建 JobAgentAssistant。
@@ -66,7 +67,8 @@ public class JobAgentConfig {
                         interviewPrepareTool,
                         resumeAnalyzeTool,
                         jobRecommendTool,
-                        mockInterviewReviewTool
+                        mockInterviewReviewTool,
+                        ragSearchTool
                 )
                 .build();
     }

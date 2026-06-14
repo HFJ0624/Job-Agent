@@ -189,6 +189,67 @@ export interface AgentTraceLogInfo {
 /**
  * MyBatis-Plus 分页返回结构。
  */
+/**
+ * RAG 文档类型统计。
+ */
+export interface RagDocumentTypeStats {
+  userId: number;
+  documentType: string;
+  documentCount: number;
+  chunkCount: number;
+}
+
+/**
+ * RAG 知识库统计。
+ */
+export interface RagStats {
+  tableName: string;
+  dimension: number;
+  maxResults: number;
+  minScore: number;
+  chunkSize: number;
+  chunkOverlap: number;
+  extensionReady: boolean;
+  tableReady: boolean;
+  schemaReady: boolean;
+  setupMessage?: string;
+  totalChunks: number;
+  publicChunks: number;
+  privateChunks: number;
+  typeStats: RagDocumentTypeStats[];
+}
+
+/**
+ * RAG 索引结果。
+ */
+export interface RagIndexResult {
+  indexedDocumentCount: number;
+  indexedChunkCount: number;
+  resumeCount: number;
+  jobCount: number;
+  companyCount: number;
+  communicationCount: number;
+  messageCount: number;
+  skippedDocumentCount: number;
+  warnings: string[];
+}
+
+/**
+ * RAG 检索结果。
+ */
+export interface RagSearchResult {
+  id: number;
+  userId: number;
+  documentType: string;
+  businessId: number;
+  chunkIndex: number;
+  title?: string;
+  content: string;
+  source?: string;
+  score: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface PageResult<T> {
   records: T[];
   total: number;
