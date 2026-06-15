@@ -6,15 +6,22 @@ import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
+import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentChatService;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
+import com.job.common.vo.rag.RagSearchResultVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -37,6 +44,9 @@ public class AgentChatServiceImpl implements AgentChatService {
     private static final int NOT_DELETED = 0;
     private static final String ROLE_USER = "USER";
     private static final String ROLE_ASSISTANT = "ASSISTANT";
+    private static final int PRE_RETRIEVAL_LIMIT = 5;
+    private static final int RAG_CONTENT_PREVIEW_LENGTH = 500;
+    private static final String RAG_PRE_RETRIEVAL_TOOL_NAME = "RagPreRetrieval.searchKnowledge";
 
     private final AiConversationMapper aiConversationMapper;
     private final AiMessageMapper aiMessageMapper;
@@ -51,6 +61,12 @@ public class AgentChatServiceImpl implements AgentChatService {
      * Agent Trace 统一记录服务。
      */
     private final AgentTraceService agentTraceService;
+
+    /**
+     * RAG 检索服务。
+     * 用户每次询问 AI 助手时，都先用它从 pgvector 中召回相关知识。
+     */
+    private final RagRetrievalService ragRetrievalService;
 
     /**
      * 意图路由器。
@@ -116,25 +132,48 @@ public class AgentChatServiceImpl implements AgentChatService {
             );
 
             /*
-             * 6. 调用 Agent。
-             *    conversation.getId() 作为 memoryId，用于绑定多轮对话上下文。
+             * 6. 前置 RAG 检索。
+             *
+             * 这里是本次改造的核心:
+             * - 之前的 RagSearchTool 是“模型决定是否调用”，不够稳定。
+             * - 现在每次用户询问都会先检索知识库，再把召回片段塞进本轮提示词。
+             * - 用户前端不会看到 chunk、score、metadata，来源只写入后台 Agent Trace。
              */
-            String answer = jobAgentAssistant.chat(conversation.getId(), message);
+            RagContext ragContext = retrieveRagContext(
+                    userId,
+                    conversation.getId(),
+                    intentCode.name(),
+                    message
+            );
 
             /*
-             * 7. 保存助手消息。
+             * 7. 调用 Agent。
+             *    conversation.getId() 作为 memoryId，用于绑定多轮对话上下文。
+             *    传给模型的是增强后的 message，里面包含:
+             *    - 用户原始问题
+             *    - 后端已召回的 RAG 知识片段
+             *    - 回答约束
+             */
+            String answer = jobAgentAssistant.chat(conversation.getId(), ragContext.enhancedMessage());
+
+            /*
+             * 8. 保存助手消息。
              */
             saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
 
             /*
-             * 8. 更新会话时间。
+             * 9. 更新会话时间。
              *    这样前端会话列表可以按最近聊天排序。
              */
             touchConversation(conversation);
 
             /*
-             * 9. 保存主对话 Trace。
+             * 10. 保存主对话 Trace。
              *    工具调用 Trace 会在 Tool 内部单独保存。
+             *    RAG 前置检索不是前端展示内容，但必须记录到 outputData 里，方便后台排查:
+             *    - 本轮是否真的走了 RAG
+             *    - 命中了哪些 chunk
+             *    - 回答依据来自简历、JD、公司还是沟通记录
              */
             agentTraceService.saveTrace(
                     traceId,
@@ -142,8 +181,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     conversation.getId(),
                     intentCode.name(),
                     null,
-                    Map.of("message", message),
-                    Map.of("answer", answer),
+                    buildChatTraceInput(message, ragContext),
+                    buildChatTraceOutput(answer, ragContext),
                     "SUCCESS",
                     null,
                     System.currentTimeMillis() - start
@@ -157,7 +196,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
         } catch (Exception e) {
             /*
-             * 10. 异常也必须落 Trace。
+             * 11. 异常也必须落 Trace。
              *     企业级 Agent 项目中，失败链路比成功链路更重要。
              */
             agentTraceService.saveTrace(
@@ -177,11 +216,235 @@ public class AgentChatServiceImpl implements AgentChatService {
 
         } finally {
             /*
-             * 11. 清理 ThreadLocal。
+             * 12. 清理 ThreadLocal。
              *     这是必须做的，否则线程池复用时可能串用户。
              */
             AgentRuntimeContext.clear();
         }
+    }
+
+    /**
+     * 前置检索 RAG 知识。
+     *
+     * 设计说明:
+     * 1. 这里不依赖大模型是否“愿意”调用工具，而是后端强制先检索。
+     * 2. 检索结果会进入本轮提示词，帮助模型基于真实简历、岗位、公司和沟通记录回答。
+     * 3. 检索结果同时写入 Agent Trace，后台管理员可以看到回答依据。
+     */
+    private RagContext retrieveRagContext(Long userId, Long conversationId, String intentCode, String message) {
+        long start = System.currentTimeMillis();
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("query", message);
+        input.put("limit", PRE_RETRIEVAL_LIMIT);
+        input.put("stage", "BEFORE_AGENT_ANSWER");
+
+        try {
+            List<RagSearchResultVO> results = ragRetrievalService.search(userId, message, PRE_RETRIEVAL_LIMIT);
+            List<Map<String, Object>> references = buildRagReferences(results, true);
+
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("ragEnabled", true);
+            output.put("ragStatus", "SUCCESS");
+            output.put("hitCount", results.size());
+            output.put("references", references);
+
+            agentTraceService.saveToolTrace(
+                    userId,
+                    conversationId,
+                    intentCode,
+                    RAG_PRE_RETRIEVAL_TOOL_NAME,
+                    input,
+                    output,
+                    "SUCCESS",
+                    null,
+                    System.currentTimeMillis() - start
+            );
+
+            return new RagContext(
+                    true,
+                    "SUCCESS",
+                    null,
+                    results,
+                    buildRagEnhancedMessage(message, results, null)
+            );
+        } catch (Exception exception) {
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("ragEnabled", true);
+            output.put("ragStatus", "FAILED");
+            output.put("hitCount", 0);
+
+            agentTraceService.saveToolTrace(
+                    userId,
+                    conversationId,
+                    intentCode,
+                    RAG_PRE_RETRIEVAL_TOOL_NAME,
+                    input,
+                    output,
+                    "FAILED",
+                    exception.getMessage(),
+                    System.currentTimeMillis() - start
+            );
+
+            /*
+             * RAG 失败时不直接中断用户聊天。
+             * 原因:
+             * - Embedding 服务、pgvector、网络都可能临时异常。
+             * - 用户端 AI 助手仍可以给出通用回答。
+             * - 后台 Trace 会明确标记 ragStatus=FAILED，便于管理员排查。
+             */
+            return new RagContext(
+                    true,
+                    "FAILED",
+                    exception.getMessage(),
+                    List.of(),
+                    buildRagEnhancedMessage(message, List.of(), exception.getMessage())
+            );
+        }
+    }
+
+    /**
+     * 构造带 RAG 知识的用户消息。
+     *
+     * 注意:
+     * 1. 这里传给大模型，不直接保存到 ai_message 表。
+     * 2. ai_message 表保存的仍然是用户原始输入，避免前端历史记录出现内部检索上下文。
+     * 3. RAG 来源进入 Trace，而不是展示给普通用户。
+     */
+    private String buildRagEnhancedMessage(String originalMessage, List<RagSearchResultVO> results, String ragError) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("【用户原始问题】\n")
+                .append(originalMessage)
+                .append("\n\n");
+
+        builder.append("【系统已检索的 RAG 知识】\n");
+        if (StringUtils.hasText(ragError)) {
+            builder.append("本轮知识库检索失败，错误信息: ")
+                    .append(ragError)
+                    .append("\n");
+            builder.append("如果继续回答，只能基于通用求职知识，不要声称已经读取到用户简历、岗位、公司或沟通记录。\n\n");
+        } else if (CollectionUtils.isEmpty(results)) {
+            builder.append("未检索到高相关知识片段。\n");
+            builder.append("如果问题依赖用户简历、岗位、公司或沟通记录，请明确说明知识库里暂未找到依据，并给出下一步建议。\n\n");
+        } else {
+            for (int i = 0; i < results.size(); i++) {
+                RagSearchResultVO result = results.get(i);
+                builder.append("【知识片段 ")
+                        .append(i + 1)
+                        .append("】\n");
+                builder.append("来源类型: ").append(nullToDash(result.getDocumentType())).append("\n");
+                builder.append("标题: ").append(nullToDash(result.getTitle())).append("\n");
+                builder.append("业务ID: ").append(result.getBusinessId()).append("\n");
+                builder.append("分片序号: ").append(result.getChunkIndex()).append("\n");
+                builder.append("相似度: ").append(formatScore(result.getScore())).append("\n");
+                builder.append("内容:\n")
+                        .append(result.getContent())
+                        .append("\n\n");
+            }
+        }
+
+        builder.append("【回答要求】\n");
+        builder.append("1. 优先依据 RAG 知识回答用户问题，不能编造知识片段中不存在的事实。\n");
+        builder.append("2. 普通用户前端不要展示向量ID、chunkIndex、score、metadata 等内部字段。\n");
+        builder.append("3. 如果 RAG 没有命中或命中不足，要说明“知识库里暂未找到足够依据”，再给通用建议。\n");
+        builder.append("4. 回答要自然、清晰、中文分点，像一个求职 Agent 助手，而不是把原始 JSON 贴给用户。\n");
+        return builder.toString();
+    }
+
+    private Map<String, Object> buildChatTraceInput(String message, RagContext ragContext) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("message", message);
+        input.put("ragEnabled", ragContext.enabled());
+        input.put("ragStatus", ragContext.status());
+        input.put("ragHitCount", ragContext.results().size());
+        return input;
+    }
+
+    private Map<String, Object> buildChatTraceOutput(String answer, RagContext ragContext) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("answer", answer);
+        output.put("ragEnabled", ragContext.enabled());
+        output.put("ragStatus", ragContext.status());
+        output.put("ragError", ragContext.errorMessage());
+        output.put("ragHitCount", ragContext.results().size());
+        output.put("ragReferences", buildRagReferences(ragContext.results(), false));
+        return output;
+    }
+
+    /**
+     * 构造 RAG 来源引用。
+     *
+     * @param results RAG 检索结果
+     * @param includeContent 是否保留完整分片内容
+     * @return 可直接写入 Trace outputData 的来源列表
+     */
+    private List<Map<String, Object>> buildRagReferences(List<RagSearchResultVO> results, boolean includeContent) {
+        if (CollectionUtils.isEmpty(results)) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> references = new ArrayList<>();
+        for (int i = 0; i < results.size(); i++) {
+            RagSearchResultVO result = results.get(i);
+            Map<String, Object> reference = new LinkedHashMap<>();
+            reference.put("rank", i + 1);
+            reference.put("knowledgeId", result.getId());
+            reference.put("owner", result.getUserId() != null && result.getUserId() == 0 ? "PUBLIC" : "PRIVATE");
+            reference.put("userId", result.getUserId());
+            reference.put("documentType", result.getDocumentType());
+            reference.put("businessId", result.getBusinessId());
+            reference.put("chunkIndex", result.getChunkIndex());
+            reference.put("title", result.getTitle());
+            reference.put("source", result.getSource());
+            reference.put("score", result.getScore());
+            reference.put("metadata", result.getMetadata());
+            if (includeContent) {
+                reference.put("content", result.getContent());
+            } else {
+                reference.put("contentPreview", preview(result.getContent()));
+            }
+            references.add(reference);
+        }
+        return references;
+    }
+
+    private String preview(String content) {
+        if (!StringUtils.hasText(content)) {
+            return "";
+        }
+        String text = content.trim();
+        return text.length() <= RAG_CONTENT_PREVIEW_LENGTH
+                ? text
+                : text.substring(0, RAG_CONTENT_PREVIEW_LENGTH) + "...";
+    }
+
+    private String formatScore(Double score) {
+        if (score == null) {
+            return "-";
+        }
+        return String.format("%.4f", score);
+    }
+
+    private String nullToDash(Object value) {
+        return value == null ? "-" : String.valueOf(value);
+    }
+
+    /**
+     * 本轮聊天使用的 RAG 上下文。
+     *
+     * @param enabled 是否启用 RAG
+     * @param status 检索状态
+     * @param errorMessage 检索异常信息
+     * @param results 召回结果
+     * @param enhancedMessage 注入 RAG 知识后的模型输入
+     */
+    private record RagContext(
+            boolean enabled,
+            String status,
+            String errorMessage,
+            List<RagSearchResultVO> results,
+            String enhancedMessage
+    ) {
     }
 
     /**

@@ -120,6 +120,36 @@ public class RagProperties {
         private String modelName;
 
         /**
+         * Embedding 请求模式。
+         * auto: 根据 modelName 自动判断，包含 vision/multimodal 时走方舟多模态请求体。
+         * openai-text: 走普通文本向量化请求体，适合纯文本 embedding 模型。
+         * ark-multimodal: 走火山方舟多模态向量化请求体，适合 doubao-embedding-vision-*。
+         */
+        private String requestMode = "auto";
+
+        /**
+         * 自定义 Embedding API 路径。
+         * 为空时由 requestMode 自动选择，便于火山方舟接口路径调整时只改 yml、不改代码。
+         */
+        private String apiPath;
+
+        /**
+         * 普通文本向量化接口路径。
+         */
+        private String textApiPath = "/embeddings";
+
+        /**
+         * 多模态向量化接口路径。
+         */
+        private String multimodalApiPath = "/embeddings/multimodal";
+
+        /**
+         * 向量返回格式。
+         * 为空时不发送该字段，避免多模态接口不支持该参数。
+         */
+        private String encodingFormat;
+
+        /**
          * 请求超时时间，单位秒。
          */
         private Long timeoutSeconds = 60L;

@@ -34,6 +34,7 @@ import java.util.regex.Pattern;
 public class RagVectorStoreServiceImpl implements RagVectorStoreService {
 
     private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+    private static final int PGVECTOR_IVFFLAT_MAX_DIMENSION = 2000;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -95,10 +96,17 @@ public class RagVectorStoreServiceImpl implements RagVectorStoreService {
                 "CREATE INDEX IF NOT EXISTS " + indexName(table, "user_type") +
                         " ON " + table + " (user_id, document_type)"
         );
-        jdbcTemplate.execute(
-                "CREATE INDEX IF NOT EXISTS " + indexName(table, "embedding") +
-                        " ON " + table + " USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-        );
+        /*
+         * pgvector 的 ivfflat/hnsw 索引对 vector 类型有维度上限。
+         * 当前项目配置的 embedding 维度是 2048，超过 ivfflat 的 2000 维限制。
+         * 这种情况下跳过向量索引，检索 SQL 仍然可以用 <=> 做精确相似度扫描。
+         */
+        if (dimension != null && dimension <= PGVECTOR_IVFFLAT_MAX_DIMENSION) {
+            jdbcTemplate.execute(
+                    "CREATE INDEX IF NOT EXISTS " + indexName(table, "embedding") +
+                            " ON " + table + " USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+            );
+        }
     }
 
     /**

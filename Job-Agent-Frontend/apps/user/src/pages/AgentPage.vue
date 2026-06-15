@@ -349,6 +349,10 @@ async function scrollToBottom() {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  height: calc(100vh - 68px);
+  min-height: 0;
+  overflow: hidden;
+  padding: 28px 0 24px;
 }
 
 .agent-hero {
@@ -371,6 +375,8 @@ async function scrollToBottom() {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   gap: 16px;
+  flex: 1;
+  min-height: 0;
 }
 
 .conversation-sidebar {
@@ -378,7 +384,8 @@ async function scrollToBottom() {
   border-radius: 20px;
   background: #ffffff;
   border: 1px solid #e5e7eb;
-  min-height: 620px;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -400,7 +407,9 @@ async function scrollToBottom() {
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
 .conversation-item {
@@ -439,6 +448,10 @@ async function scrollToBottom() {
 }
 
 .agent-chat-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   padding: 18px;
   border-radius: 20px;
   background: #ffffff;
@@ -446,7 +459,8 @@ async function scrollToBottom() {
 }
 
 .agent-message-list {
-  height: 520px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
   border-radius: 16px;
@@ -525,12 +539,24 @@ async function scrollToBottom() {
 }
 
 @media (max-width: 900px) {
+  .agent-page {
+    height: auto;
+    min-height: calc(100vh - 68px);
+    overflow: visible;
+    padding: 28px 0 40px;
+  }
+
   .agent-layout {
     grid-template-columns: 1fr;
+    flex: none;
   }
 
   .conversation-sidebar {
-    min-height: auto;
+    max-height: 360px;
+  }
+
+  .agent-chat-card {
+    min-height: 620px;
   }
 }
 

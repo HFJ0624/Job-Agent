@@ -1,7 +1,5 @@
 package com.job.bootstrap.rag.config;
 
-import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -9,8 +7,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.util.StringUtils;
-
-import java.time.Duration;
 
 /**
  * 作者:hfj
@@ -50,36 +46,6 @@ public class RagConfig {
          * 3. MyBatis-Plus 仍然使用原来的 spring.datasource。
          */
         return new JdbcTemplate(dataSource);
-    }
-
-    /**
-     * 创建 RAG 专用 EmbeddingModel。
-     *
-     * @return OpenAI 兼容 Embedding 模型
-     */
-    @Bean("ragEmbeddingModel")
-    public EmbeddingModel ragEmbeddingModel() {
-        RagProperties.Embedding embedding = ragProperties.getEmbedding();
-
-        if (!StringUtils.hasText(embedding.getApiKey())) {
-            throw new IllegalStateException("请配置 job.rag.embedding.api-key");
-        }
-        if (!StringUtils.hasText(embedding.getBaseUrl())) {
-            throw new IllegalStateException("请配置 job.rag.embedding.base-url");
-        }
-        if (!StringUtils.hasText(embedding.getModelName())) {
-            throw new IllegalStateException("请配置 job.rag.embedding.model-name");
-        }
-
-        return OpenAiEmbeddingModel.builder()
-                .baseUrl(embedding.getBaseUrl())
-                .apiKey(embedding.getApiKey())
-                .modelName(embedding.getModelName())
-                .timeout(Duration.ofSeconds(embedding.getTimeoutSeconds()))
-                .maxRetries(embedding.getMaxRetries())
-                .logRequests(embedding.getLogRequests())
-                .logResponses(embedding.getLogResponses())
-                .build();
     }
 
     private String resolveJdbcUrl(RagProperties.Pgvector pgvector, RagProperties.DataSource datasourceProperties) {
