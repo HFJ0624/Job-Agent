@@ -3,32 +3,47 @@ package com.job.bootstrap.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.agent.ResumeScoreAssistant;
 import com.job.bootstrap.mapper.JobResumeScoreRecordMapper;
 import com.job.bootstrap.service.JobResumeScoreService;
 import com.job.bootstrap.service.JobResumeService;
+import com.job.bootstrap.service.resume.ResumeScoreRuleEngine;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.entity.resume.JobResumeScoreRecord;
 import com.job.common.vo.resume.ResumeScoreVO;
 import com.job.exception.BizException;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 作者:hfj
- * 功能:简历评分业务实现
- * 日期:2026/6/6
+ * 功能:简历 AI 评分业务实现
+ * 日期:2026/6/15
  *
- * 设计说明：
- * 1. 第一版先使用规则评分，保证系统稳定、可解释、可测试。
- * 2. 后续接入大模型时，可以在本类中增加 LLM 评分结果，或者把本类封装成 ResumeAnalyzeTool。
- * 3. 评分维度采用 100 分制：
- *    基础信息10 + 教育背景10 + 技能栈20 + 项目经历35 + 实习/工作经历15 + 表达质量10。
+ * V2 设计说明:
+ * 1. 先用 ResumeScoreRuleEngine 计算稳定分数，保证评分可解释、可测试、可重复。
+ * 2. 再调用 ResumeScoreAssistant，让大模型基于简历原文补充更自然的优势、不足、风险点和建议。
+ * 3. 最终分数仍以规则引擎为准，大模型不能随意改分，避免同一份简历多次评分结果漂移。
+ * 4. score_json 保存完整 V2 结构，老字段继续写入，兼容当前数据库和旧前端字段。
  */
 @Service
 @RequiredArgsConstructor
@@ -42,7 +57,7 @@ public class JobResumeScoreServiceImpl
     private static final String STATUS_SCORED = "SCORED";
 
     /**
-     * 解析失败状态。
+     * 简历解析失败状态。
      */
     private static final String STATUS_PARSE_FAILED = "PARSE_FAILED";
 
@@ -52,94 +67,87 @@ public class JobResumeScoreServiceImpl
     private static final int NOT_DELETED = 0;
 
     /**
-     * 常见技术关键词。
-     * 说明：第一版用关键词命中做技能栈评分，后续可以换成技能字典表或 JD 技能抽取。
+     * 送给模型的简历最大字符数。
+     * 说明: 简历过长时先截断，避免一次模型调用超过上下文长度。
      */
-    private static final List<String> TECH_KEYWORDS = List.of(
-            "Java", "Spring", "Spring Boot", "Spring Cloud", "MyBatis", "MyBatis-Plus",
-            "MySQL", "Redis", "MongoDB", "Elasticsearch", "RabbitMQ", "Kafka",
-            "Docker", "Kubernetes", "Linux", "Nginx", "Git", "Maven",
-            "Vue", "React", "TypeScript", "JavaScript", "HTML", "CSS",
-            "Python", "Go", "C++", "微服务", "分布式", "高并发", "缓存", "消息队列",
-            "事务", "接口", "数据库", "SQL", "JVM", "多线程"
-    );
+    private static final int LLM_RESUME_TEXT_LIMIT = 12000;
 
     /**
-     * 教育背景关键词。
+     * 简历评分大模型辅助点评最多等待时间。
+     * 说明: 评分接口是用户点击按钮触发的同步请求，不能因为模型供应商网络抖动一直卡住。
+     * 超过这个时间就返回规则评分兜底结果，保证“重新评分”按钮稳定可用。
      */
-    private static final List<String> EDUCATION_KEYWORDS = List.of(
-            "大学", "学院", "本科", "硕士", "研究生", "专科", "博士", "专业", "计算机",
-            "软件工程", "网络工程", "人工智能", "数据科学"
-    );
-
-    /**
-     * 项目经历关键词。
-     */
-    private static final List<String> PROJECT_KEYWORDS = List.of(
-            "项目", "系统", "平台", "模块", "接口", "业务", "权限", "订单", "用户",
-            "后台", "管理", "开发", "设计", "实现", "优化", "负责"
-    );
-
-    /**
-     * 量化结果关键词。
-     */
-    private static final List<String> METRIC_KEYWORDS = List.of(
-            "%", "ms", "秒", "分钟", "QPS", "TPS", "并发", "提升", "降低", "减少",
-            "优化", "性能", "响应时间", "吞吐量", "成功率"
-    );
+    private static final long LLM_ANALYSIS_TIMEOUT_SECONDS = 12;
 
     private final JobResumeService jobResumeService;
+    private final ResumeScoreRuleEngine resumeScoreRuleEngine;
+    private final ObjectProvider<ResumeScoreAssistant> resumeScoreAssistantProvider;
     private final ObjectMapper objectMapper;
 
     /**
-     * 对当前用户指定简历进行评分。
+     * 简历评分 LLM 辅助分析线程池。
+     * 说明: 单独线程池可以给模型调用加超时控制，不影响主业务线程及时返回规则评分结果。
+     */
+    private final ExecutorService resumeScoreLlmExecutor = Executors.newFixedThreadPool(
+            2,
+            new ResumeScoreThreadFactory()
+    );
+
+    /**
+     * 对当前用户指定简历执行 V2 AI 评分。
+     *
+     * @param userId 当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param targetPosition 用户填写的求职方向，可为空，不作为 JD 匹配评分
+     * @return 前端展示用评分结果
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ResumeScoreVO scoreResume(Long userId, Long resumeId, String targetPosition) {
-        // 1. 先校验简历归属，避免用户通过改ID评分别人的简历。
+        // 1. 校验简历归属，防止用户通过改 ID 评分或读取别人的简历。
         JobResume resume = jobResumeService.getUserResumeRequired(userId, resumeId);
 
-        // 2. 如果简历还没有解析文本，就复用已有的 parseResumeText 能力先解析。
+        // 2. 如果简历还没有解析文本，复用已有解析能力先得到 rawText。
         if (!StringUtils.hasText(resume.getRawText())) {
             resume = jobResumeService.parseResumeText(userId, resumeId);
         }
 
-        // 3. 解析失败或没有有效文本时，不继续评分。
+        // 3. 没有有效文本就不能评分，因为 V2 必须基于简历原文，不允许凭空编造。
         if (!StringUtils.hasText(resume.getRawText()) || STATUS_PARSE_FAILED.equals(resume.getStatus())) {
-            throw new BizException("当前简历没有可用的解析文本，请先上传可复制文字的 PDF、DOC 或 DOCX 简历");
+            throw new BizException("当前简历没有可用的解析文本，请先上传可复制文字的 PDF、DOC 或 DOCX 简历。");
         }
 
-        // 4. 执行规则评分，得到各维度分数和问题建议。
-        ResumeRuleScore ruleScore = calculateRuleScore(resume.getRawText(), targetPosition);
+        // 4. 执行 V2 评分: 规则算分 + LLM 补充解释 + 分数校验合并。
+        ResumeScoreRuleEngine.RuleScoreResult scoreResult = calculateV2Score(resume.getRawText(), targetPosition);
 
-        // 5. 保存评分记录。
+        // 5. 保存评分记录。老字段继续写入，完整 V2 结构存 score_json。
         Date now = new Date();
         JobResumeScoreRecord record = new JobResumeScoreRecord();
         record.setUserId(userId);
         record.setResumeId(resumeId);
         record.setTargetPosition(trimToNull(targetPosition));
 
-        record.setTotalScore(ruleScore.totalScore());
-        record.setBasicInfoScore(ruleScore.basicInfoScore());
-        record.setEducationScore(ruleScore.educationScore());
-        record.setSkillScore(ruleScore.skillScore());
-        record.setProjectScore(ruleScore.projectScore());
-        record.setExperienceScore(ruleScore.experienceScore());
-        record.setExpressionScore(ruleScore.expressionScore());
+        ResumeScoreRuleEngine.ScoreBreakdown breakdown = scoreResult.getScoreBreakdown();
+        record.setTotalScore(toDecimal(scoreResult.getOverallScore()));
+        record.setBasicInfoScore(toDecimal(breakdown.getBasicInfoScore()));
+        record.setEducationScore(toDecimal(breakdown.getEducationScore()));
+        record.setSkillScore(toDecimal(breakdown.getSkillsScore()));
+        record.setProjectScore(toDecimal(breakdown.getProjectExperienceScore()));
+        record.setExperienceScore(toDecimal(breakdown.getWorkExperienceScore()));
+        record.setExpressionScore(toDecimal(breakdown.getFormatScore()));
 
-        record.setAdvantage(joinLines(ruleScore.advantages()));
-        record.setProblem(joinLines(ruleScore.problems()));
-        record.setSuggestion(joinLines(ruleScore.suggestions()));
-        record.setScoreJson(toJson(ruleScore));
+        record.setAdvantage(joinLines(scoreResult.getStrengths()));
+        record.setProblem(joinLines(buildLegacyProblems(scoreResult)));
+        record.setSuggestion(joinLines(scoreResult.getImprovementSuggestions()));
+        record.setScoreJson(toJson(scoreResult));
 
         record.setIsDeleted(NOT_DELETED);
         record.setCreateTime(now);
         record.setUpdateTime(now);
         save(record);
 
-        // 6. 同步更新 resume 表上的 score 字段，方便简历列表直接展示总分。
-        resume.setScore(ruleScore.totalScore());
+        // 6. 同步更新 resume 表上的 score 和状态，方便简历列表直接展示最近总分。
+        resume.setScore(toDecimal(scoreResult.getOverallScore()));
         resume.setStatus(STATUS_SCORED);
         resume.setUpdateTime(now);
         jobResumeService.updateById(resume);
@@ -148,7 +156,7 @@ public class JobResumeScoreServiceImpl
     }
 
     /**
-     * 查询最近一次评分记录。
+     * 查询当前用户某份简历最近一次评分记录。
      */
     @Override
     public ResumeScoreVO getLatestScore(Long userId, Long resumeId) {
@@ -163,401 +171,233 @@ public class JobResumeScoreServiceImpl
     }
 
     /**
-     * 核心规则评分逻辑。
+     * V2 核心评分流程。
      *
-     * @param rawText 简历解析文本
-     * @param targetPosition 目标岗位
-     * @return 规则评分结果
+     * @param rawText 简历原文
+     * @param targetPosition 求职方向，可为空
+     * @return 合并后的最终评分结果
      */
-    private ResumeRuleScore calculateRuleScore(String rawText, String targetPosition) {
-        String text = normalizeText(rawText);
+    private ResumeScoreRuleEngine.RuleScoreResult calculateV2Score(String rawText, String targetPosition) {
+        // 1. 规则引擎先产出稳定分数和兜底解释。
+        ResumeScoreRuleEngine.RuleScoreResult ruleScore = resumeScoreRuleEngine.calculate(rawText, targetPosition);
 
-        BigDecimal basicInfoScore = scoreBasicInfo(text);
-        BigDecimal educationScore = scoreEducation(text);
-        BigDecimal skillScore = scoreSkill(text);
-        BigDecimal projectScore = scoreProject(text);
-        BigDecimal experienceScore = scoreExperience(text);
-        BigDecimal expressionScore = scoreExpression(text);
+        // 2. 如果当前环境没有注册 ResumeScoreAssistant，则直接返回规则结果，便于测试和本地离线运行。
+        ResumeScoreAssistant assistant = resumeScoreAssistantProvider.getIfAvailable();
+        if (assistant == null) {
+            ruleScore.setLlmStatus("SKIPPED");
+            ruleScore.setLlmError("未注册 ResumeScoreAssistant，已使用规则评分兜底。");
+            return ruleScore;
+        }
 
-        BigDecimal totalScore = basicInfoScore
-                .add(educationScore)
-                .add(skillScore)
-                .add(projectScore)
-                .add(experienceScore)
-                .add(expressionScore)
-                .setScale(2, RoundingMode.HALF_UP);
+        try {
+            // 3. 大模型只负责补充解释，不负责最终定分。
+            String prompt = buildLlmPrompt(rawText, targetPosition, ruleScore);
+            String response = callAssistantWithTimeout(assistant, prompt);
+            ResumeScoreRuleEngine.RuleScoreResult llmResult = parseLlmResult(response);
+            ResumeScoreRuleEngine.RuleScoreResult mergedResult = mergeLlmExplanation(ruleScore, llmResult);
+            mergedResult.setLlmStatus("SUCCESS");
+            mergedResult.setLlmError(null);
+            return mergedResult;
+        } catch (Exception exception) {
+            /*
+             * 4. 模型调用失败时不能影响用户评分。
+             *    这里记录失败原因到 score_json，前端仍能看到规则评分和本地建议。
+             */
+            ruleScore.setLlmStatus("FAILED");
+            ruleScore.setLlmError(shortMessage(exception));
+            return ruleScore;
+        }
+    }
 
-        List<String> advantages = buildAdvantages(
-                basicInfoScore,
-                educationScore,
-                skillScore,
-                projectScore,
-                experienceScore,
-                expressionScore,
-                targetPosition
+    /**
+     * 带超时调用简历评分大模型。
+     * 说明:
+     * 1. 火山方舟或其他 OpenAI 兼容接口偶尔会出现 Request cancelled / timeout。
+     * 2. 如果直接在 HTTP 请求线程里等待模型，前端“重新评分”会变成失败。
+     * 3. 这里把模型调用放到独立线程，并设置短超时；超时后抛出异常，外层会保存规则评分兜底。
+     */
+    private String callAssistantWithTimeout(ResumeScoreAssistant assistant, String prompt) throws Exception {
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(
+                () -> assistant.analyze(prompt),
+                resumeScoreLlmExecutor
         );
 
-        List<String> problems = buildProblems(
-                basicInfoScore,
-                educationScore,
-                skillScore,
-                projectScore,
-                experienceScore,
-                expressionScore
+        try {
+            return future.get(LLM_ANALYSIS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException exception) {
+            future.cancel(true);
+            throw new IllegalStateException("AI 简历点评超过 " + LLM_ANALYSIS_TIMEOUT_SECONDS + " 秒未返回，已使用规则评分兜底。", exception);
+        } catch (InterruptedException exception) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("AI 简历点评线程被中断，已使用规则评分兜底。", exception);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof Exception actualException) {
+                throw actualException;
+            }
+            throw new IllegalStateException("AI 简历点评调用失败，已使用规则评分兜底。", cause);
+        }
+    }
+
+    /**
+     * 构造给大模型的 Prompt。
+     * 说明: Prompt 中同时提供规则评分结果和简历原文，让模型在不改分的前提下补充证据化分析。
+     */
+    private String buildLlmPrompt(String rawText, String targetPosition, ResumeScoreRuleEngine.RuleScoreResult ruleScore) {
+        return """
+                请基于下面的规则评分结果和简历原文，输出符合系统提示词要求的 JSON。
+                
+                重要约束:
+                1. 你必须保留规则评分中的 overallScore 和 scoreBreakdown，不能改分。
+                2. 你可以优化 dimensions.reason、issues、suggestions。
+                3. strengths、weaknesses、riskPoints、improvementSuggestions 必须基于简历原文，不允许编造。
+                4. 如果某项没有证据，请写“简历中未找到相关证据”。
+                
+                用户填写的求职方向:
+                %s
+                
+                规则评分结果:
+                %s
+                
+                简历原文:
+                %s
+                """.formatted(
+                StringUtils.hasText(targetPosition) ? targetPosition.trim() : "未填写",
+                toJson(ruleScore),
+                truncate(rawText, LLM_RESUME_TEXT_LIMIT)
         );
-
-        List<String> suggestions = buildSuggestions(
-                skillScore,
-                projectScore,
-                experienceScore,
-                expressionScore,
-                targetPosition
-        );
-
-        return new ResumeRuleScore(
-                totalScore,
-                basicInfoScore,
-                educationScore,
-                skillScore,
-                projectScore,
-                experienceScore,
-                expressionScore,
-                advantages,
-                problems,
-                suggestions
-        );
     }
 
     /**
-     * 基础信息评分，满分10。
+     * 解析大模型返回的 JSON。
      */
-    private BigDecimal scoreBasicInfo(String text) {
-        double score = 0;
-
-        // 手机号命中，加3分。
-        if (text.matches("(?s).*1[3-9]\\d{9}.*")) {
-            score += 3;
-        }
-
-        // 邮箱命中，加3分。
-        if (text.matches("(?s).*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}.*")) {
-            score += 3;
-        }
-
-        // 求职意向或目标岗位命中，加2分。
-        if (containsAny(text, List.of("求职意向", "应聘岗位", "目标岗位", "期望岗位", "Java后端", "后端开发"))) {
-            score += 2;
-        }
-
-        // GitHub、博客、作品集等加2分。
-        if (containsAny(text, List.of("GitHub", "Gitee", "博客", "Blog", "作品", "个人网站", "开源"))) {
-            score += 2;
-        }
-
-        return decimal(Math.min(score, 10));
+    private ResumeScoreRuleEngine.RuleScoreResult parseLlmResult(String response) throws Exception {
+        String json = extractJson(response);
+        return objectMapper.readValue(json, ResumeScoreRuleEngine.RuleScoreResult.class);
     }
 
     /**
-     * 教育背景评分，满分10。
+     * 从模型响应中提取 JSON 对象。
+     * 说明: 有些模型会错误包一层 ```json 代码块，这里做兼容清洗。
      */
-    private BigDecimal scoreEducation(String text) {
-        int hitCount = countKeywordHits(text, EDUCATION_KEYWORDS);
-        double score = Math.min(hitCount * 2.0, 8.0);
-
-        // 如果出现明确时间段，说明教育经历更完整。
-        if (text.matches("(?s).*20\\d{2}.*20\\d{2}.*")) {
-            score += 2;
+    private String extractJson(String response) {
+        if (!StringUtils.hasText(response)) {
+            throw new IllegalArgumentException("模型未返回内容");
         }
 
-        return decimal(Math.min(score, 10));
+        String cleaned = response.trim();
+        int start = cleaned.indexOf('{');
+        int end = cleaned.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new IllegalArgumentException("模型未返回合法 JSON: " + cleaned);
+        }
+        return cleaned.substring(start, end + 1);
     }
 
     /**
-     * 技能栈评分，满分20。
+     * 合并 LLM 解释。
+     * 说明: 这里故意保留 ruleScore 的所有分数，只接受 LLM 的文案字段，避免模型改分。
      */
-    private BigDecimal scoreSkill(String text) {
-        int hitCount = countKeywordHits(text, TECH_KEYWORDS);
-
-        // 每命中一个技术关键词给2分，最多18分。
-        double score = Math.min(hitCount * 2.0, 18.0);
-
-        // 如果技能描述有熟练程度，说明不是简单堆关键词。
-        if (containsAny(text, List.of("熟悉", "掌握", "了解", "精通", "使用", "具备"))) {
-            score += 2;
-        }
-
-        return decimal(Math.min(score, 20));
-    }
-
-    /**
-     * 项目经历评分，满分35。
-     */
-    private BigDecimal scoreProject(String text) {
-        double score = 0;
-
-        // 项目相关关键词越多，项目经历越完整。
-        int projectHitCount = countKeywordHits(text, PROJECT_KEYWORDS);
-        score += Math.min(projectHitCount * 1.5, 12);
-
-        // 技术关键词出现在项目文本中，说明技能不是只写在技能栏。
-        int techHitCount = countKeywordHits(text, TECH_KEYWORDS);
-        score += Math.min(techHitCount * 1.2, 10);
-
-        // 出现“负责/设计/实现/优化”等个人贡献表达。
-        if (containsAny(text, List.of("负责", "设计", "实现", "开发", "优化", "封装", "重构", "排查"))) {
-            score += 5;
-        }
-
-        // 出现量化结果，说明项目描述更有说服力。
-        int metricHitCount = countKeywordHits(text, METRIC_KEYWORDS);
-        score += Math.min(metricHitCount * 2.0, 5);
-
-        // 出现权限、缓存、消息队列、高并发、部署等工程化内容，加分。
-        if (containsAny(text, List.of("权限", "缓存", "消息队列", "高并发", "部署", "日志", "监控", "限流", "事务"))) {
-            score += 3;
-        }
-
-        return decimal(Math.min(score, 35));
-    }
-
-    /**
-     * 实习/工作经历评分，满分15。
-     */
-    private BigDecimal scoreExperience(String text) {
-        double score = 0;
-
-        if (containsAny(text, List.of("实习", "工作经历", "任职", "公司", "岗位", "职责"))) {
-            score += 8;
-        }
-
-        if (containsAny(text, List.of("参与", "负责", "独立", "协作", "上线", "交付", "维护"))) {
-            score += 4;
-        }
-
-        if (text.matches("(?s).*20\\d{2}[./年-].*20\\d{2}.*")) {
-            score += 3;
-        }
-
-        return decimal(Math.min(score, 15));
-    }
-
-    /**
-     * 表达质量评分，满分10。
-     */
-    private BigDecimal scoreExpression(String text) {
-        double score = 10;
-
-        // 文本过短，一般说明简历内容不足或解析效果不好。
-        if (text.length() < 800) {
-            score -= 3;
-        }
-
-        // 文本过长，可能存在无关内容或格式混乱。
-        if (text.length() > 20000) {
-            score -= 2;
-        }
-
-        // 出现明显解析失败残留或乱码，扣分。
-        if (containsAny(text, List.of("解析失败", "乱码", "����", "image1.png", "word/media"))) {
-            score -= 4;
-        }
-
-        // 大段没有换行会影响阅读。
-        if (!text.contains("\n") && text.length() > 1000) {
-            score -= 2;
-        }
-
-        return decimal(Math.max(score, 0));
-    }
-
-    /**
-     * 生成优势列表。
-     */
-    private List<String> buildAdvantages(
-            BigDecimal basicInfoScore,
-            BigDecimal educationScore,
-            BigDecimal skillScore,
-            BigDecimal projectScore,
-            BigDecimal experienceScore,
-            BigDecimal expressionScore,
-            String targetPosition
+    private ResumeScoreRuleEngine.RuleScoreResult mergeLlmExplanation(
+            ResumeScoreRuleEngine.RuleScoreResult ruleScore,
+            ResumeScoreRuleEngine.RuleScoreResult llmResult
     ) {
-        List<String> advantages = new ArrayList<>();
+        ruleScore.setDimensions(mergeDimensions(ruleScore.getDimensions(), llmResult.getDimensions()));
+        ruleScore.setStrengths(preferLlmList(llmResult.getStrengths(), ruleScore.getStrengths()));
+        ruleScore.setWeaknesses(preferLlmList(llmResult.getWeaknesses(), ruleScore.getWeaknesses()));
+        ruleScore.setRiskPoints(preferLlmList(llmResult.getRiskPoints(), ruleScore.getRiskPoints()));
+        ruleScore.setImprovementSuggestions(preferLlmList(llmResult.getImprovementSuggestions(), ruleScore.getImprovementSuggestions()));
 
-        if (skillScore.doubleValue() >= 14) {
-            advantages.add("技能栈覆盖较完整，具备较好的岗位基础匹配能力。");
+        if (StringUtils.hasText(llmResult.getSummary())) {
+            ruleScore.setSummary(llmResult.getSummary().trim());
         }
 
-        if (projectScore.doubleValue() >= 24) {
-            advantages.add("项目经历较丰富，能够体现一定的业务开发和工程实践能力。");
+        /*
+         * 强制还原规则分数。
+         * 即使模型返回了不同分数，也不允许覆盖 ruleScore 的 final score。
+         */
+        ruleScore.setScoreVersion("V2");
+        ruleScore.setScoringMode("RULE_WITH_LLM_EXPLANATION");
+        ruleScore.setLevel(resolveLevel(ruleScore.getOverallScore()));
+        return ruleScore;
+    }
+
+    private List<ResumeScoreRuleEngine.ScoreDimension> mergeDimensions(
+            List<ResumeScoreRuleEngine.ScoreDimension> ruleDimensions,
+            List<ResumeScoreRuleEngine.ScoreDimension> llmDimensions
+    ) {
+        if (llmDimensions == null || llmDimensions.isEmpty()) {
+            return ruleDimensions;
         }
 
-        if (experienceScore.doubleValue() >= 10) {
-            advantages.add("实习或工作经历描述较完整，具备真实业务场景经验。");
+        Map<String, ResumeScoreRuleEngine.ScoreDimension> llmMap = new LinkedHashMap<>();
+        for (ResumeScoreRuleEngine.ScoreDimension dimension : llmDimensions) {
+            if (StringUtils.hasText(dimension.getDimensionName())) {
+                llmMap.put(dimension.getDimensionName(), dimension);
+            }
         }
 
-        if (expressionScore.doubleValue() >= 8) {
-            advantages.add("简历整体表达较清晰，结构和可读性较好。");
-        }
+        List<ResumeScoreRuleEngine.ScoreDimension> merged = new ArrayList<>();
+        for (ResumeScoreRuleEngine.ScoreDimension ruleDimension : ruleDimensions) {
+            ResumeScoreRuleEngine.ScoreDimension llmDimension = llmMap.get(ruleDimension.getDimensionName());
+            if (llmDimension == null) {
+                merged.add(ruleDimension);
+                continue;
+            }
 
-        if (StringUtils.hasText(targetPosition)) {
-            advantages.add("本次评分已结合目标岗位「" + targetPosition.trim() + "」进行建议归纳。");
+            ResumeScoreRuleEngine.ScoreDimension dimension = new ResumeScoreRuleEngine.ScoreDimension();
+            dimension.setDimensionName(ruleDimension.getDimensionName());
+            dimension.setScore(ruleDimension.getScore());
+            dimension.setMaxScore(ruleDimension.getMaxScore());
+            dimension.setReason(StringUtils.hasText(llmDimension.getReason()) ? llmDimension.getReason().trim() : ruleDimension.getReason());
+            dimension.setIssues(preferLlmList(llmDimension.getIssues(), ruleDimension.getIssues()));
+            dimension.setSuggestions(preferLlmList(llmDimension.getSuggestions(), ruleDimension.getSuggestions()));
+            merged.add(dimension);
         }
-
-        if (advantages.isEmpty()) {
-            advantages.add("简历已经具备基础内容，可以在项目经历和技能证明上继续增强。");
-        }
-
-        return advantages;
+        return merged;
     }
 
     /**
-     * 生成问题列表。
+     * 兼容旧字段 problem。
+     * 说明: V2 已经拆成 weaknesses 和 riskPoints，旧字段用两者合并，旧前端也能看到问题。
      */
-    private List<String> buildProblems(
-            BigDecimal basicInfoScore,
-            BigDecimal educationScore,
-            BigDecimal skillScore,
-            BigDecimal projectScore,
-            BigDecimal experienceScore,
-            BigDecimal expressionScore
-    ) {
+    private List<String> buildLegacyProblems(ResumeScoreRuleEngine.RuleScoreResult scoreResult) {
         List<String> problems = new ArrayList<>();
-
-        if (basicInfoScore.doubleValue() < 7) {
-            problems.add("基础信息不够完整，建议补充联系方式、求职意向、GitHub或个人作品链接。");
-        }
-
-        if (educationScore.doubleValue() < 6) {
-            problems.add("教育背景信息不够完整，建议补充学校、专业、学历、时间和相关课程。");
-        }
-
-        if (skillScore.doubleValue() < 12) {
-            problems.add("技能栈覆盖不足或表达较弱，建议补充核心技术并体现掌握程度。");
-        }
-
-        if (projectScore.doubleValue() < 20) {
-            problems.add("项目经历说服力不足，缺少技术难点、个人贡献或量化结果。");
-        }
-
-        if (experienceScore.doubleValue() < 8) {
-            problems.add("实习或工作经历较弱，如果没有正式经历，应进一步强化项目经历。");
-        }
-
-        if (expressionScore.doubleValue() < 7) {
-            problems.add("简历表达或格式存在优化空间，建议减少大段描述并突出重点。");
-        }
-
-        return problems;
+        problems.addAll(nonNullList(scoreResult.getWeaknesses()));
+        problems.addAll(nonNullList(scoreResult.getRiskPoints()));
+        return problems.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .limit(8)
+                .toList();
     }
 
-    /**
-     * 生成优化建议列表。
-     */
-    private List<String> buildSuggestions(
-            BigDecimal skillScore,
-            BigDecimal projectScore,
-            BigDecimal experienceScore,
-            BigDecimal expressionScore,
-            String targetPosition
-    ) {
-        List<String> suggestions = new ArrayList<>();
-
-        if (StringUtils.hasText(targetPosition)) {
-            suggestions.add("围绕目标岗位「" + targetPosition.trim() + "」重新组织技能栈，把最相关的技术放在前面。");
-        }
-
-        if (skillScore.doubleValue() < 16) {
-            suggestions.add("技能栏不要只堆关键词，建议按“后端框架 / 数据库 / 缓存 / 中间件 / 部署工具”分类展示。");
-        }
-
-        if (projectScore.doubleValue() < 28) {
-            suggestions.add("项目经历建议采用“背景 + 技术方案 + 个人负责内容 + 最终效果”的结构描述。");
-            suggestions.add("尽量补充量化指标，例如接口响应时间、并发量、数据量、性能提升比例等。");
-        }
-
-        if (experienceScore.doubleValue() < 10) {
-            suggestions.add("如果缺少实习经历，可以把课程设计、个人项目或开源项目写得更工程化。");
-        }
-
-        if (expressionScore.doubleValue() < 8) {
-            suggestions.add("控制每段项目描述长度，避免大段文字堆积，使用短句和项目符号提升可读性。");
-        }
-
-        if (suggestions.isEmpty()) {
-            suggestions.add("当前简历整体质量较好，后续可以针对不同岗位微调项目关键词和技能顺序。");
-        }
-
-        return suggestions;
+    private List<String> preferLlmList(List<String> llmList, List<String> fallbackList) {
+        List<String> cleaned = nonNullList(llmList).stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        return cleaned.isEmpty() ? nonNullList(fallbackList) : cleaned;
     }
 
-    /**
-     * 统计关键词命中数量。
-     */
-    private int countKeywordHits(String text, List<String> keywords) {
-        int count = 0;
-        String lowerText = text.toLowerCase(Locale.ROOT);
-
-        for (String keyword : keywords) {
-            if (lowerText.contains(keyword.toLowerCase(Locale.ROOT))) {
-                count++;
-            }
-        }
-
-        return count;
+    private List<String> nonNullList(List<String> list) {
+        return list == null ? List.of() : list;
     }
 
-    /**
-     * 判断文本是否包含任意关键词。
-     */
-    private boolean containsAny(String text, List<String> keywords) {
-        String lowerText = text.toLowerCase(Locale.ROOT);
-
-        for (String keyword : keywords) {
-            if (lowerText.contains(keyword.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-
-        return false;
+    private BigDecimal toDecimal(Integer value) {
+        return BigDecimal.valueOf(value == null ? 0 : value);
     }
 
-    /**
-     * 清洗文本。
-     */
-    private String normalizeText(String text) {
-        if (text == null) {
-            return "";
-        }
-
-        return text
-                .replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .replace('\t', ' ')
-                .trim();
-    }
-
-    /**
-     * 转 BigDecimal 并保留两位小数。
-     */
-    private BigDecimal decimal(double value) {
-        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
-    }
-
-    /**
-     * 多行文本拼接。
-     */
     private String joinLines(List<String> lines) {
         if (lines == null || lines.isEmpty()) {
             return "";
         }
-
         return String.join("\n", lines);
     }
 
-    /**
-     * 字符串清洗。
-     */
     private String trimToNull(String value) {
         if (!StringUtils.hasText(value)) {
             return null;
@@ -565,10 +405,6 @@ public class JobResumeScoreServiceImpl
         return value.trim();
     }
 
-    /**
-     * 对象转 JSON。
-     * 说明：转失败不影响主流程，只保存空JSON。
-     */
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -577,20 +413,59 @@ public class JobResumeScoreServiceImpl
         }
     }
 
+    private String truncate(String text, int maxLength) {
+        if (text == null || text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "\n\n[后续内容因长度限制已截断]";
+    }
+
+    private String shortMessage(Exception exception) {
+        String message = exception.getMessage();
+        if (!StringUtils.hasText(message)) {
+            return exception.getClass().getSimpleName();
+        }
+        return message.length() <= 300 ? message : message.substring(0, 300);
+    }
+
+    private String resolveLevel(Integer score) {
+        int value = score == null ? 0 : score;
+        if (value >= 90) {
+            return "优秀";
+        }
+        if (value >= 80) {
+            return "良好";
+        }
+        if (value >= 70) {
+            return "一般";
+        }
+        if (value >= 60) {
+            return "较弱";
+        }
+        return "需要重写";
+    }
+
     /**
-     * 规则评分内部结果。
+     * 应用关闭时释放简历评分 LLM 线程池。
      */
-    private record ResumeRuleScore(
-            BigDecimal totalScore,
-            BigDecimal basicInfoScore,
-            BigDecimal educationScore,
-            BigDecimal skillScore,
-            BigDecimal projectScore,
-            BigDecimal experienceScore,
-            BigDecimal expressionScore,
-            List<String> advantages,
-            List<String> problems,
-            List<String> suggestions
-    ) {
+    @PreDestroy
+    public void destroy() {
+        resumeScoreLlmExecutor.shutdownNow();
+    }
+
+    /**
+     * 简历评分 LLM 线程工厂。
+     * 说明: 线程名带业务含义，后续看日志或线程 dump 时更容易定位。
+     */
+    private static class ResumeScoreThreadFactory implements ThreadFactory {
+
+        private final AtomicInteger index = new AtomicInteger(1);
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "resume-score-llm-" + index.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 }

@@ -33,17 +33,18 @@ public class ResumeAnalyzeTool {
      * 分析简历。
      *
      * @param resumeId 简历ID
-     * @param targetPosition 目标岗位
+     * @param targetPosition 求职方向
      * @return JSON 字符串结果
      */
     @Tool("""
-    根据简历ID和目标岗位，对当前登录用户的简历进行整体评分，返回总分、维度分、优势、问题和优化建议
-        当用户要求“分析简历”“简历分析”“优化简历”“简历问题”“简历评分”时使用本工具。
-        resumeId 必须由用户输入或前端上下文提供，不能编造。
+        对当前登录用户的指定简历进行 AI 简历质量评分 V2。
+        这个工具不是岗位匹配评分，而是评价简历本身质量，返回总分、八个维度分、优势、不足、风险点、优化建议和总结。
+        当用户要求“分析简历”“简历评分”“优化简历”“看看简历问题”“简历质量怎么样”时使用本工具。
+        resumeId 必须由用户输入或由前端上下文提供，不能编造；targetPosition 可以为空，只表示用户的求职方向，不表示具体 JD。
     """)
     public String analyzeResume(
             @P("简历ID，例如 1") Long resumeId,
-            @P("目标岗位名称，可以为空，例如 Java 后端开发") String targetPosition
+            @P("求职方向，可以为空，例如 Java 后端开发、AI Agent 开发") String targetPosition
     ) {
         long start = System.currentTimeMillis();
 

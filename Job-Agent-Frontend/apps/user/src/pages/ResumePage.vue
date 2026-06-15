@@ -331,11 +331,11 @@
 
         <div v-if="scoreResumeTarget" class="score-input-card">
           <label class="resume-field">
-            <span>目标岗位</span>
+            <span>求职方向</span>
             <input
               v-model.trim="scoreTargetPosition"
               maxlength="128"
-              placeholder="例如 Java 后端开发，可不填"
+              placeholder="例如 Java 后端开发、AI Agent 开发，可不填"
             />
           </label>
 
@@ -360,7 +360,7 @@
           </div>
 
           <p class="score-tip">
-            第一版评分基于简历解析文本进行规则化评分，后续可以接入 LLM 输出更强的诊断建议。
+            V2 评分会先用规则引擎稳定计算八个维度，再由大模型补充证据化分析和可执行优化建议。
           </p>
         </div>
 
@@ -374,60 +374,61 @@
 
         <div v-if="scoreResult" class="score-result">
           <div class="total-score-card">
-            <div class="score-number">{{ scoreResult.totalScore }}</div>
+            <div class="score-number">{{ scoreResult.overallScore ?? scoreResult.totalScore }}</div>
             <div class="score-meta">
               <strong>{{ scoreResult.level }}</strong>
               <span>评分时间：{{ scoreResult.createTime || "-" }}</span>
+              <small>{{ scoreResult.scoreVersion || "V1" }} · {{ formatLlmStatus(scoreResult.llmStatus) }}</small>
             </div>
           </div>
 
           <div class="dimension-grid">
-            <div class="dimension-card">
-              <span>基础信息</span>
-              <strong>{{ scoreResult.basicInfoScore }}/10</strong>
+            <div
+              v-for="dimension in normalizedScoreDimensions"
+              :key="dimension.dimensionName"
+              class="dimension-card dimension-card-detail"
+            >
+              <div>
+                <span>{{ dimension.dimensionName }}</span>
+                <p v-if="dimension.reason">{{ dimension.reason }}</p>
+              </div>
+              <strong>{{ dimension.score }}/{{ dimension.maxScore }}</strong>
             </div>
-            <div class="dimension-card">
-              <span>教育背景</span>
-              <strong>{{ scoreResult.educationScore }}/10</strong>
-            </div>
-            <div class="dimension-card">
-              <span>技能栈</span>
-              <strong>{{ scoreResult.skillScore }}/20</strong>
-            </div>
-            <div class="dimension-card">
-              <span>项目经历</span>
-              <strong>{{ scoreResult.projectScore }}/35</strong>
-            </div>
-            <div class="dimension-card">
-              <span>工作经历</span>
-              <strong>{{ scoreResult.experienceScore }}/15</strong>
-            </div>
-            <div class="dimension-card">
-              <span>表达质量</span>
-              <strong>{{ scoreResult.expressionScore }}/10</strong>
-            </div>
+          </div>
+
+          <div v-if="scoreResult.summary" class="analysis-card summary">
+            <h3>整体总结</h3>
+            <p>{{ scoreResult.summary }}</p>
           </div>
 
           <div class="analysis-card">
             <h3>简历优势</h3>
-            <ul v-if="scoreResult.advantages?.length">
-              <li v-for="item in scoreResult.advantages" :key="item">{{ item }}</li>
+            <ul v-if="scoreStrengths.length">
+              <li v-for="item in scoreStrengths" :key="item">{{ item }}</li>
             </ul>
             <p v-else>暂无优势分析。</p>
           </div>
 
           <div class="analysis-card warning">
             <h3>存在问题</h3>
-            <ul v-if="scoreResult.problems?.length">
-              <li v-for="item in scoreResult.problems" :key="item">{{ item }}</li>
+            <ul v-if="scoreWeaknesses.length">
+              <li v-for="item in scoreWeaknesses" :key="item">{{ item }}</li>
             </ul>
             <p v-else>暂无明显问题。</p>
           </div>
 
+          <div class="analysis-card risk">
+            <h3>风险点</h3>
+            <ul v-if="scoreRisks.length">
+              <li v-for="item in scoreRisks" :key="item">{{ item }}</li>
+            </ul>
+            <p v-else>暂无明显高风险点。</p>
+          </div>
+
           <div class="analysis-card suggestion">
             <h3>优化建议</h3>
-            <ul v-if="scoreResult.suggestions?.length">
-              <li v-for="item in scoreResult.suggestions" :key="item">{{ item }}</li>
+            <ul v-if="scoreSuggestions.length">
+              <li v-for="item in scoreSuggestions" :key="item">{{ item }}</li>
             </ul>
             <p v-else>暂无优化建议。</p>
           </div>
@@ -452,7 +453,7 @@ import {
   updateResumeName,
   uploadResume
 } from "../api/resume";
-import type { ResumeInfo, ResumeScoreInfo } from "../api/types";
+import type { ResumeInfo, ResumeScoreDimensionInfo, ResumeScoreInfo } from "../api/types";
 import { useAuthStore } from "../stores/auth";
 
 const authStore = useAuthStore();
@@ -493,6 +494,56 @@ const isPdfPreview = computed(() => {
     && (previewResume.value?.fileType || "").toUpperCase() === "PDF";
 });
 
+const normalizedScoreDimensions = computed<ResumeScoreDimensionInfo[]>(() => {
+  const score = scoreResult.value;
+
+  if (!score) {
+    return [];
+  }
+
+  if (score.dimensions?.length) {
+    return score.dimensions;
+  }
+
+  if (score.scoreBreakdown) {
+    return [
+      buildDimension("基础信息完整性", score.scoreBreakdown.basicInfoScore, 10),
+      buildDimension("求职目标清晰度", score.scoreBreakdown.careerGoalScore, 10),
+      buildDimension("教育背景", score.scoreBreakdown.educationScore, 10),
+      buildDimension("技能结构", score.scoreBreakdown.skillsScore, 15),
+      buildDimension("项目经历质量", score.scoreBreakdown.projectExperienceScore, 25),
+      buildDimension("实习 / 工作经历", score.scoreBreakdown.workExperienceScore, 15),
+      buildDimension("成果量化程度", score.scoreBreakdown.quantifiedImpactScore, 10),
+      buildDimension("表达与排版", score.scoreBreakdown.formatScore, 5)
+    ];
+  }
+
+  return [
+    buildDimension("基础信息", score.basicInfoScore, 10),
+    buildDimension("教育背景", score.educationScore, 10),
+    buildDimension("技能栈", score.skillScore, 20),
+    buildDimension("项目经历", score.projectScore, 35),
+    buildDimension("工作经历", score.experienceScore, 15),
+    buildDimension("表达质量", score.expressionScore, 10)
+  ];
+});
+
+const scoreStrengths = computed(() => {
+  return normalizeScoreList(scoreResult.value?.strengths, scoreResult.value?.advantages);
+});
+
+const scoreWeaknesses = computed(() => {
+  return normalizeScoreList(scoreResult.value?.weaknesses, scoreResult.value?.problems);
+});
+
+const scoreRisks = computed(() => {
+  return normalizeScoreList(scoreResult.value?.riskPoints);
+});
+
+const scoreSuggestions = computed(() => {
+  return normalizeScoreList(scoreResult.value?.improvementSuggestions, scoreResult.value?.suggestions);
+});
+
 onMounted(async () => {
   await authStore.loadMe();
   if (authStore.isLogin) {
@@ -503,6 +554,37 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   revokePreviewUrl();
 });
+
+function buildDimension(dimensionName: string, score = 0, maxScore = 0): ResumeScoreDimensionInfo {
+  return {
+    dimensionName,
+    score,
+    maxScore,
+    reason: "历史评分记录未保存该维度的详细解释。"
+  };
+}
+
+function normalizeScoreList(primary?: string[], fallback?: string[]) {
+  const source = primary?.length ? primary : fallback;
+
+  if (!source?.length) {
+    return [];
+  }
+
+  return source
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function formatLlmStatus(status?: string) {
+  const statusMap: Record<string, string> = {
+    SUCCESS: "AI 已参与点评",
+    FAILED: "规则评分兜底",
+    SKIPPED: "规则评分兜底"
+  };
+
+  return statusMap[status || ""] || "评分完成";
+}
 
 function openResumePicker() {
   if (!uploading.value) {
@@ -1075,6 +1157,12 @@ function downloadByTemporaryLink(blobUrl: string, filename: string) {
   font-size: 13px;
 }
 
+.score-meta small {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .dimension-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1097,6 +1185,27 @@ function downloadByTemporaryLink(blobUrl: string, filename: string) {
 
 .dimension-card strong {
   color: #111827;
+}
+
+.dimension-card-detail {
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 96px;
+}
+
+.dimension-card-detail div {
+  min-width: 0;
+}
+
+.dimension-card-detail p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dimension-card-detail strong {
+  flex-shrink: 0;
 }
 
 .analysis-card {
@@ -1130,6 +1239,16 @@ function downloadByTemporaryLink(blobUrl: string, filename: string) {
 .analysis-card.warning {
   border-color: #fed7aa;
   background: #fff7ed;
+}
+
+.analysis-card.summary {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.analysis-card.risk {
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 .analysis-card.suggestion {

@@ -16,7 +16,7 @@ public interface JobResumeScoreService extends IService<JobResumeScoreRecord> {
      *
      * @param userId 当前登录用户ID
      * @param resumeId 简历ID
-     * @param targetPosition 目标岗位，可为空
+     * @param targetPosition 求职方向，可为空
      * @return 返回评分结果VO
      */
     ResumeScoreVO scoreResume(Long userId, Long resumeId, String targetPosition);

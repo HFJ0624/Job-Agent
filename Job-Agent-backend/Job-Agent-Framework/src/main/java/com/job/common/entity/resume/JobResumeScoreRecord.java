@@ -44,12 +44,14 @@ public class JobResumeScoreRecord extends BaseEntity{
     private BigDecimal educationScore;
 
     /**
-     * 技能栈分，满分20。
+     * 技能结构分。
+     * 说明: V1 满分20，V2 满分15；完整满分信息以 scoreJson 中的 dimensions 为准。
      */
     private BigDecimal skillScore;
 
     /**
-     * 项目经历分，满分35。
+     * 项目经历分。
+     * 说明: V1 满分35，V2 满分25；完整满分信息以 scoreJson 中的 dimensions 为准。
      */
     private BigDecimal projectScore;
 
@@ -59,13 +61,14 @@ public class JobResumeScoreRecord extends BaseEntity{
     private BigDecimal experienceScore;
 
     /**
-     * 表达质量分，满分10。
+     * 表达与排版分。
+     * 说明: V1 满分10，V2 满分5；完整满分信息以 scoreJson 中的 dimensions 为准。
      */
     private BigDecimal expressionScore;
 
     /**
-     * 用户本次评分时填写的目标岗位。
-     * 第一版可以为空，后续可用于“面向Java后端岗位的简历评分”。
+     * 用户本次评分时填写的求职方向。
+     * 说明: V2 不是 JD 匹配评分，这个字段只用于判断简历主线是否清晰。
      */
     private String targetPosition;
 
@@ -86,7 +89,7 @@ public class JobResumeScoreRecord extends BaseEntity{
 
     /**
      * 完整评分JSON。
-     * 后续接入LLM后，可以把模型原始输出、评分细节、命中关键词都放进来。
+     * V2 会保存八维分数、维度解释、优势、不足、风险点、优化建议和 LLM 调用状态。
      */
     private String scoreJson;
 }

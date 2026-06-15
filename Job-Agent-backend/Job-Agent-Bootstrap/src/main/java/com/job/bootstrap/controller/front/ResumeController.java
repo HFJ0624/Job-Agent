@@ -200,7 +200,7 @@ public class ResumeController {
      * P表示参数描述：如果简历还没有解析文本，Service 会自动先调用解析逻辑。
      *
      * @param id 简历ID
-     * @param request 评分请求参数，可传目标岗位
+     * @param request 评分请求参数，可传求职方向
      * @return 返回简历评分结果
      */
     @PostMapping("/{id}/score")
@@ -211,7 +211,7 @@ public class ResumeController {
         // 1. 当前用户只能评分自己名下的简历。
         Long userId = StpUtil.getLoginIdAsLong();
 
-        // 2. request 允许为空，避免前端不传目标岗位时报错。
+        // 2. request 允许为空，避免前端不传求职方向时报错。
         String targetPosition = request == null ? null : request.getTargetPosition();
 
         // 3. 调用评分服务，生成评分记录并同步更新 resume.score。

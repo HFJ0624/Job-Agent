@@ -218,6 +218,26 @@ export interface JobMessageInfo {
 /**
  * 简历评分结果，对应后端 ResumeScoreVO。
  */
+export interface ResumeScoreBreakdownInfo {
+  basicInfoScore: number;
+  careerGoalScore: number;
+  educationScore: number;
+  skillsScore: number;
+  projectExperienceScore: number;
+  workExperienceScore: number;
+  quantifiedImpactScore: number;
+  formatScore: number;
+}
+
+export interface ResumeScoreDimensionInfo {
+  dimensionName: string;
+  score: number;
+  maxScore: number;
+  reason?: string;
+  issues?: string[];
+  suggestions?: string[];
+}
+
 export interface ResumeScoreInfo {
   id: number;
   resumeId: number;
@@ -238,6 +258,18 @@ export interface ResumeScoreInfo {
   advantages: string[];
   problems: string[];
   suggestions: string[];
+
+  scoreVersion?: string;
+  overallScore?: number;
+  scoreBreakdown?: ResumeScoreBreakdownInfo;
+  dimensions?: ResumeScoreDimensionInfo[];
+  strengths?: string[];
+  weaknesses?: string[];
+  riskPoints?: string[];
+  improvementSuggestions?: string[];
+  summary?: string;
+  llmStatus?: "SUCCESS" | "FAILED" | "SKIPPED" | string;
+  llmError?: string;
 
   createTime?: string;
 }

@@ -88,7 +88,7 @@
           <textarea
             v-model.trim="inputMessage"
             maxlength="2000"
-            placeholder="例如：帮我分析 resumeId=1 的简历，目标岗位是 Java 后端开发"
+            placeholder="例如：帮我分析 resumeId=1 的简历，求职方向是 Java 后端开发"
             @keydown.enter.exact.prevent="sendMessage"
           />
 
@@ -157,7 +157,7 @@ const messageListRef = ref<HTMLElement | null>(null);
  * 2. 后续可以再改成“默认简历”或“简历名称”。
  */
 const quickPrompts = [
-  "帮我分析 resumeId=1 的简历，目标岗位是 Java 后端开发",
+  "帮我分析 resumeId=1 的简历，求职方向是 Java 后端开发",
   "帮我分析 resumeId=1 和 jobId=1 的岗位匹配度",
   "帮我根据 resumeId=1 和 jobId=1 生成一段自然风格的 HR 打招呼语",
   "帮我找上海 Java 后端岗位，最低薪资 15000"

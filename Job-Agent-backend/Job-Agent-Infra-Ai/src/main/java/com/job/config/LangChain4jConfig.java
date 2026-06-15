@@ -32,7 +32,12 @@ public class LangChain4jConfig {
                 .baseUrl(properties.getBaseUrl())
                 .modelName(properties.getModelName())
                 .temperature(properties.getTemperature())
-                .timeout(Duration.ofSeconds(60))
+                /*
+                 * Web 请求场景下不要让模型调用阻塞太久。
+                 * 如果供应商网络抖动，业务层会做兜底；这里关闭 SDK 重试，避免一次点击等待多轮 60s 超时。
+                 */
+                .timeout(Duration.ofSeconds(20))
+                .maxRetries(0)
                 .build();
     }
 

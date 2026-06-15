@@ -3,7 +3,7 @@
     <div class="score-header">
       <div>
         <h3>AI 简历评分</h3>
-        <p>从基础信息、教育背景、技能栈、项目经历、工作经历和表达质量进行综合评分。</p>
+        <p>从八个维度评估简历质量，并输出优势、不足、风险点和可执行优化建议。</p>
       </div>
 
       <el-button
@@ -17,10 +17,10 @@
     </div>
 
     <el-form label-width="90px" class="score-form">
-      <el-form-item label="目标岗位">
+      <el-form-item label="求职方向">
         <el-input
           v-model="targetPosition"
-          placeholder="例如：Java 后端开发，可不填"
+          placeholder="例如：Java 后端开发、AI Agent 开发，可不填"
           clearable
         />
       </el-form-item>
@@ -33,7 +33,7 @@
 
     <div v-else class="score-result">
       <div class="total-score-card">
-        <div class="score-number">{{ scoreResult.totalScore }}</div>
+        <div class="score-number">{{ scoreResult.overallScore ?? scoreResult.totalScore }}</div>
         <div class="score-meta">
           <div class="score-level">{{ scoreResult.level }}</div>
           <div class="score-time">评分时间：{{ scoreResult.createTime || "-" }}</div>
@@ -41,62 +41,48 @@
       </div>
 
       <el-row :gutter="12" class="dimension-row">
-        <el-col :span="8">
+        <el-col
+          v-for="dimension in normalizedScoreDimensions"
+          :key="dimension.dimensionName"
+          :span="12"
+        >
           <div class="dimension-card">
-            <span>基础信息</span>
-            <strong>{{ scoreResult.basicInfoScore }}/10</strong>
-          </div>
-        </el-col>
-        <el-col :span="8">
-          <div class="dimension-card">
-            <span>教育背景</span>
-            <strong>{{ scoreResult.educationScore }}/10</strong>
-          </div>
-        </el-col>
-        <el-col :span="8">
-          <div class="dimension-card">
-            <span>技能栈</span>
-            <strong>{{ scoreResult.skillScore }}/20</strong>
-          </div>
-        </el-col>
-        <el-col :span="8">
-          <div class="dimension-card">
-            <span>项目经历</span>
-            <strong>{{ scoreResult.projectScore }}/35</strong>
-          </div>
-        </el-col>
-        <el-col :span="8">
-          <div class="dimension-card">
-            <span>工作经历</span>
-            <strong>{{ scoreResult.experienceScore }}/15</strong>
-          </div>
-        </el-col>
-        <el-col :span="8">
-          <div class="dimension-card">
-            <span>表达质量</span>
-            <strong>{{ scoreResult.expressionScore }}/10</strong>
+            <span>{{ dimension.dimensionName }}</span>
+            <strong>{{ dimension.score }}/{{ dimension.maxScore }}</strong>
           </div>
         </el-col>
       </el-row>
 
+      <el-card v-if="scoreResult.summary" class="analysis-card" shadow="never">
+        <template #header>整体总结</template>
+        <p>{{ scoreResult.summary }}</p>
+      </el-card>
+
       <el-card class="analysis-card" shadow="never">
         <template #header>简历优势</template>
         <ul>
-          <li v-for="item in scoreResult.advantages" :key="item">{{ item }}</li>
+          <li v-for="item in scoreStrengths" :key="item">{{ item }}</li>
         </ul>
       </el-card>
 
       <el-card class="analysis-card" shadow="never">
         <template #header>存在问题</template>
         <ul>
-          <li v-for="item in scoreResult.problems" :key="item">{{ item }}</li>
+          <li v-for="item in scoreWeaknesses" :key="item">{{ item }}</li>
+        </ul>
+      </el-card>
+
+      <el-card class="analysis-card" shadow="never">
+        <template #header>风险点</template>
+        <ul>
+          <li v-for="item in scoreRisks" :key="item">{{ item }}</li>
         </ul>
       </el-card>
 
       <el-card class="analysis-card" shadow="never">
         <template #header>优化建议</template>
         <ul>
-          <li v-for="item in scoreResult.suggestions" :key="item">{{ item }}</li>
+          <li v-for="item in scoreSuggestions" :key="item">{{ item }}</li>
         </ul>
       </el-card>
     </div>
@@ -104,10 +90,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { getLatestResumeScore, scoreResume } from "../api/resume";
-import type { ResumeInfo, ResumeScoreInfo } from "../api/types";
+import type { ResumeInfo, ResumeScoreDimensionInfo, ResumeScoreInfo } from "../api/types";
 
 /**
  * 组件参数。
@@ -127,6 +113,65 @@ const emit = defineEmits<{
 const targetPosition = ref("");
 const scoring = ref(false);
 const scoreResult = ref<ResumeScoreInfo | null>(null);
+
+const normalizedScoreDimensions = computed<ResumeScoreDimensionInfo[]>(() => {
+  const score = scoreResult.value;
+
+  if (!score) {
+    return [];
+  }
+
+  if (score.dimensions?.length) {
+    return score.dimensions;
+  }
+
+  if (score.scoreBreakdown) {
+    return [
+      buildDimension("基础信息完整性", score.scoreBreakdown.basicInfoScore, 10),
+      buildDimension("求职目标清晰度", score.scoreBreakdown.careerGoalScore, 10),
+      buildDimension("教育背景", score.scoreBreakdown.educationScore, 10),
+      buildDimension("技能结构", score.scoreBreakdown.skillsScore, 15),
+      buildDimension("项目经历质量", score.scoreBreakdown.projectExperienceScore, 25),
+      buildDimension("实习 / 工作经历", score.scoreBreakdown.workExperienceScore, 15),
+      buildDimension("成果量化程度", score.scoreBreakdown.quantifiedImpactScore, 10),
+      buildDimension("表达与排版", score.scoreBreakdown.formatScore, 5)
+    ];
+  }
+
+  return [
+    buildDimension("基础信息", score.basicInfoScore, 10),
+    buildDimension("教育背景", score.educationScore, 10),
+    buildDimension("技能栈", score.skillScore, 20),
+    buildDimension("项目经历", score.projectScore, 35),
+    buildDimension("工作经历", score.experienceScore, 15),
+    buildDimension("表达质量", score.expressionScore, 10)
+  ];
+});
+
+const scoreStrengths = computed(() => normalizeScoreList(scoreResult.value?.strengths, scoreResult.value?.advantages));
+const scoreWeaknesses = computed(() => normalizeScoreList(scoreResult.value?.weaknesses, scoreResult.value?.problems));
+const scoreRisks = computed(() => normalizeScoreList(scoreResult.value?.riskPoints));
+const scoreSuggestions = computed(() => normalizeScoreList(scoreResult.value?.improvementSuggestions, scoreResult.value?.suggestions));
+
+function buildDimension(dimensionName: string, score = 0, maxScore = 0): ResumeScoreDimensionInfo {
+  return {
+    dimensionName,
+    score,
+    maxScore
+  };
+}
+
+function normalizeScoreList(primary?: string[], fallback?: string[]) {
+  const source = primary?.length ? primary : fallback;
+
+  if (!source?.length) {
+    return [];
+  }
+
+  return source
+    .map(item => item.trim())
+    .filter(Boolean);
+}
 
 /**
  * 加载最近一次评分结果。

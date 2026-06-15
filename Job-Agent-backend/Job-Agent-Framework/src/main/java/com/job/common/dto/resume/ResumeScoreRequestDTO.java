@@ -12,9 +12,9 @@ import lombok.Data;
 public class ResumeScoreRequestDTO {
 
     /**
-     * 目标岗位。
-     * 说明：第一版可以不传；如果传了，可以让评分建议更贴近目标方向。
+     * 求职方向。
+     * 说明: V2 不是 JD 匹配评分，这个字段只用于让评分建议更贴近用户想投递的方向。
      */
-    @Size(max = 128, message = "目标岗位长度不能超过128位")
+    @Size(max = 128, message = "求职方向长度不能超过128位")
     private String targetPosition;
 }
