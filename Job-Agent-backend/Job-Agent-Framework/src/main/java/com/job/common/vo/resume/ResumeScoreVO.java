@@ -97,7 +97,8 @@ public class ResumeScoreVO {
     private String summary;
 
     /**
-     * LLM 辅助点评状态: SUCCESS / FAILED / SKIPPED。
+     * LLM 辅助点评状态: PROCESSING / SUCCESS / FAILED / SKIPPED。
+     * 说明: PROCESSING 是历史兼容状态，表示大模型评分请求仍在处理中。
      */
     private String llmStatus;
 

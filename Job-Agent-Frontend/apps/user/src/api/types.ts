@@ -268,7 +268,7 @@ export interface ResumeScoreInfo {
   riskPoints?: string[];
   improvementSuggestions?: string[];
   summary?: string;
-  llmStatus?: "SUCCESS" | "FAILED" | "SKIPPED" | string;
+  llmStatus?: "PROCESSING" | "SUCCESS" | "FAILED" | "SKIPPED" | string;
   llmError?: string;
 
   createTime?: string;

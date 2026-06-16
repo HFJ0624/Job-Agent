@@ -17,10 +17,10 @@ import java.util.regex.Pattern;
  * 日期:2026/6/15
  *
  * 设计说明:
- * 1. V2 评分采用“规则评分为主，LLM 解释为辅”的方式。
- * 2. 本类只负责稳定计算分数和生成兜底解释，不调用数据库，也不调用大模型。
- * 3. 这样做的好处是: 没有真实模型 Key 时测试仍然可以运行，同一份简历多次评分也不会大幅波动。
- * 4. 业务 Service 会把本类输出交给大模型补充更自然的分析文案，但最终分数仍以本类为准。
+ * 1. 本类负责生成稳定、可复现的初始规则分。
+ * 2. 本类不调用数据库，也不调用大模型，方便单元测试和本地兜底。
+ * 3. 业务 Service 会把本类输出交给大模型二次评分，再按权重合并最终分。
+ * 4. 如果大模型不可用，本类输出会作为明确标记的兜底结果返回。
  */
 @Component
 public class ResumeScoreRuleEngine {
@@ -156,7 +156,7 @@ public class ResumeScoreRuleEngine {
 
         RuleScoreResult result = new RuleScoreResult();
         result.setScoreVersion(SCORE_VERSION);
-        result.setScoringMode("RULE_WITH_LLM_EXPLANATION");
+        result.setScoringMode("RULE_SCORE_INITIAL");
         result.setOverallScore(total);
         result.setLevel(resolveLevel(total));
         result.setScoreBreakdown(breakdown);

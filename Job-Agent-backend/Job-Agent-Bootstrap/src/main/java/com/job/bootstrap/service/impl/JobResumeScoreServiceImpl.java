@@ -12,7 +12,6 @@ import com.job.common.entity.resume.JobResume;
 import com.job.common.entity.resume.JobResumeScoreRecord;
 import com.job.common.vo.resume.ResumeScoreVO;
 import com.job.exception.BizException;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -25,14 +24,6 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 作者:hfj
@@ -41,9 +32,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * V2 设计说明:
  * 1. 先用 ResumeScoreRuleEngine 计算稳定分数，保证评分可解释、可测试、可重复。
- * 2. 再调用 ResumeScoreAssistant，让大模型基于简历原文补充更自然的优势、不足、风险点和建议。
- * 3. 最终分数仍以规则引擎为准，大模型不能随意改分，避免同一份简历多次评分结果漂移。
- * 4. score_json 保存完整 V2 结构，老字段继续写入，兼容当前数据库和旧前端字段。
+ * 2. 配置了大模型时，评分接口会优先等待 ResumeScoreAssistant 返回，让页面直接看到 AI 参与后的结果。
+ * 3. 大模型作为第二评分员参与维度打分和建议生成，规则引擎只负责提供稳定初始分和兜底。
+ * 4. 大模型结果回来后按“规则分 65% + 模型分 35%”合并，既体现模型参与，又避免模型分数大幅漂移。
+ * 5. score_json 保存完整 V2 结构，老字段继续写入，兼容当前数据库和旧前端字段。
  */
 @Service
 @RequiredArgsConstructor
@@ -68,30 +60,25 @@ public class JobResumeScoreServiceImpl
 
     /**
      * 送给模型的简历最大字符数。
-     * 说明: 简历过长时先截断，避免一次模型调用超过上下文长度。
+     * 说明:
+     * 1. 原来把 12000 字符简历 + 完整规则 JSON 一次塞给模型，容易导致请求超过 20 秒。
+     * 2. 这里保留足够模型判断质量的主体内容，同时减少上下文长度，让模型更快返回。
      */
-    private static final int LLM_RESUME_TEXT_LIMIT = 12000;
+    private static final int LLM_RESUME_TEXT_LIMIT = 3500;
 
     /**
-     * 简历评分大模型辅助点评最多等待时间。
-     * 说明: 评分接口是用户点击按钮触发的同步请求，不能因为模型供应商网络抖动一直卡住。
-     * 超过这个时间就返回规则评分兜底结果，保证“重新评分”按钮稳定可用。
+     * 大模型分数在最终分里的权重。
+     * 说明:
+     * 1. 规则分负责稳定、可复现，适合做基础分。
+     * 2. 模型分负责理解语义、判断项目质量和表达问题，适合做修正分。
+     * 3. 35% 是偏保守的权重，能体现模型参与，但不会因为一次模型输出异常把总分拉得过高或过低。
      */
-    private static final long LLM_ANALYSIS_TIMEOUT_SECONDS = 12;
+    private static final double LLM_SCORE_WEIGHT = 0.35;
 
     private final JobResumeService jobResumeService;
     private final ResumeScoreRuleEngine resumeScoreRuleEngine;
     private final ObjectProvider<ResumeScoreAssistant> resumeScoreAssistantProvider;
     private final ObjectMapper objectMapper;
-
-    /**
-     * 简历评分 LLM 辅助分析线程池。
-     * 说明: 单独线程池可以给模型调用加超时控制，不影响主业务线程及时返回规则评分结果。
-     */
-    private final ExecutorService resumeScoreLlmExecutor = Executors.newFixedThreadPool(
-            2,
-            new ResumeScoreThreadFactory()
-    );
 
     /**
      * 对当前用户指定简历执行 V2 AI 评分。
@@ -117,10 +104,23 @@ public class JobResumeScoreServiceImpl
             throw new BizException("当前简历没有可用的解析文本，请先上传可复制文字的 PDF、DOC 或 DOCX 简历。");
         }
 
-        // 4. 执行 V2 评分: 规则算分 + LLM 补充解释 + 分数校验合并。
-        ResumeScoreRuleEngine.RuleScoreResult scoreResult = calculateV2Score(resume.getRawText(), targetPosition);
+        // 4. 先执行规则评分，得到稳定、可复现的初始分。
+        //    注意：这一步不是最终结果；如果大模型可用，后面必须让 AI 基于简历原文重新参与评分。
+        ResumeScoreRuleEngine.RuleScoreResult ruleScore = resumeScoreRuleEngine.calculate(resume.getRawText(), targetPosition);
+        ResumeScoreAssistant assistant = resumeScoreAssistantProvider.getIfAvailable();
+        ResumeScoreRuleEngine.RuleScoreResult scoreResult;
+        if (assistant == null) {
+            scoreResult = ruleScore;
+            scoreResult.setScoringMode("RULE_SCORE_AI_UNAVAILABLE");
+            scoreResult.setLlmStatus("SKIPPED");
+            scoreResult.setLlmError("未注册 ResumeScoreAssistant，无法调用大模型参与评分。请检查 Job-Agent-Infra-Ai 配置和 job.ai 配置。");
+        } else {
+            // 5. 配置了大模型时，优先等待 AI 评分完成后再保存。
+            //    这样前端第一次拿到的就是 AI 参与后的评分，而不是规则分被当成最终结果展示。
+            scoreResult = calculateLlmScoreNow(resume.getRawText(), targetPosition, ruleScore, assistant);
+        }
 
-        // 5. 保存评分记录。老字段继续写入，完整 V2 结构存 score_json。
+        // 6. 保存评分记录。老字段继续写入，完整 V2 结构存 score_json。
         Date now = new Date();
         JobResumeScoreRecord record = new JobResumeScoreRecord();
         record.setUserId(userId);
@@ -146,7 +146,7 @@ public class JobResumeScoreServiceImpl
         record.setUpdateTime(now);
         save(record);
 
-        // 6. 同步更新 resume 表上的 score 和状态，方便简历列表直接展示最近总分。
+        // 7. 同步更新 resume 表上的 score 和状态，方便简历列表直接展示最近总分。
         resume.setScore(toDecimal(scoreResult.getOverallScore()));
         resume.setStatus(STATUS_SCORED);
         resume.setUpdateTime(now);
@@ -171,38 +171,28 @@ public class JobResumeScoreServiceImpl
     }
 
     /**
-     * V2 核心评分流程。
-     *
-     * @param rawText 简历原文
-     * @param targetPosition 求职方向，可为空
-     * @return 合并后的最终评分结果
+     * 立即调用大模型参与评分。
+     * 说明:
+     * 1. 用户明确要求“评分结果必须体现 AI 参与”，所以这里不再把规则评分提前返回成最终结果。
+     * 2. 如果 AI 成功返回，就合并 AI 的维度分、分析、问题和建议，并标记 SUCCESS。
+     * 3. 如果 AI 调用失败，会保留规则分，但明确标记 FAILED，并把错误原因写入 score_json 和前端。
      */
-    private ResumeScoreRuleEngine.RuleScoreResult calculateV2Score(String rawText, String targetPosition) {
-        // 1. 规则引擎先产出稳定分数和兜底解释。
-        ResumeScoreRuleEngine.RuleScoreResult ruleScore = resumeScoreRuleEngine.calculate(rawText, targetPosition);
-
-        // 2. 如果当前环境没有注册 ResumeScoreAssistant，则直接返回规则结果，便于测试和本地离线运行。
-        ResumeScoreAssistant assistant = resumeScoreAssistantProvider.getIfAvailable();
-        if (assistant == null) {
-            ruleScore.setLlmStatus("SKIPPED");
-            ruleScore.setLlmError("未注册 ResumeScoreAssistant，已使用规则评分兜底。");
-            return ruleScore;
-        }
-
+    private ResumeScoreRuleEngine.RuleScoreResult calculateLlmScoreNow(
+            String rawText,
+            String targetPosition,
+            ResumeScoreRuleEngine.RuleScoreResult ruleScore,
+            ResumeScoreAssistant assistant
+    ) {
         try {
-            // 3. 大模型只负责补充解释，不负责最终定分。
             String prompt = buildLlmPrompt(rawText, targetPosition, ruleScore);
-            String response = callAssistantWithTimeout(assistant, prompt);
+            String response = assistant.analyze(prompt);
             ResumeScoreRuleEngine.RuleScoreResult llmResult = parseLlmResult(response);
-            ResumeScoreRuleEngine.RuleScoreResult mergedResult = mergeLlmExplanation(ruleScore, llmResult);
+            ResumeScoreRuleEngine.RuleScoreResult mergedResult = mergeLlmScore(ruleScore, llmResult);
             mergedResult.setLlmStatus("SUCCESS");
             mergedResult.setLlmError(null);
             return mergedResult;
         } catch (Exception exception) {
-            /*
-             * 4. 模型调用失败时不能影响用户评分。
-             *    这里记录失败原因到 score_json，前端仍能看到规则评分和本地建议。
-             */
+            ruleScore.setScoringMode("RULE_SCORE_LLM_FAILED");
             ruleScore.setLlmStatus("FAILED");
             ruleScore.setLlmError(shortMessage(exception));
             return ruleScore;
@@ -210,63 +200,57 @@ public class JobResumeScoreServiceImpl
     }
 
     /**
-     * 带超时调用简历评分大模型。
-     * 说明:
-     * 1. 火山方舟或其他 OpenAI 兼容接口偶尔会出现 Request cancelled / timeout。
-     * 2. 如果直接在 HTTP 请求线程里等待模型，前端“重新评分”会变成失败。
-     * 3. 这里把模型调用放到独立线程，并设置短超时；超时后抛出异常，外层会保存规则评分兜底。
-     */
-    private String callAssistantWithTimeout(ResumeScoreAssistant assistant, String prompt) throws Exception {
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(
-                () -> assistant.analyze(prompt),
-                resumeScoreLlmExecutor
-        );
-
-        try {
-            return future.get(LLM_ANALYSIS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (TimeoutException exception) {
-            future.cancel(true);
-            throw new IllegalStateException("AI 简历点评超过 " + LLM_ANALYSIS_TIMEOUT_SECONDS + " 秒未返回，已使用规则评分兜底。", exception);
-        } catch (InterruptedException exception) {
-            future.cancel(true);
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("AI 简历点评线程被中断，已使用规则评分兜底。", exception);
-        } catch (ExecutionException exception) {
-            Throwable cause = exception.getCause();
-            if (cause instanceof Exception actualException) {
-                throw actualException;
-            }
-            throw new IllegalStateException("AI 简历点评调用失败，已使用规则评分兜底。", cause);
-        }
-    }
-
-    /**
      * 构造给大模型的 Prompt。
-     * 说明: Prompt 中同时提供规则评分结果和简历原文，让模型在不改分的前提下补充证据化分析。
+     * 说明:
+     * 1. 这里不再传完整 ruleScore JSON，避免把大量规则解释、建议重复塞进上下文。
+     * 2. 大模型作为“第二评分员”可以给出自己的维度分，后端再做加权合并。
+     * 3. 要求列表最多 5 条，是为了降低输出长度和 JSON 解析失败概率。
      */
     private String buildLlmPrompt(String rawText, String targetPosition, ResumeScoreRuleEngine.RuleScoreResult ruleScore) {
         return """
-                请基于下面的规则评分结果和简历原文，输出符合系统提示词要求的 JSON。
-                
-                重要约束:
-                1. 你必须保留规则评分中的 overallScore 和 scoreBreakdown，不能改分。
-                2. 你可以优化 dimensions.reason、issues、suggestions。
-                3. strengths、weaknesses、riskPoints、improvementSuggestions 必须基于简历原文，不允许编造。
-                4. 如果某项没有证据，请写“简历中未找到相关证据”。
+                按简历原文重新评分，输出 JSON，不要 Markdown。
+                要求:
+                1. 八个维度顺序必须与规则摘要 dimensions 一致，maxScore 不变，score 不能超过 maxScore。
+                2. 不要照抄规则分，要根据简历原文独立判断。
+                3. dimensions.reason 每条不超过 30 字。
+                4. strengths/weaknesses/riskPoints/improvementSuggestions 每类最多 3 条，每条不超过 40 字。
+                5. overallScore 等于 dimensions.score 之和。
+                6. dimensions 元素字段固定为 dimensionName、score、maxScore、reason、issues、suggestions。
+                7. scoreBreakdown 字段固定为 basicInfoScore、careerGoalScore、educationScore、skillsScore、projectExperienceScore、workExperienceScore、quantifiedImpactScore、formatScore。
                 
                 用户填写的求职方向:
                 %s
                 
-                规则评分结果:
+                规则评分摘要:
                 %s
                 
                 简历原文:
                 %s
                 """.formatted(
                 StringUtils.hasText(targetPosition) ? targetPosition.trim() : "未填写",
-                toJson(ruleScore),
+                buildRuleScoreSummary(ruleScore),
                 truncate(rawText, LLM_RESUME_TEXT_LIMIT)
         );
+    }
+
+    /**
+     * 构造更短的规则评分摘要。
+     * 说明: 大模型只需要知道规则分和每个维度满分，不需要拿到所有本地建议文本。
+     */
+    private String buildRuleScoreSummary(ResumeScoreRuleEngine.RuleScoreResult ruleScore) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("overallScore", ruleScore.getOverallScore());
+
+        List<Map<String, Object>> dimensionSummaries = new ArrayList<>();
+        for (ResumeScoreRuleEngine.ScoreDimension dimension : nonNullList(ruleScore.getDimensions())) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("name", dimension.getDimensionName());
+            item.put("ruleScore", dimension.getScore());
+            item.put("maxScore", dimension.getMaxScore());
+            dimensionSummaries.add(item);
+        }
+        summary.put("dimensions", dimensionSummaries);
+        return toJson(summary);
     }
 
     /**
@@ -296,14 +280,20 @@ public class JobResumeScoreServiceImpl
     }
 
     /**
-     * 合并 LLM 解释。
-     * 说明: 这里故意保留 ruleScore 的所有分数，只接受 LLM 的文案字段，避免模型改分。
+     * 合并 LLM 评分。
+     * 说明:
+     * 1. LLM 不是只写文案，它会给出自己的八维分数。
+     * 2. 后端用加权合并控制最终分，规则分占 65%，模型分占 35%。
+     * 3. 单个维度最多只允许被模型拉动该维度满分的 20%，防止模型一次性把分数改得过猛。
      */
-    private ResumeScoreRuleEngine.RuleScoreResult mergeLlmExplanation(
+    private ResumeScoreRuleEngine.RuleScoreResult mergeLlmScore(
             ResumeScoreRuleEngine.RuleScoreResult ruleScore,
             ResumeScoreRuleEngine.RuleScoreResult llmResult
     ) {
-        ruleScore.setDimensions(mergeDimensions(ruleScore.getDimensions(), llmResult.getDimensions()));
+        List<ResumeScoreRuleEngine.ScoreDimension> llmDimensions = resolveLlmDimensions(ruleScore.getDimensions(), llmResult);
+        ruleScore.setDimensions(mergeDimensions(ruleScore.getDimensions(), llmDimensions));
+        ruleScore.setScoreBreakdown(buildBreakdownFromDimensions(ruleScore.getDimensions()));
+        ruleScore.setOverallScore(sumDimensionScore(ruleScore.getDimensions()));
         ruleScore.setStrengths(preferLlmList(llmResult.getStrengths(), ruleScore.getStrengths()));
         ruleScore.setWeaknesses(preferLlmList(llmResult.getWeaknesses(), ruleScore.getWeaknesses()));
         ruleScore.setRiskPoints(preferLlmList(llmResult.getRiskPoints(), ruleScore.getRiskPoints()));
@@ -313,14 +303,61 @@ public class JobResumeScoreServiceImpl
             ruleScore.setSummary(llmResult.getSummary().trim());
         }
 
-        /*
-         * 强制还原规则分数。
-         * 即使模型返回了不同分数，也不允许覆盖 ruleScore 的 final score。
-         */
         ruleScore.setScoreVersion("V2");
-        ruleScore.setScoringMode("RULE_WITH_LLM_EXPLANATION");
+        ruleScore.setScoringMode("RULE_LLM_WEIGHTED_SCORE");
         ruleScore.setLevel(resolveLevel(ruleScore.getOverallScore()));
         return ruleScore;
+    }
+
+    /**
+     * 解析模型返回的维度分。
+     * 说明:
+     * 1. 正常情况下模型会返回 dimensions，里面包含每个维度的 score 和 reason。
+     * 2. 有些模型为了省输出可能只返回 scoreBreakdown；这里把 scoreBreakdown 转成 dimensions，仍然让模型分参与合并。
+     * 3. 这样可以降低“模型明明返回了分数，但后端没用上”的概率。
+     */
+    private List<ResumeScoreRuleEngine.ScoreDimension> resolveLlmDimensions(
+            List<ResumeScoreRuleEngine.ScoreDimension> ruleDimensions,
+            ResumeScoreRuleEngine.RuleScoreResult llmResult
+    ) {
+        if (llmResult.getDimensions() != null && !llmResult.getDimensions().isEmpty()) {
+            return llmResult.getDimensions();
+        }
+
+        ResumeScoreRuleEngine.ScoreBreakdown breakdown = llmResult.getScoreBreakdown();
+        if (breakdown == null) {
+            return List.of();
+        }
+
+        List<Integer> scores = List.of(
+                valueOrZero(breakdown.getBasicInfoScore()),
+                valueOrZero(breakdown.getCareerGoalScore()),
+                valueOrZero(breakdown.getEducationScore()),
+                valueOrZero(breakdown.getSkillsScore()),
+                valueOrZero(breakdown.getProjectExperienceScore()),
+                valueOrZero(breakdown.getWorkExperienceScore()),
+                valueOrZero(breakdown.getQuantifiedImpactScore()),
+                valueOrZero(breakdown.getFormatScore())
+        );
+
+        List<ResumeScoreRuleEngine.ScoreDimension> dimensions = new ArrayList<>();
+        List<ResumeScoreRuleEngine.ScoreDimension> safeRuleDimensions = nonNullList(ruleDimensions);
+        for (int index = 0; index < safeRuleDimensions.size() && index < scores.size(); index++) {
+            ResumeScoreRuleEngine.ScoreDimension ruleDimension = safeRuleDimensions.get(index);
+            ResumeScoreRuleEngine.ScoreDimension dimension = new ResumeScoreRuleEngine.ScoreDimension();
+            dimension.setDimensionName(ruleDimension.getDimensionName());
+            dimension.setScore(scores.get(index));
+            dimension.setMaxScore(ruleDimension.getMaxScore());
+            dimension.setReason(ruleDimension.getReason());
+            dimension.setIssues(ruleDimension.getIssues());
+            dimension.setSuggestions(ruleDimension.getSuggestions());
+            dimensions.add(dimension);
+        }
+        return dimensions;
+    }
+
+    private Integer valueOrZero(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private List<ResumeScoreRuleEngine.ScoreDimension> mergeDimensions(
@@ -338,9 +375,15 @@ public class JobResumeScoreServiceImpl
             }
         }
 
+        List<ResumeScoreRuleEngine.ScoreDimension> safeRuleDimensions = nonNullList(ruleDimensions);
         List<ResumeScoreRuleEngine.ScoreDimension> merged = new ArrayList<>();
-        for (ResumeScoreRuleEngine.ScoreDimension ruleDimension : ruleDimensions) {
+        for (int index = 0; index < safeRuleDimensions.size(); index++) {
+            ResumeScoreRuleEngine.ScoreDimension ruleDimension = safeRuleDimensions.get(index);
             ResumeScoreRuleEngine.ScoreDimension llmDimension = llmMap.get(ruleDimension.getDimensionName());
+            if (llmDimension == null && llmDimensions.size() > index) {
+                // 模型偶尔会把维度名写得不完全一致；八个维度顺序是固定的，因此可按位置兜底匹配。
+                llmDimension = llmDimensions.get(index);
+            }
             if (llmDimension == null) {
                 merged.add(ruleDimension);
                 continue;
@@ -348,7 +391,7 @@ public class JobResumeScoreServiceImpl
 
             ResumeScoreRuleEngine.ScoreDimension dimension = new ResumeScoreRuleEngine.ScoreDimension();
             dimension.setDimensionName(ruleDimension.getDimensionName());
-            dimension.setScore(ruleDimension.getScore());
+            dimension.setScore(blendScore(ruleDimension.getScore(), llmDimension.getScore(), ruleDimension.getMaxScore()));
             dimension.setMaxScore(ruleDimension.getMaxScore());
             dimension.setReason(StringUtils.hasText(llmDimension.getReason()) ? llmDimension.getReason().trim() : ruleDimension.getReason());
             dimension.setIssues(preferLlmList(llmDimension.getIssues(), ruleDimension.getIssues()));
@@ -356,6 +399,56 @@ public class JobResumeScoreServiceImpl
             merged.add(dimension);
         }
         return merged;
+    }
+
+    /**
+     * 合并单个维度分。
+     * 说明:
+     * 1. 先按权重计算 blended = 规则分 * 65% + 模型分 * 35%。
+     * 2. 再限制模型对该维度的最大影响幅度，默认最多影响该维度满分的 20%。
+     * 3. 最后再限制到 0~maxScore，保证不会出现负分或超满分。
+     */
+    private Integer blendScore(Integer ruleScore, Integer llmScore, Integer maxScore) {
+        int safeMax = maxScore == null ? 0 : maxScore;
+        int safeRuleScore = clamp(ruleScore, 0, safeMax);
+        int safeLlmScore = clamp(llmScore, 0, safeMax);
+        int weightedScore = (int) Math.round(safeRuleScore * (1 - LLM_SCORE_WEIGHT) + safeLlmScore * LLM_SCORE_WEIGHT);
+        int maxAdjustment = Math.max(1, (int) Math.round(safeMax * 0.2));
+        return clamp(weightedScore, safeRuleScore - maxAdjustment, safeRuleScore + maxAdjustment);
+    }
+
+    private int clamp(Integer value, int min, Integer max) {
+        int safeValue = value == null ? min : value;
+        int safeMax = max == null ? safeValue : max;
+        return Math.max(min, Math.min(safeValue, safeMax));
+    }
+
+    private int sumDimensionScore(List<ResumeScoreRuleEngine.ScoreDimension> dimensions) {
+        return nonNullList(dimensions).stream()
+                .map(ResumeScoreRuleEngine.ScoreDimension::getScore)
+                .mapToInt(score -> score == null ? 0 : score)
+                .sum();
+    }
+
+    private ResumeScoreRuleEngine.ScoreBreakdown buildBreakdownFromDimensions(List<ResumeScoreRuleEngine.ScoreDimension> dimensions) {
+        ResumeScoreRuleEngine.ScoreBreakdown breakdown = new ResumeScoreRuleEngine.ScoreBreakdown();
+        List<ResumeScoreRuleEngine.ScoreDimension> safeDimensions = nonNullList(dimensions);
+        breakdown.setBasicInfoScore(dimensionScore(safeDimensions, 0));
+        breakdown.setCareerGoalScore(dimensionScore(safeDimensions, 1));
+        breakdown.setEducationScore(dimensionScore(safeDimensions, 2));
+        breakdown.setSkillsScore(dimensionScore(safeDimensions, 3));
+        breakdown.setProjectExperienceScore(dimensionScore(safeDimensions, 4));
+        breakdown.setWorkExperienceScore(dimensionScore(safeDimensions, 5));
+        breakdown.setQuantifiedImpactScore(dimensionScore(safeDimensions, 6));
+        breakdown.setFormatScore(dimensionScore(safeDimensions, 7));
+        return breakdown;
+    }
+
+    private Integer dimensionScore(List<ResumeScoreRuleEngine.ScoreDimension> dimensions, int index) {
+        if (dimensions == null || dimensions.size() <= index || dimensions.get(index).getScore() == null) {
+            return 0;
+        }
+        return dimensions.get(index).getScore();
     }
 
     /**
@@ -383,7 +476,7 @@ public class JobResumeScoreServiceImpl
         return cleaned.isEmpty() ? nonNullList(fallbackList) : cleaned;
     }
 
-    private List<String> nonNullList(List<String> list) {
+    private <T> List<T> nonNullList(List<T> list) {
         return list == null ? List.of() : list;
     }
 
@@ -445,27 +538,4 @@ public class JobResumeScoreServiceImpl
         return "需要重写";
     }
 
-    /**
-     * 应用关闭时释放简历评分 LLM 线程池。
-     */
-    @PreDestroy
-    public void destroy() {
-        resumeScoreLlmExecutor.shutdownNow();
-    }
-
-    /**
-     * 简历评分 LLM 线程工厂。
-     * 说明: 线程名带业务含义，后续看日志或线程 dump 时更容易定位。
-     */
-    private static class ResumeScoreThreadFactory implements ThreadFactory {
-
-        private final AtomicInteger index = new AtomicInteger(1);
-
-        @Override
-        public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "resume-score-llm-" + index.getAndIncrement());
-            thread.setDaemon(true);
-            return thread;
-        }
-    }
 }

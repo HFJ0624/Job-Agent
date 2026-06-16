@@ -32,4 +32,16 @@ public class AiProperties {
      * 温度参数，越低越稳定。
      */
     private Double temperature = 0.3;
+
+    /**
+     * 简历评分模型超时时间。
+     * 说明: 简历评分需要读取较长文本并返回结构化 JSON，比普通聊天更慢，所以单独配置超时。
+     */
+    private Integer resumeScoreTimeoutSeconds = 180;
+
+    /**
+     * 简历评分模型最大输出 token 数。
+     * 说明: 限制输出长度可以减少火山方舟长时间生成导致的 Request cancelled。
+     */
+    private Integer resumeScoreMaxTokens = 1800;
 }

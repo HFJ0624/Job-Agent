@@ -360,7 +360,7 @@
           </div>
 
           <p class="score-tip">
-            V2 评分会先用规则引擎稳定计算八个维度，再由大模型补充证据化分析和可执行优化建议。
+            V2 评分会等待大模型参与八维打分和证据化分析；规则引擎只作为稳定初始分和异常兜底。
           </p>
         </div>
 
@@ -379,6 +379,7 @@
               <strong>{{ scoreResult.level }}</strong>
               <span>评分时间：{{ scoreResult.createTime || "-" }}</span>
               <small>{{ scoreResult.scoreVersion || "V1" }} · {{ formatLlmStatus(scoreResult.llmStatus) }}</small>
+              <em v-if="scoreResult.llmError">{{ scoreResult.llmError }}</em>
             </div>
           </div>
 
@@ -489,6 +490,11 @@ const scoreLoading = ref(false);
 const scoringId = ref<string | null>(null);
 const scoreErrorMessage = ref("");
 
+const SCORE_POLL_INTERVAL_MS = 3000;
+const SCORE_POLL_MAX_ATTEMPTS = 20;
+let scorePollTimer: ReturnType<typeof window.setTimeout> | null = null;
+let scorePollAttempts = 0;
+
 const isPdfPreview = computed(() => {
   return Boolean(previewBlobUrl.value)
     && (previewResume.value?.fileType || "").toUpperCase() === "PDF";
@@ -553,6 +559,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   revokePreviewUrl();
+  clearScorePollTimer();
 });
 
 function buildDimension(dimensionName: string, score = 0, maxScore = 0): ResumeScoreDimensionInfo {
@@ -578,12 +585,37 @@ function normalizeScoreList(primary?: string[], fallback?: string[]) {
 
 function formatLlmStatus(status?: string) {
   const statusMap: Record<string, string> = {
-    SUCCESS: "AI 已参与点评",
-    FAILED: "规则评分兜底",
-    SKIPPED: "规则评分兜底"
+    PROCESSING: "AI 评分中",
+    SUCCESS: "AI 已参与评分",
+    FAILED: "AI 评分失败",
+    SKIPPED: "AI 未启用"
   };
 
-  return statusMap[status || ""] || "评分完成";
+  return statusMap[status || ""] || "历史评分";
+}
+
+function clearScorePollTimer() {
+  if (scorePollTimer) {
+    window.clearTimeout(scorePollTimer);
+    scorePollTimer = null;
+  }
+}
+
+function scheduleScorePollingIfNeeded(resume = scoreResumeTarget.value) {
+  clearScorePollTimer();
+
+  if (!resume?.id || !scoreDrawerVisible.value || scoreResult.value?.llmStatus !== "PROCESSING") {
+    return;
+  }
+
+  if (scorePollAttempts >= SCORE_POLL_MAX_ATTEMPTS) {
+    return;
+  }
+
+  scorePollAttempts += 1;
+  scorePollTimer = window.setTimeout(() => {
+    void loadLatestScore(resume, true);
+  }, SCORE_POLL_INTERVAL_MS);
 }
 
 function openResumePicker() {
@@ -891,6 +923,8 @@ function replaceResumeInList(resume: ResumeInfo) {
 }
 
 async function openScoreDrawer(resume: ResumeInfo) {
+  clearScorePollTimer();
+  scorePollAttempts = 0;
   scoreDrawerVisible.value = true;
   scoreResumeTarget.value = resume;
   scoreTargetPosition.value = "";
@@ -900,18 +934,36 @@ async function openScoreDrawer(resume: ResumeInfo) {
   await loadLatestScore(resume);
 }
 
-async function loadLatestScore(resume: ResumeInfo) {
+async function loadLatestScore(resume: ResumeInfo, fromPolling = false) {
   const resumeId = String(resume.id);
 
-  scoreLoading.value = true;
+  if (!fromPolling) {
+    clearScorePollTimer();
+    scorePollAttempts = 0;
+    scoreLoading.value = true;
+  }
   scoreErrorMessage.value = "";
 
   try {
     scoreResult.value = await getLatestResumeScore(resumeId);
+
+    if (fromPolling && scoreResult.value?.llmStatus !== "PROCESSING") {
+      await loadResumeList();
+      const latestResume = resumes.value.find(item => item.id === resume.id);
+      if (latestResume) {
+        scoreResumeTarget.value = latestResume;
+        if (previewResume.value?.id === latestResume.id) {
+          previewResume.value = latestResume;
+        }
+      }
+    }
   } catch (error) {
     scoreErrorMessage.value = error instanceof Error ? error.message : "评分结果加载失败";
   } finally {
-    scoreLoading.value = false;
+    if (!fromPolling) {
+      scoreLoading.value = false;
+    }
+    scheduleScorePollingIfNeeded(resume);
   }
 }
 
@@ -929,6 +981,7 @@ async function submitScoreResume() {
   try {
     const result = await scoreResume(resumeId, scoreTargetPosition.value);
     scoreResult.value = result;
+    scorePollAttempts = 0;
 
     await loadResumeList();
 
@@ -940,7 +993,14 @@ async function submitScoreResume() {
       }
     }
 
-    ElMessage.success("简历评分完成");
+    scheduleScorePollingIfNeeded(scoreResumeTarget.value);
+    if (result.llmStatus === "SUCCESS") {
+      ElMessage.success("AI 已参与简历评分");
+    } else if (result.llmStatus === "FAILED" || result.llmStatus === "SKIPPED") {
+      ElMessage.warning(result.llmError || "AI 没有参与成功，当前展示规则评分");
+    } else {
+      ElMessage.success(result.llmStatus === "PROCESSING" ? "AI 评分进行中" : "简历评分完成");
+    }
   } catch (error) {
     scoreErrorMessage.value = error instanceof Error ? error.message : "简历评分失败";
     ElMessage.error(scoreErrorMessage.value);
@@ -950,6 +1010,8 @@ async function submitScoreResume() {
 }
 
 function clearScoreDrawer() {
+  clearScorePollTimer();
+  scorePollAttempts = 0;
   scoreResumeTarget.value = null;
   scoreResult.value = null;
   scoreTargetPosition.value = "";
@@ -1161,6 +1223,17 @@ function downloadByTemporaryLink(blobUrl: string, filename: string) {
   color: #2563eb;
   font-size: 12px;
   font-weight: 700;
+}
+
+.score-meta em {
+  max-width: 560px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.5;
 }
 
 .dimension-grid {
