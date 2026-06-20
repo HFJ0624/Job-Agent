@@ -1,6 +1,8 @@
 package com.job.bootstrap.agent.plan;
 
 import com.job.bootstrap.agent.intent.AgentIntentCode;
+import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -12,7 +14,10 @@ import java.util.Map;
  * 日期:2026/6/19
  */
 @Component
+@RequiredArgsConstructor
 public class AgentPlanTemplateFactory {
+
+    private final AgentToolSchemaRegistry toolSchemaRegistry;
 
     /**
      * 根据意图生成计划模板。
@@ -41,10 +46,10 @@ public class AgentPlanTemplateFactory {
                 List.of("resumeId"),
                 List.of(
                         step("确认简历", "确认用户提供的 resumeId 属于当前登录用户。", "ResumeAnalyzeTool.analyzeResume",
-                                Map.of("resumeId", "必填，用户简历ID", "targetPosition", "可选，求职方向"),
+                                schema("ResumeAnalyzeTool.analyzeResume"),
                                 "确认简历可解析且能用于评分。"),
                         step("生成分析结果", "基于简历原文输出质量评分和优化建议。", "ResumeAnalyzeTool.analyzeResume",
-                                Map.of("resumeId", "来自已抽取参数"),
+                                schema("ResumeAnalyzeTool.analyzeResume"),
                                 "返回总分、优势、不足和优化建议。")
                 )
         );
@@ -57,10 +62,10 @@ public class AgentPlanTemplateFactory {
                 List.of("resumeId", "jobId"),
                 List.of(
                         step("确认匹配对象", "确认 resumeId 和 jobId 都已提供。", "JobMatchTool.matchJob",
-                                Map.of("resumeId", "必填", "jobId", "必填"),
+                                schema("JobMatchTool.matchJob"),
                                 "简历和岗位均存在且可以进入匹配。"),
                         step("执行岗位匹配", "计算技能、项目、条件和偏好匹配度。", "JobMatchTool.matchJob",
-                                Map.of("resumeId", "来自已抽取参数", "jobId", "来自已抽取参数"),
+                                schema("JobMatchTool.matchJob"),
                                 "返回匹配分、匹配等级、优势、风险点和建议。")
                 )
         );
@@ -73,10 +78,10 @@ public class AgentPlanTemplateFactory {
                 List.of("resumeId", "jobId"),
                 List.of(
                         step("确认话术上下文", "确认简历、岗位和话术风格。", "GreetingGenerateTool.generateGreeting",
-                                Map.of("resumeId", "必填", "jobId", "必填", "style", "可选"),
+                                schema("GreetingGenerateTool.generateGreeting"),
                                 "确认生成话术所需上下文完整。"),
                         step("生成沟通话术", "生成自然、克制、与岗位匹配的 HR 开场白。", "GreetingGenerateTool.generateGreeting",
-                                Map.of("resumeId", "来自已抽取参数", "jobId", "来自已抽取参数"),
+                                schema("GreetingGenerateTool.generateGreeting"),
                                 "返回可复制的话术，并由后端自动创建沟通记录。")
                 )
         );
@@ -92,7 +97,7 @@ public class AgentPlanTemplateFactory {
                                 Map.of("keyword", "可选", "city", "可选", "minSalary", "可选"),
                                 "得到可用于岗位检索的筛选条件。"),
                         step("检索岗位", "按条件搜索岗位；如果用户强调偏好推荐，则优先调用推荐工具。", "JobSearchTool.searchJobs / JobRecommendTool.recommendJobs",
-                                Map.of("keyword", "可选", "city", "可选", "minSalary", "可选"),
+                                schema("JobSearchTool.searchJobs / JobRecommendTool.recommendJobs"),
                                 "返回岗位列表、公司、薪资、地点和推荐理由。")
                 )
         );
@@ -105,10 +110,10 @@ public class AgentPlanTemplateFactory {
                 List.of("applicationId"),
                 List.of(
                         step("确认投递记录", "确认 applicationId 属于当前用户。", "InterviewPrepareTool.prepareInterview",
-                                Map.of("applicationId", "必填", "resumeId", "可选"),
+                                schema("InterviewPrepareTool.prepareInterview"),
                                 "确认投递记录可用于生成面试准备。"),
                         step("生成面试材料", "生成技术题、项目追问题、HR 问题和复习建议。", "InterviewPrepareTool.prepareInterview",
-                                Map.of("applicationId", "来自已抽取参数"),
+                                schema("InterviewPrepareTool.prepareInterview"),
                                 "返回面试准备材料和复习建议。")
                 )
         );
@@ -121,10 +126,10 @@ public class AgentPlanTemplateFactory {
                 List.of("mockSessionId"),
                 List.of(
                         step("确认模拟面试会话", "确认 mockSessionId 属于当前用户。", "MockInterviewReviewTool.generateMockInterviewReview",
-                                Map.of("mockSessionId", "必填"),
+                                schema("MockInterviewReviewTool.generateMockInterviewReview"),
                                 "确认模拟面试会话已存在且可复盘。"),
                         step("生成复盘", "汇总回答表现、薄弱题目和提升建议。", "MockInterviewReviewTool.generateMockInterviewReview",
-                                Map.of("mockSessionId", "来自已抽取参数"),
+                                schema("MockInterviewReviewTool.generateMockInterviewReview"),
                                 "返回总分、优势、短板、薄弱题和提升计划。")
                 )
         );
@@ -150,7 +155,7 @@ public class AgentPlanTemplateFactory {
                 List.of(),
                 List.of(
                         step("检索知识库", "检索当前用户简历、岗位、公司和沟通记录。", "RagSearchTool.searchKnowledge",
-                                Map.of("query", "用户原始问题", "limit", "建议3到5"),
+                                schema("RagSearchTool.searchKnowledge"),
                                 "获得可用于回答的相关知识片段。"),
                         step("生成回答", "基于知识片段回答用户问题，知识不足时明确说明。", null,
                                 Map.of("answerLanguage", "中文"),
@@ -167,5 +172,9 @@ public class AgentPlanTemplateFactory {
             String completionCriteria
     ) {
         return new AgentPlanStepTemplate(stepName, stepGoal, toolName, toolInputSchema, completionCriteria);
+    }
+
+    private Map<String, Object> schema(String toolExpression) {
+        return toolSchemaRegistry.buildPlanInputSchema(toolExpression);
     }
 }

@@ -2,14 +2,18 @@ package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.InterviewPrepareService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.interview.InterviewPrepareVO;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -24,9 +28,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class InterviewPrepareTool {
 
+    private static final String TOOL_NAME = "InterviewPrepareTool.prepareInterview";
+
     private final InterviewPrepareService interviewPrepareService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 生成面试准备内容。
@@ -50,12 +57,14 @@ public class InterviewPrepareTool {
         Long conversationId = AgentRuntimeContext.getConversationId();
         String intentCode = AgentRuntimeContext.getIntentCode();
 
-        Map<String, Object> input = Map.of(
-                "applicationId", applicationId,
-                "resumeId", resumeId
-        );
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("applicationId", applicationId);
+        input.put("resumeId", resumeId);
 
+        AgentToolSchema schema = null;
         try {
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
             InterviewPrepareVO result = interviewPrepareService.generatePrepare(
                     userId,
@@ -70,8 +79,8 @@ public class InterviewPrepareTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "InterviewPrepareTool.prepareInterview",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     result,
                     "SUCCESS",
                     null,
@@ -87,14 +96,17 @@ public class InterviewPrepareTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "InterviewPrepareTool.prepareInterview",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("面试准备工具调用失败: " + e.getMessage(), e);
         }
     }

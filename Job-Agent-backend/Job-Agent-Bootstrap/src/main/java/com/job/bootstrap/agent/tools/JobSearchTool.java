@@ -3,9 +3,12 @@ package com.job.bootstrap.agent.tools;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobPositionService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.position.JobPosition;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
@@ -33,9 +36,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class JobSearchTool {
 
+    private static final String TOOL_NAME = "JobSearchTool.searchJobs";
+
     private final JobPositionService jobPositionService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 搜索岗位。
@@ -68,7 +74,11 @@ public class JobSearchTool {
         input.put("educationReq", educationReq);
         input.put("experienceReq", experienceReq);
 
+        AgentToolSchema schema = null;
         try {
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             /*
              * 调用已有岗位分页查询能力。
              * pageNo=1, pageSize=5:
@@ -106,8 +116,8 @@ public class JobSearchTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "JobSearchTool.searchJobs",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     output,
                     "SUCCESS",
                     null,
@@ -121,14 +131,17 @@ public class JobSearchTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "JobSearchTool.searchJobs",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("岗位搜索工具调用失败: " + e.getMessage(), e);
         }
     }

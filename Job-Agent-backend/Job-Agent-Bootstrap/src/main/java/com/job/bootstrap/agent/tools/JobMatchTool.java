@@ -2,14 +2,18 @@ package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobMatchService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.match.JobMatchVO;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -21,9 +25,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class JobMatchTool {
 
+    private static final String TOOL_NAME = "JobMatchTool.matchJob";
+
     private final JobMatchService jobMatchService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 分析当前登录用户某份简历与岗位的匹配度。
@@ -48,11 +55,15 @@ public class JobMatchTool {
         Long conversationId = AgentRuntimeContext.getConversationId();
         String intentCode = AgentRuntimeContext.getIntentCode();
 
-        Map<String, Object> input = Map.of(
-                "resumeId", resumeId,
-                "jobId", jobId
-        );
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("resumeId", resumeId);
+        input.put("jobId", jobId);
+
+        AgentToolSchema schema = null;
         try {
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             /*
              * 调用已有的岗位匹配服务。
              * 注意:
@@ -68,8 +79,8 @@ public class JobMatchTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "JobMatchTool.matchJob",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     result,
                     "SUCCESS",
                     null,
@@ -85,8 +96,8 @@ public class JobMatchTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "JobMatchTool.matchJob",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
@@ -97,6 +108,9 @@ public class JobMatchTool {
              * 把异常继续抛给 AgentChatServiceImpl。
              * AgentChatServiceImpl 会记录主链路失败日志。
              */
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("岗位匹配工具调用失败: " + e.getMessage(), e);
         }
     }

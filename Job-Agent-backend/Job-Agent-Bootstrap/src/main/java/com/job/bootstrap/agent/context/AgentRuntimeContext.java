@@ -1,5 +1,9 @@
 package com.job.bootstrap.agent.context;
 
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * 作者: hfj
  * 功能: Agent 单次请求运行时上下文
@@ -32,11 +36,31 @@ public class AgentRuntimeContext {
      * @param intentCode 当前识别出来的用户意图
      */
     public static void set(Long userId, Long conversationId, String traceId, String intentCode) {
+        set(userId, conversationId, traceId, intentCode, Set.of());
+    }
+
+    /**
+     * 设置当前 Agent 请求上下文。
+     *
+     * @param userId 当前登录用户ID
+     * @param conversationId 当前会话ID
+     * @param traceId 当前对话链路ID
+     * @param intentCode 当前识别出来的用户意图
+     * @param confirmedToolNames 本轮用户已确认允许执行的工具名
+     */
+    public static void set(
+            Long userId,
+            Long conversationId,
+            String traceId,
+            String intentCode,
+            Collection<String> confirmedToolNames
+    ) {
         Context context = new Context();
         context.setUserId(userId);
         context.setConversationId(conversationId);
         context.setTraceId(traceId);
         context.setIntentCode(intentCode);
+        context.setConfirmedToolNames(confirmedToolNames);
         CONTEXT_HOLDER.set(context);
     }
 
@@ -103,6 +127,17 @@ public class AgentRuntimeContext {
     }
 
     /**
+     * 判断指定工具是否已经获得用户确认。
+     *
+     * @param toolName 工具名
+     * @return true 表示本轮请求已确认
+     */
+    public static boolean isToolConfirmed(String toolName) {
+        Context context = CONTEXT_HOLDER.get();
+        return context != null && context.isToolConfirmed(toolName);
+    }
+
+    /**
      * 清理上下文。
      * 注意:
      * 1. 这个方法必须在 finally 中调用。
@@ -138,6 +173,12 @@ public class AgentRuntimeContext {
          */
         private String intentCode;
 
+        /**
+         * 本轮用户已确认允许执行的工具名。
+         * 这里保存工具唯一名称，例如 GreetingGenerateTool.generateGreeting。
+         */
+        private Set<String> confirmedToolNames = Set.of();
+
         public Long getUserId() {
             return userId;
         }
@@ -168,6 +209,29 @@ public class AgentRuntimeContext {
 
         public void setIntentCode(String intentCode) {
             this.intentCode = intentCode;
+        }
+
+        public Set<String> getConfirmedToolNames() {
+            return confirmedToolNames;
+        }
+
+        public void setConfirmedToolNames(Collection<String> confirmedToolNames) {
+            if (confirmedToolNames == null || confirmedToolNames.isEmpty()) {
+                this.confirmedToolNames = Set.of();
+                return;
+            }
+
+            Set<String> values = new HashSet<>();
+            for (String toolName : confirmedToolNames) {
+                if (toolName != null && !toolName.isBlank()) {
+                    values.add(toolName.trim());
+                }
+            }
+            this.confirmedToolNames = values;
+        }
+
+        public boolean isToolConfirmed(String toolName) {
+            return toolName != null && confirmedToolNames.contains(toolName.trim());
         }
     }
 }

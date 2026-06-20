@@ -2,14 +2,18 @@ package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobGreetingService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.greeting.GreetingVO;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -25,9 +29,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class GreetingGenerateTool {
 
+    private static final String TOOL_NAME = "GreetingGenerateTool.generateGreeting";
+
     private final JobGreetingService jobGreetingService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 生成 HR 打招呼语。
@@ -55,13 +62,20 @@ public class GreetingGenerateTool {
         Long conversationId = AgentRuntimeContext.getConversationId();
         String intentCode = AgentRuntimeContext.getIntentCode();
 
-        Map<String, Object> input = Map.of(
-                "resumeId", resumeId,
-                "jobId", jobId,
-                "style", style == null ? "礼貌" : style
-        );
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("resumeId", resumeId);
+        input.put("jobId", jobId);
+        input.put("style", style == null ? "礼貌" : style);
 
+        AgentToolSchema schema = null;
         try {
+            /*
+             * 该工具会自动创建沟通记录，Schema 中要求用户确认。
+             * 如果本轮请求没有 confirmedToolNames，Guard 会阻止执行。
+             */
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             GreetingVO result = jobGreetingService.generateGreeting(
                     userId,
                     resumeId,
@@ -76,8 +90,8 @@ public class GreetingGenerateTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "GreetingGenerateTool.generateGreeting",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     result,
                     "SUCCESS",
                     null,
@@ -93,14 +107,17 @@ public class GreetingGenerateTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "GreetingGenerateTool.generateGreeting",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("打招呼语生成工具调用失败: " + e.getMessage(), e);
         }
     }

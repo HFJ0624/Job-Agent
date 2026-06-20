@@ -2,9 +2,12 @@ package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentTraceService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
@@ -23,9 +26,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class RagSearchTool {
 
+    private static final String TOOL_NAME = "RagSearchTool.searchKnowledge";
+
     private final RagRetrievalService ragRetrievalService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 检索当前用户相关的简历、岗位、公司和沟通记录。
@@ -53,7 +59,11 @@ public class RagSearchTool {
         input.put("query", query);
         input.put("limit", limit);
 
+        AgentToolSchema schema = null;
         try {
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             /*
              * 1. Tool 不直接拼 SQL，也不直接操作向量库。
              * 2. Tool 只调用领域服务，便于记录 Trace、做权限隔离、后续替换检索策略。
@@ -68,8 +78,8 @@ public class RagSearchTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "RagSearchTool.searchKnowledge",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     output,
                     "SUCCESS",
                     null,
@@ -82,14 +92,17 @@ public class RagSearchTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "RagSearchTool.searchKnowledge",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("RAG 知识库检索工具调用失败: " + e.getMessage(), e);
         }
     }

@@ -3,15 +3,19 @@ package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.UserJobPreferenceService;
 import com.job.common.dto.preference.JobRecommendQueryDTO;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.preference.JobRecommendVO;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,9 +30,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class JobRecommendTool {
 
+    private static final String TOOL_NAME = "JobRecommendTool.recommendJobs";
+
     private final UserJobPreferenceService userJobPreferenceService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 根据当前用户求职偏好推荐岗位。
@@ -50,13 +57,16 @@ public class JobRecommendTool {
         Long conversationId = AgentRuntimeContext.getConversationId();
         String intentCode = AgentRuntimeContext.getIntentCode();
 
-        Map<String, Object> input = Map.of(
-                "keyword", keyword,
-                "city", city,
-                "limit",limit
-        );
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("keyword", keyword);
+        input.put("city", city);
+        input.put("limit", limit);
 
+        AgentToolSchema schema = null;
         try {
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             JobRecommendQueryDTO query = new JobRecommendQueryDTO();
             query.setKeyword(keyword);
             query.setCity(city);
@@ -71,8 +81,8 @@ public class JobRecommendTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "JobRecommendTool.recommendJobs",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     list,
                     "SUCCESS",
                     null,
@@ -88,14 +98,17 @@ public class JobRecommendTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "JobRecommendTool.recommendJobs",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("岗位推荐失败: " + e.getMessage(), e);
         }
     }

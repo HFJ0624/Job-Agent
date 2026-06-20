@@ -1,15 +1,19 @@
 package com.job.bootstrap.agent.tools;
 
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobResumeScoreService;
+import com.job.common.agent.tool.AgentToolSchema;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.vo.resume.ResumeScoreVO;
+import com.job.exception.AgentToolException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -25,9 +29,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ResumeAnalyzeTool {
 
+    private static final String TOOL_NAME = "ResumeAnalyzeTool.analyzeResume";
+
     private final JobResumeScoreService jobResumeScoreService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 分析简历。
@@ -52,12 +59,19 @@ public class ResumeAnalyzeTool {
         Long conversationId = AgentRuntimeContext.getConversationId();
         String intentCode = AgentRuntimeContext.getIntentCode();
 
-        Map<String, Object> input = Map.of(
-                "resumeId", resumeId,
-                "targetPosition", targetPosition
-        );
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("resumeId", resumeId);
+        input.put("targetPosition", targetPosition);
 
+        AgentToolSchema schema = null;
         try {
+            /*
+             * 执行前统一校验工具 Schema。
+             * 这里会检查必填参数、权限和用户确认策略。
+             */
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             ResumeScoreVO result = jobResumeScoreService.scoreResume(userId, resumeId, targetPosition);
 
             String json = objectMapper.writeValueAsString(result);
@@ -69,8 +83,8 @@ public class ResumeAnalyzeTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "ResumeAnalyzeTool.analyzeResume",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     result,
                     "SUCCESS",
                     null,
@@ -86,14 +100,17 @@ public class ResumeAnalyzeTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "ResumeAnalyzeTool.analyzeResume",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("简历分析失败: " + e.getMessage(), e);
         }
     }

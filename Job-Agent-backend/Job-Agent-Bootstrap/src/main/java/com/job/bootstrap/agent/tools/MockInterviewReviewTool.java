@@ -2,14 +2,18 @@ package com.job.bootstrap.agent.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.MockInterviewReviewService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.interview.MockInterviewReviewVO;
+import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -23,9 +27,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class MockInterviewReviewTool {
 
+    private static final String TOOL_NAME = "MockInterviewReviewTool.generateMockInterviewReview";
+
     private final MockInterviewReviewService mockInterviewReviewService;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
+    private final AgentToolGuard agentToolGuard;
 
     /**
      * 生成模拟面试复盘报告。
@@ -44,10 +51,14 @@ public class MockInterviewReviewTool {
         Long conversationId = AgentRuntimeContext.getConversationId();
         String intentCode = AgentRuntimeContext.getIntentCode();
 
-        Map<String, Object> input = Map.of(
-                "sessionId", sessionId
-        );
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("sessionId", sessionId);
+
+        AgentToolSchema schema = null;
         try {
+            schema = agentToolGuard.validate(TOOL_NAME, input);
+            Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
+
             MockInterviewReviewVO vo = mockInterviewReviewService.generateReview(userId, sessionId);
 
             /*
@@ -57,8 +68,8 @@ public class MockInterviewReviewTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "MockInterviewReviewTool.generateMockInterviewReview",
-                    input,
+                    TOOL_NAME,
+                    traceInput,
                     vo,
                     "SUCCESS",
                     null,
@@ -74,14 +85,17 @@ public class MockInterviewReviewTool {
                     userId,
                     conversationId,
                     intentCode,
-                    "MockInterviewReviewTool.generateMockInterviewReview",
-                    input,
+                    TOOL_NAME,
+                    agentToolGuard.buildTraceInput(TOOL_NAME, schema, input),
                     null,
                     "FAILED",
                     e.getMessage(),
                     System.currentTimeMillis() - start
             );
 
+            if (e instanceof AgentToolException toolException) {
+                throw toolException;
+            }
             throw new RuntimeException("模拟面试复盘失败: " + e.getMessage(), e);
         }
     }

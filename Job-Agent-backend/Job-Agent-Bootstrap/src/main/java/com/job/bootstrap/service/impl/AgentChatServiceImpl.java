@@ -6,6 +6,7 @@ import com.job.agent.JobAgentAssistant;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
+import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
@@ -17,6 +18,7 @@ import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
 import com.job.common.vo.agent.AgentPlanStepVO;
 import com.job.common.vo.agent.AgentPlanVO;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.enums.AgentPlanStatus;
 import lombok.RequiredArgsConstructor;
@@ -86,6 +88,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AgentPlanningService agentPlanningService;
 
     /**
+     * Agent 工具 Schema 注册中心。
+     */
+    private final AgentToolSchemaRegistry agentToolSchemaRegistry;
+
+    /**
      * 统一 JSON 工具。
      */
     private final ObjectMapper objectMapper;
@@ -96,11 +103,12 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param userId 当前登录用户ID
      * @param conversationId 会话ID，可以为空
      * @param message 用户输入
+     * @param confirmedToolNames 本轮用户已确认允许执行的工具名
      * @return Agent 回复
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public AgentChatVO chat(Long userId, Long conversationId, String message) {
+    public AgentChatVO chat(Long userId, Long conversationId, String message, List<String> confirmedToolNames) {
         long start = System.currentTimeMillis();
 
         /*
@@ -166,6 +174,36 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentChatVO vo = new AgentChatVO();
                 vo.setConversationId(conversation.getId());
                 vo.setAnswer(answer);
+                vo.setRequiresUserConfirmation(false);
+                vo.setRequiredConfirmationToolNames(List.of());
+                return vo;
+            }
+
+            List<AgentToolSchema> unconfirmedTools = findUnconfirmedTools(plan, confirmedToolNames);
+            if (!unconfirmedTools.isEmpty()) {
+                String answer = buildConfirmationAnswer(unconfirmedTools);
+                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+                touchConversation(conversation);
+
+                agentTraceService.saveTrace(
+                        traceId,
+                        userId,
+                        conversation.getId(),
+                        intentCode.name(),
+                        null,
+                        buildPlanOnlyTraceInput(message, plan, confirmedToolNames),
+                        buildPlanOnlyTraceOutput(answer, plan, unconfirmedTools),
+                        "SUCCESS",
+                        null,
+                        System.currentTimeMillis() - start
+                );
+
+                AgentChatVO vo = new AgentChatVO();
+                vo.setConversationId(conversation.getId());
+                vo.setAnswer(answer);
+                vo.setRequiresUserConfirmation(true);
+                vo.setRequiredConfirmationToolNames(toToolNames(unconfirmedTools));
+                vo.setConfirmationMessage("请确认是否允许执行这些有副作用的工具。");
                 return vo;
             }
 
@@ -181,7 +219,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     userId,
                     conversation.getId(),
                     traceId,
-                    intentCode.name()
+                    intentCode.name(),
+                    confirmedToolNames
             );
 
             /*
@@ -248,6 +287,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentChatVO vo = new AgentChatVO();
             vo.setConversationId(conversation.getId());
             vo.setAnswer(answer);
+            vo.setRequiresUserConfirmation(false);
+            vo.setRequiredConfirmationToolNames(List.of());
             return vo;
 
         } catch (Exception e) {
@@ -425,6 +466,60 @@ public class AgentChatServiceImpl implements AgentChatService {
         return builder.toString();
     }
 
+    private List<AgentToolSchema> findUnconfirmedTools(AgentPlanVO plan, List<String> confirmedToolNames) {
+        if (plan == null || CollectionUtils.isEmpty(plan.getSteps())) {
+            return List.of();
+        }
+
+        Map<String, AgentToolSchema> unconfirmedTools = new LinkedHashMap<>();
+        for (AgentPlanStepVO step : plan.getSteps()) {
+            for (AgentToolSchema schema : agentToolSchemaRegistry.findByToolExpression(step.getToolName())) {
+                if (Boolean.TRUE.equals(schema.getRequiresUserConfirmation())
+                        && !isConfirmed(schema.getToolName(), confirmedToolNames)) {
+                    unconfirmedTools.put(schema.getToolName(), schema);
+                }
+            }
+        }
+        return List.copyOf(unconfirmedTools.values());
+    }
+
+    private boolean isConfirmed(String toolName, List<String> confirmedToolNames) {
+        if (!StringUtils.hasText(toolName) || CollectionUtils.isEmpty(confirmedToolNames)) {
+            return false;
+        }
+
+        return confirmedToolNames.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .anyMatch(toolName::equals);
+    }
+
+    private String buildConfirmationAnswer(List<AgentToolSchema> unconfirmedTools) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("我已经把你的目标拆成了计划，但里面包含需要你确认后才能执行的操作。\n\n");
+        builder.append("需要确认的工具：\n");
+
+        for (AgentToolSchema schema : unconfirmedTools) {
+            builder.append("- ")
+                    .append(schema.getDisplayName())
+                    .append("（")
+                    .append(schema.getToolName())
+                    .append("）：")
+                    .append(schema.getConfirmationMessage())
+                    .append("\n");
+        }
+
+        builder.append("\n确认后请重新发送请求，并在 confirmedToolNames 中带上对应工具名。");
+        return builder.toString();
+    }
+
+    private List<String> toToolNames(List<AgentToolSchema> schemas) {
+        if (CollectionUtils.isEmpty(schemas)) {
+            return List.of();
+        }
+        return schemas.stream().map(AgentToolSchema::getToolName).toList();
+    }
+
     private List<String> readStringList(String json) {
         if (!StringUtils.hasText(json)) {
             return List.of();
@@ -489,17 +584,55 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     private Map<String, Object> buildPlanOnlyTraceInput(String message, AgentPlanVO plan) {
+        return buildPlanOnlyTraceInput(message, plan, List.of());
+    }
+
+    private Map<String, Object> buildPlanOnlyTraceInput(
+            String message,
+            AgentPlanVO plan,
+            List<String> confirmedToolNames
+    ) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
+        input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
         input.put("agentPlan", buildPlanSnapshot(plan));
         return input;
     }
 
     private Map<String, Object> buildPlanOnlyTraceOutput(String answer, AgentPlanVO plan) {
+        return buildPlanOnlyTraceOutput(answer, plan, List.of());
+    }
+
+    private Map<String, Object> buildPlanOnlyTraceOutput(
+            String answer,
+            AgentPlanVO plan,
+            List<AgentToolSchema> unconfirmedTools
+    ) {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("answer", answer);
         output.put("agentPlan", buildPlanSnapshot(plan));
+        output.put("unconfirmedTools", buildToolSchemaSnapshots(unconfirmedTools));
         return output;
+    }
+
+    private List<Map<String, Object>> buildToolSchemaSnapshots(List<AgentToolSchema> schemas) {
+        if (CollectionUtils.isEmpty(schemas)) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> snapshots = new ArrayList<>();
+        for (AgentToolSchema schema : schemas) {
+            Map<String, Object> snapshot = new LinkedHashMap<>();
+            snapshot.put("toolName", schema.getToolName());
+            snapshot.put("displayName", schema.getDisplayName());
+            snapshot.put("permissionType", schema.getPermissionType());
+            snapshot.put("sideEffectType", schema.getSideEffectType());
+            snapshot.put("hasSideEffect", schema.getHasSideEffect());
+            snapshot.put("requiresUserConfirmation", schema.getRequiresUserConfirmation());
+            snapshot.put("confirmationMessage", schema.getConfirmationMessage());
+            snapshots.add(snapshot);
+        }
+        return snapshots;
     }
 
     private Map<String, Object> buildPlanSnapshot(AgentPlanVO plan) {
