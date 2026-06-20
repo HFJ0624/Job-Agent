@@ -12,18 +12,21 @@ import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentChatService;
+import com.job.bootstrap.service.AgentMemoryService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
+import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.common.vo.agent.AgentPlanStepVO;
 import com.job.common.vo.agent.AgentPlanVO;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.enums.AgentPlanStatus;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -47,6 +50,7 @@ import java.util.UUID;
  * 6. 保存主链路 Trace。
  * 日期: 2026/6/8 15:20
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AgentChatServiceImpl implements AgentChatService {
@@ -55,6 +59,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private static final String ROLE_USER = "USER";
     private static final String ROLE_ASSISTANT = "ASSISTANT";
     private static final int PRE_RETRIEVAL_LIMIT = 5;
+    private static final int MEMORY_RETRIEVAL_LIMIT = 5;
     private static final int RAG_CONTENT_PREVIEW_LENGTH = 500;
     private static final String RAG_PRE_RETRIEVAL_TOOL_NAME = "RagPreRetrieval.searchKnowledge";
 
@@ -93,6 +98,12 @@ public class AgentChatServiceImpl implements AgentChatService {
      * Agent 计划执行器。
      */
     private final AgentPlanExecutorService agentPlanExecutorService;
+
+    /**
+     * Agent 长期记忆服务。
+     * 本服务负责在执行总结前召回历史偏好、简历画像、面试反馈和历史决策。
+     */
+    private final AgentMemoryService agentMemoryService;
 
     /**
      * Agent 工具 Schema 注册中心。
@@ -267,6 +278,16 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanExecutionResult executionResult = agentPlanExecutorService.executePlan(userId, plan.getId());
 
             /*
+             * 7.1 召回长期记忆。
+             *
+             * 设计说明:
+             * 1. 这里放在 Executor 之后，是为了让本轮工具结果先完成沉淀，再统一召回历史和最新记忆。
+             * 2. 召回结果只进入 Summary Assistant，不直接改写工具入参，避免破坏 Tool Schema 的第一版边界。
+             * 3. 记忆库不可用时不影响主流程，retrieveLongTermMemories 内部会降级为空列表。
+             */
+            List<AgentMemoryVO> retrievedMemories = retrieveLongTermMemories(userId, message, plan);
+
+            /*
              * 7. 总结执行结果。
              *
              * 注意:
@@ -275,7 +296,7 @@ public class AgentChatServiceImpl implements AgentChatService {
              * 3. 这样可以避免已经执行过的工具被模型重复调用。
              */
             String answer = jobAgentSummaryAssistant.summarize(
-                    buildExecutorSummaryMessage(message, plan, executionResult)
+                    buildExecutorSummaryMessage(message, plan, executionResult, retrievedMemories)
             );
 
             /*
@@ -300,8 +321,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     conversation.getId(),
                     activeIntentCode,
                     null,
-                    buildExecutorTraceInput(message, plan, confirmedToolNames),
-                    buildExecutorTraceOutput(answer, plan, executionResult),
+                    buildExecutorTraceInput(message, plan, confirmedToolNames, retrievedMemories),
+                    buildExecutorTraceOutput(answer, plan, executionResult, retrievedMemories),
                     "SUCCESS",
                     null,
                     System.currentTimeMillis() - start
@@ -545,15 +566,88 @@ public class AgentChatServiceImpl implements AgentChatService {
         return schemas.stream().map(AgentToolSchema::getToolName).toList();
     }
 
+    /**
+     * 召回用户长期记忆。
+     *
+     * 方法步骤:
+     * 1. 用用户原始输入、计划目标、意图和已抽取参数拼出检索词。
+     * 2. 调用 AgentMemoryService 做结构化关键词检索。
+     * 3. 如果记忆表未创建或查询失败，返回空列表，不影响本轮 Agent 回复。
+     *
+     * 注意:
+     * 第一版只把长期记忆注入 Summary Assistant。
+     * 后续如果要让记忆影响工具入参，可以在 Executor 的参数合并阶段读取固定 memoryKey。
+     */
+    private List<AgentMemoryVO> retrieveLongTermMemories(Long userId, String message, AgentPlanVO plan) {
+        try {
+            return agentMemoryService.searchMemories(
+                    userId,
+                    buildMemoryQuery(message, plan),
+                    MEMORY_RETRIEVAL_LIMIT
+            );
+        } catch (Exception exception) {
+            log.warn(
+                    "Agent 长期记忆召回失败，userId={}, planId={}, error={}",
+                    userId,
+                    plan == null ? null : plan.getId(),
+                    exception.getMessage(),
+                    exception
+            );
+            return List.of();
+        }
+    }
+
+    private String buildMemoryQuery(String message, AgentPlanVO plan) {
+        StringBuilder builder = new StringBuilder();
+        if (StringUtils.hasText(message)) {
+            builder.append(message).append(' ');
+        }
+        if (plan != null) {
+            appendIfText(builder, plan.getUserGoal());
+            appendIfText(builder, plan.getIntentCode());
+            appendIfText(builder, plan.getPlanTitle());
+            appendIfText(builder, plan.getPlanSummary());
+            appendIfText(builder, plan.getExtractedParamsJson());
+        }
+        return builder.toString().trim();
+    }
+
+    private void appendIfText(StringBuilder builder, String value) {
+        if (StringUtils.hasText(value)) {
+            builder.append(value).append(' ');
+        }
+    }
+
     private String buildExecutorSummaryMessage(
             String originalMessage,
             AgentPlanVO plan,
-            AgentPlanExecutionResult executionResult
+            AgentPlanExecutionResult executionResult,
+            List<AgentMemoryVO> retrievedMemories
     ) {
         StringBuilder builder = new StringBuilder();
         builder.append("【当前用户输入】\n")
                 .append(originalMessage)
                 .append("\n\n");
+
+        builder.append("【已召回的长期记忆】\n");
+        if (CollectionUtils.isEmpty(retrievedMemories)) {
+            builder.append("本轮没有召回到可用长期记忆。\n\n");
+        } else {
+            for (int i = 0; i < retrievedMemories.size(); i++) {
+                AgentMemoryVO memory = retrievedMemories.get(i);
+                builder.append(i + 1)
+                        .append(". 类型: ")
+                        .append(nullToDash(memory.getMemoryType()))
+                        .append("，键: ")
+                        .append(nullToDash(memory.getMemoryKey()))
+                        .append("，摘要: ")
+                        .append(nullToDash(memory.getSummary()))
+                        .append("\n内容: ")
+                        .append(preview(memory.getMemoryValue()))
+                        .append("\n");
+            }
+            builder.append("\n");
+        }
 
         builder.append("【计划原始目标】\n")
                 .append(plan.getUserGoal())
@@ -579,12 +673,15 @@ public class AgentChatServiceImpl implements AgentChatService {
     private Map<String, Object> buildExecutorTraceInput(
             String message,
             AgentPlanVO plan,
-            List<String> confirmedToolNames
+            List<String> confirmedToolNames,
+            List<AgentMemoryVO> retrievedMemories
     ) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
         input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
         input.put("agentPlan", buildPlanSnapshot(plan));
+        input.put("memoryHitCount", retrievedMemories == null ? 0 : retrievedMemories.size());
+        input.put("retrievedMemories", buildMemorySnapshots(retrievedMemories));
         input.put("executionMode", "PLAN_EXECUTOR");
         return input;
     }
@@ -592,14 +689,41 @@ public class AgentChatServiceImpl implements AgentChatService {
     private Map<String, Object> buildExecutorTraceOutput(
             String answer,
             AgentPlanVO plan,
-            AgentPlanExecutionResult executionResult
+            AgentPlanExecutionResult executionResult,
+            List<AgentMemoryVO> retrievedMemories
     ) {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("answer", answer);
         output.put("planId", plan == null ? null : plan.getId());
         output.put("executionResult", executionResult);
+        output.put("memoryHitCount", retrievedMemories == null ? 0 : retrievedMemories.size());
+        output.put("retrievedMemories", buildMemorySnapshots(retrievedMemories));
         output.put("executionMode", "PLAN_EXECUTOR");
         return output;
+    }
+
+    private List<Map<String, Object>> buildMemorySnapshots(List<AgentMemoryVO> memories) {
+        if (CollectionUtils.isEmpty(memories)) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> snapshots = new ArrayList<>();
+        for (AgentMemoryVO memory : memories) {
+            Map<String, Object> snapshot = new LinkedHashMap<>();
+            snapshot.put("id", memory.getId());
+            snapshot.put("userId", memory.getUserId());
+            snapshot.put("memoryType", memory.getMemoryType());
+            snapshot.put("memoryKey", memory.getMemoryKey());
+            snapshot.put("summary", memory.getSummary());
+            snapshot.put("sourceType", memory.getSourceType());
+            snapshot.put("sourceId", memory.getSourceId());
+            snapshot.put("confidence", memory.getConfidence());
+            snapshot.put("importance", memory.getImportance());
+            snapshot.put("lastUsedTime", memory.getLastUsedTime());
+            snapshot.put("contentPreview", preview(memory.getMemoryValue()));
+            snapshots.add(snapshot);
+        }
+        return snapshots;
     }
 
     private List<String> readStringList(String json) {

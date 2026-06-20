@@ -10,6 +10,7 @@ import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
+import com.job.bootstrap.service.AgentMemoryExtractionService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
@@ -17,6 +18,7 @@ import com.job.enums.AgentPlanStatus;
 import com.job.enums.AgentPlanStepStatus;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -32,6 +34,7 @@ import java.util.Map;
  * 功能:Agent 计划执行服务实现
  * 日期:2026/6/20
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
@@ -42,6 +45,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     private final AgentPlanMapper agentPlanMapper;
     private final AgentPlanStepMapper agentPlanStepMapper;
     private final AgentToolInvoker agentToolInvoker;
+    private final AgentMemoryExtractionService agentMemoryExtractionService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -102,13 +106,22 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
 
         updatePlanStatus(plan, failed, failReason);
 
-        return AgentPlanExecutionResult.builder()
+        AgentPlanExecutionResult executionResult = AgentPlanExecutionResult.builder()
                 .planId(plan.getId())
                 .success(!failed)
                 .status(failed ? AgentPlanStatus.FAILED.name() : AgentPlanStatus.COMPLETED.name())
                 .message(failed ? "计划执行失败: " + failReason : "计划执行完成")
                 .steps(stepResults)
                 .build();
+
+        /*
+         * 长期记忆沉淀放在计划状态更新之后:
+         * 1. Executor 已经完成工具调用，工具结果和步骤状态都是确定的。
+         * 2. 记忆提取失败不应该影响用户本轮对话，所以这里捕获异常并记录日志。
+         * 3. 如果数据库还没有创建 agent_long_term_memory 表，本轮 Agent 仍然可以正常返回。
+         */
+        recordLongTermMemory(plan, executionResult);
+        return executionResult;
     }
 
     private AgentPlan loadUserPlan(Long userId, Long planId) {
@@ -247,6 +260,20 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         plan.setFailReason(failed ? failReason : null);
         plan.setUpdateTime(new Date());
         agentPlanMapper.updateById(plan);
+    }
+
+    private void recordLongTermMemory(AgentPlan plan, AgentPlanExecutionResult executionResult) {
+        try {
+            agentMemoryExtractionService.extractFromExecution(plan, executionResult);
+        } catch (Exception exception) {
+            log.warn(
+                    "Agent 长期记忆提取失败，planId={}, userId={}, error={}",
+                    plan == null ? null : plan.getId(),
+                    plan == null ? null : plan.getUserId(),
+                    exception.getMessage(),
+                    exception
+            );
+        }
     }
 
     private AgentPlanExecutionResult buildExistingPlanResult(
