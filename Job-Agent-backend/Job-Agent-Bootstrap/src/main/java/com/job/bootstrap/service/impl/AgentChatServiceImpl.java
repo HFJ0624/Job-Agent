@@ -1,5 +1,7 @@
 package com.job.bootstrap.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.agent.JobAgentAssistant;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
@@ -8,11 +10,15 @@ import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentChatService;
+import com.job.bootstrap.service.AgentPlanningService;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
+import com.job.common.vo.agent.AgentPlanStepVO;
+import com.job.common.vo.agent.AgentPlanVO;
 import com.job.common.vo.rag.RagSearchResultVO;
+import com.job.enums.AgentPlanStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,6 +81,16 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AgentIntentRouter agentIntentRouter;
 
     /**
+     * Agent Planner 服务。
+     */
+    private final AgentPlanningService agentPlanningService;
+
+    /**
+     * 统一 JSON 工具。
+     */
+    private final ObjectMapper objectMapper;
+
+    /**
      * 执行一次 AI 对话。
      *
      * @param userId 当前登录用户ID
@@ -115,7 +131,44 @@ public class AgentChatServiceImpl implements AgentChatService {
          */
         saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
 
+        AgentPlanVO plan = null;
         try {
+            /*
+             * 先由后端 Planner 生成计划。
+             * 第一版只负责拆目标、识别缺参、给模型明确工具选择约束。
+             */
+            plan = agentPlanningService.createPlan(
+                    userId,
+                    conversation.getId(),
+                    traceId,
+                    intentCode,
+                    message
+            );
+
+            if (needClarification(plan)) {
+                String answer = buildClarificationAnswer(plan);
+                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+                touchConversation(conversation);
+
+                agentTraceService.saveTrace(
+                        traceId,
+                        userId,
+                        conversation.getId(),
+                        intentCode.name(),
+                        null,
+                        buildPlanOnlyTraceInput(message, plan),
+                        buildPlanOnlyTraceOutput(answer, plan),
+                        "SUCCESS",
+                        null,
+                        System.currentTimeMillis() - start
+                );
+
+                AgentChatVO vo = new AgentChatVO();
+                vo.setConversationId(conversation.getId());
+                vo.setAnswer(answer);
+                return vo;
+            }
+
             /*
              * 5. 设置 Agent 运行时上下文。
              *    重点:
@@ -154,7 +207,10 @@ public class AgentChatServiceImpl implements AgentChatService {
              *    - 后端已召回的 RAG 知识片段
              *    - 回答约束
              */
-            String answer = jobAgentAssistant.chat(conversation.getId(), ragContext.enhancedMessage());
+            String answer = jobAgentAssistant.chat(
+                    conversation.getId(),
+                    buildPlannedAgentMessage(ragContext.enhancedMessage(), plan)
+            );
 
             /*
              * 8. 保存助手消息。
@@ -181,8 +237,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     conversation.getId(),
                     intentCode.name(),
                     null,
-                    buildChatTraceInput(message, ragContext),
-                    buildChatTraceOutput(answer, ragContext),
+                    buildChatTraceInput(message, ragContext, plan),
+                    buildChatTraceOutput(answer, ragContext, plan),
                     "SUCCESS",
                     null,
                     System.currentTimeMillis() - start
@@ -205,7 +261,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     conversation.getId(),
                     intentCode.name(),
                     null,
-                    Map.of("message", message),
+                    buildPlanOnlyTraceInput(message, plan),
                     null,
                     "FAILED",
                     e.getMessage(),
@@ -351,16 +407,149 @@ public class AgentChatServiceImpl implements AgentChatService {
         return builder.toString();
     }
 
-    private Map<String, Object> buildChatTraceInput(String message, RagContext ragContext) {
+    private boolean needClarification(AgentPlanVO plan) {
+        return plan != null && AgentPlanStatus.NEED_CLARIFICATION.name().equals(plan.getStatus());
+    }
+
+    private String buildClarificationAnswer(AgentPlanVO plan) {
+        List<String> missingParams = readStringList(plan.getMissingParamsJson());
+        StringBuilder builder = new StringBuilder();
+        builder.append("我已经把你的目标拆成了计划，但现在还缺少必要信息，先不直接调用工具。\n\n");
+        builder.append("需要补充：\n");
+
+        for (String param : missingParams) {
+            builder.append("- ").append(paramLabel(param)).append("\n");
+        }
+
+        builder.append("\n请补充以上信息后，我再继续执行。");
+        return builder.toString();
+    }
+
+    private List<String> readStringList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return List.of();
+        }
+
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {
+            });
+        } catch (Exception exception) {
+            return List.of();
+        }
+    }
+
+    private String paramLabel(String param) {
+        return switch (param) {
+            case "resumeId" -> "简历ID（resumeId）";
+            case "jobId" -> "岗位ID（jobId）";
+            case "applicationId" -> "投递记录ID（applicationId）";
+            case "mockSessionId" -> "模拟面试会话ID（mockSessionId）";
+            default -> param;
+        };
+    }
+
+    private String buildPlannedAgentMessage(String enhancedMessage, AgentPlanVO plan) {
+        if (plan == null) {
+            return enhancedMessage;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("【后端生成的执行计划】\n");
+        builder.append("计划ID: ").append(plan.getId()).append("\n");
+        builder.append("计划标题: ").append(nullToDash(plan.getPlanTitle())).append("\n");
+        builder.append("计划摘要: ").append(nullToDash(plan.getPlanSummary())).append("\n");
+        builder.append("意图: ").append(nullToDash(plan.getIntentCode())).append("\n");
+        builder.append("状态: ").append(nullToDash(plan.getStatus())).append("\n");
+        builder.append("已抽取参数: ").append(nullToDash(plan.getExtractedParamsJson())).append("\n");
+        builder.append("缺失参数: ").append(nullToDash(plan.getMissingParamsJson())).append("\n");
+        builder.append("步骤:\n");
+
+        if (CollectionUtils.isEmpty(plan.getSteps())) {
+            builder.append("- 暂无步骤\n");
+        } else {
+            for (AgentPlanStepVO step : plan.getSteps()) {
+                builder.append(step.getStepNo()).append(". ")
+                        .append(nullToDash(step.getStepName()))
+                        .append("，目标: ")
+                        .append(nullToDash(step.getStepGoal()))
+                        .append("，建议工具: ")
+                        .append(nullToDash(step.getToolName()))
+                        .append("，完成条件: ")
+                        .append(nullToDash(step.getCompletionCriteria()))
+                        .append("\n");
+            }
+        }
+
+        builder.append("\n【执行要求】\n");
+        builder.append("1. 必须优先按后端计划选择工具。\n");
+        builder.append("2. 缺参时不能编造参数，也不能跳过计划要求的关键参数。\n");
+        builder.append("3. 工具返回 JSON 后整理成中文，不要把原始 JSON 直接贴给用户。\n\n");
+        builder.append(enhancedMessage);
+        return builder.toString();
+    }
+
+    private Map<String, Object> buildPlanOnlyTraceInput(String message, AgentPlanVO plan) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("message", message);
+        input.put("agentPlan", buildPlanSnapshot(plan));
+        return input;
+    }
+
+    private Map<String, Object> buildPlanOnlyTraceOutput(String answer, AgentPlanVO plan) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("answer", answer);
+        output.put("agentPlan", buildPlanSnapshot(plan));
+        return output;
+    }
+
+    private Map<String, Object> buildPlanSnapshot(AgentPlanVO plan) {
+        if (plan == null) {
+            return Map.of();
+        }
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", plan.getId());
+        snapshot.put("traceId", plan.getTraceId());
+        snapshot.put("userId", plan.getUserId());
+        snapshot.put("conversationId", plan.getConversationId());
+        snapshot.put("intentCode", plan.getIntentCode());
+        snapshot.put("planTitle", plan.getPlanTitle());
+        snapshot.put("planSummary", plan.getPlanSummary());
+        snapshot.put("requiredParamsJson", plan.getRequiredParamsJson());
+        snapshot.put("extractedParamsJson", plan.getExtractedParamsJson());
+        snapshot.put("missingParamsJson", plan.getMissingParamsJson());
+        snapshot.put("status", plan.getStatus());
+
+        List<Map<String, Object>> steps = new ArrayList<>();
+        if (!CollectionUtils.isEmpty(plan.getSteps())) {
+            for (AgentPlanStepVO step : plan.getSteps()) {
+                Map<String, Object> stepSnapshot = new LinkedHashMap<>();
+                stepSnapshot.put("id", step.getId());
+                stepSnapshot.put("stepNo", step.getStepNo());
+                stepSnapshot.put("stepName", step.getStepName());
+                stepSnapshot.put("stepGoal", step.getStepGoal());
+                stepSnapshot.put("toolName", step.getToolName());
+                stepSnapshot.put("toolInputSchema", step.getToolInputSchema());
+                stepSnapshot.put("completionCriteria", step.getCompletionCriteria());
+                stepSnapshot.put("status", step.getStatus());
+                steps.add(stepSnapshot);
+            }
+        }
+        snapshot.put("steps", steps);
+        return snapshot;
+    }
+
+    private Map<String, Object> buildChatTraceInput(String message, RagContext ragContext, AgentPlanVO plan) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
         input.put("ragEnabled", ragContext.enabled());
         input.put("ragStatus", ragContext.status());
         input.put("ragHitCount", ragContext.results().size());
+        input.put("agentPlan", buildPlanSnapshot(plan));
         return input;
     }
 
-    private Map<String, Object> buildChatTraceOutput(String answer, RagContext ragContext) {
+    private Map<String, Object> buildChatTraceOutput(String answer, RagContext ragContext, AgentPlanVO plan) {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("answer", answer);
         output.put("ragEnabled", ragContext.enabled());
@@ -368,6 +557,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         output.put("ragError", ragContext.errorMessage());
         output.put("ragHitCount", ragContext.results().size());
         output.put("ragReferences", buildRagReferences(ragContext.results(), false));
+        output.put("agentPlan", buildPlanSnapshot(plan));
         return output;
     }
 

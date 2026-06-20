@@ -71,7 +71,15 @@ public class AgentIntentRouter {
         }
 
         /*
-         * 5. 面试准备意图。
+         * 5. 面试复盘意图。
+         * 注意：要放在“面试准备”之前，否则“复盘模拟面试”会先命中面试准备。
+         */
+        if (containsAny(text, "复盘", "面试复盘", "复盘面试")) {
+            return AgentIntentCode.MOCK_INTERVIEW;
+        }
+
+        /*
+         * 6. 面试准备意图。
          * 典型输入:
          * - 帮我准备面试
          * - 根据这个岗位生成面试题
@@ -81,17 +89,10 @@ public class AgentIntentRouter {
         }
 
         /*
-         * 6. 收藏岗位意图。
+         * 7. 收藏岗位意图。
          */
         if (containsAny(text, "收藏", "加入收藏", "保存岗位")) {
             return AgentIntentCode.JOB_FAVORITE;
-        }
-
-        /*
-         * 7. 面试复盘意图。
-         */
-        if (containsAny(text, "复盘", "面试复盘", "复盘面试")) {
-            return AgentIntentCode.MOCK_INTERVIEW;
         }
 
         return AgentIntentCode.GENERAL_CHAT;

@@ -187,6 +187,64 @@ export interface AgentTraceLogInfo {
 }
 
 /**
+ * Agent 计划查询参数。
+ */
+export interface AgentPlanQuery {
+  pageNum: number;
+  pageSize: number;
+  traceId?: string;
+  userId?: string | number;
+  conversationId?: string | number;
+  intentCode?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * Agent 计划步骤展示数据。
+ */
+export interface AgentPlanStepInfo {
+  id: number;
+  planId: number;
+  userId: number;
+  conversationId?: number;
+  stepNo: number;
+  stepName: string;
+  stepGoal?: string;
+  toolName?: string;
+  toolInputSchema?: string;
+  completionCriteria?: string;
+  status: string;
+  resultSummary?: string;
+  errorMsg?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * Agent 计划展示数据。
+ */
+export interface AgentPlanInfo {
+  id: number;
+  traceId: string;
+  userId: number;
+  conversationId?: number;
+  intentCode?: string;
+  userGoal?: string;
+  planTitle?: string;
+  planSummary?: string;
+  requiredParamsJson?: string;
+  extractedParamsJson?: string;
+  missingParamsJson?: string;
+  status: string;
+  failReason?: string;
+  steps?: AgentPlanStepInfo[];
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
  * MyBatis-Plus 分页返回结构。
  */
 /**
