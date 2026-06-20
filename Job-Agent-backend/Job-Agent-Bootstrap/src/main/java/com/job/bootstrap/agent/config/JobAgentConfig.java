@@ -1,6 +1,7 @@
 package com.job.bootstrap.agent.config;
 
 import com.job.agent.JobAgentAssistant;
+import com.job.agent.JobAgentSummaryAssistant;
 import com.job.bootstrap.agent.tools.*;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.ChatModel;
@@ -70,6 +71,24 @@ public class JobAgentConfig {
                         mockInterviewReviewTool,
                         ragSearchTool
                 )
+                .build();
+    }
+
+    /**
+     * 构建 JobAgentSummaryAssistant。
+     *
+     * 设计说明:
+     * 1. 这个助手只负责总结 Executor 已经执行出的结果。
+     * 2. 这里故意不注册 tools，避免总结阶段再次触发工具调用。
+     * 3. 真正的工具执行权放在后端 Executor 中，保证流程可控、可追踪。
+     *
+     * @param chatModel 大模型对象
+     * @return 只负责总结的 AI Service
+     */
+    @Bean
+    public JobAgentSummaryAssistant jobAgentSummaryAssistant(ChatModel chatModel) {
+        return AiServices.builder(JobAgentSummaryAssistant.class)
+                .chatModel(chatModel)
                 .build();
     }
 }

@@ -138,6 +138,35 @@ public class AgentRuntimeContext {
     }
 
     /**
+     * 设置当前正在执行的计划步骤。
+     *
+     * 说明:
+     * 1. Executor 每执行一个 step 前会调用本方法。
+     * 2. Tool 本身不直接依赖 planId/stepId，避免业务工具和编排表强耦合。
+     * 3. AgentToolGuard 会读取这两个字段写入 Trace，方便后台串起计划和工具调用。
+     *
+     * @param planId 当前计划ID
+     * @param stepId 当前步骤ID
+     */
+    public static void setCurrentPlanStep(Long planId, Long stepId) {
+        Context context = getRequired();
+        context.setPlanId(planId);
+        context.setStepId(stepId);
+    }
+
+    /**
+     * 清理当前步骤上下文。
+     * Executor 执行完一个步骤后调用，避免后续非步骤工具调用误带旧 stepId。
+     */
+    public static void clearCurrentPlanStep() {
+        Context context = CONTEXT_HOLDER.get();
+        if (context != null) {
+            context.setPlanId(null);
+            context.setStepId(null);
+        }
+    }
+
+    /**
      * 清理上下文。
      * 注意:
      * 1. 这个方法必须在 finally 中调用。
@@ -172,6 +201,16 @@ public class AgentRuntimeContext {
          * 当前用户意图编码。
          */
         private String intentCode;
+
+        /**
+         * 当前执行中的 Agent 计划ID。
+         */
+        private Long planId;
+
+        /**
+         * 当前执行中的 Agent 计划步骤ID。
+         */
+        private Long stepId;
 
         /**
          * 本轮用户已确认允许执行的工具名。
@@ -209,6 +248,22 @@ public class AgentRuntimeContext {
 
         public void setIntentCode(String intentCode) {
             this.intentCode = intentCode;
+        }
+
+        public Long getPlanId() {
+            return planId;
+        }
+
+        public void setPlanId(Long planId) {
+            this.planId = planId;
+        }
+
+        public Long getStepId() {
+            return stepId;
+        }
+
+        public void setStepId(Long stepId) {
+            this.stepId = stepId;
         }
 
         public Set<String> getConfirmedToolNames() {

@@ -61,6 +61,16 @@ public class AgentToolGuard {
         traceInput.put("toolName", toolName);
         traceInput.put("input", input);
 
+        AgentRuntimeContext.Context context = AgentRuntimeContext.get();
+        if (context != null) {
+            /*
+             * planId/stepId 只由 Executor 设置。
+             * 如果工具不是由 Executor 调用，这两个字段就是 null，Trace 仍然兼容旧链路。
+             */
+            traceInput.put("planId", context.getPlanId());
+            traceInput.put("stepId", context.getStepId());
+        }
+
         if (schema != null) {
             Map<String, Object> schemaSnapshot = new LinkedHashMap<>();
             schemaSnapshot.put("displayName", schema.getDisplayName());

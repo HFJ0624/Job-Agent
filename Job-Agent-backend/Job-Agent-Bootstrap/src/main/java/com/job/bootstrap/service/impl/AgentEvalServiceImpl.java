@@ -71,6 +71,7 @@ public class AgentEvalServiceImpl implements AgentEvalService {
             chatVO = agentChatService.chat(
                     evalCase.getUserId(),
                     null,
+                    null,
                     evalCase.getInputMessage(),
                     List.of()
             );

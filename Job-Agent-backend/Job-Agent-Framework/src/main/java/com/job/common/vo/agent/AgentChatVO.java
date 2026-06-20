@@ -18,6 +18,11 @@ public class AgentChatVO {
     private Long conversationId;
 
     /**
+     * 本轮对话关联的 Agent 计划ID。
+     */
+    private Long planId;
+
+    /**
      * 助手回复内容。
      */
     private String answer;

@@ -45,6 +45,7 @@ public class AgentController {
         AgentChatVO result = agentChatService.chat(
                 userId,
                 request.getConversationId(),
+                request.getPlanId(),
                 request.getMessage(),
                 request.getConfirmedToolNames()
         );

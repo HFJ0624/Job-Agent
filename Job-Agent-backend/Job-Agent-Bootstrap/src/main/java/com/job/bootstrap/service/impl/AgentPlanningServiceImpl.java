@@ -16,6 +16,7 @@ import com.job.common.vo.agent.AgentPlanStepVO;
 import com.job.common.vo.agent.AgentPlanVO;
 import com.job.enums.AgentPlanStatus;
 import com.job.enums.AgentPlanStepStatus;
+import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -102,6 +103,26 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         return buildPlanVO(plan);
     }
 
+    /**
+     * 查询当前用户的一份 Agent 计划。
+     *
+     * 方法步骤:
+     * 1. 根据 planId 查询计划实体。
+     * 2. 校验计划存在、未删除、属于当前登录用户。
+     * 3. 查询计划步骤并转换成 VO。
+     */
+    @Override
+    public AgentPlanVO getUserPlan(Long userId, Long planId) {
+        AgentPlan plan = agentPlanMapper.selectById(planId);
+        if (plan == null || Integer.valueOf(1).equals(plan.getIsDeleted())) {
+            throw new BizException("Agent 计划不存在");
+        }
+        if (!userId.equals(plan.getUserId())) {
+            throw new BizException("Agent 计划不存在或无权限访问");
+        }
+        return buildPlanVO(plan);
+    }
+
     private List<String> findMissingParams(List<String> requiredParams, Map<String, Object> extractedParams) {
         if (CollectionUtils.isEmpty(requiredParams)) {
             return List.of();
@@ -119,7 +140,7 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("expectedInput", stepTemplate.toolInputSchema());
         schema.put("extractedParams", extractedParams);
-        schema.put("note", "第一版 Planner 只提供计划和约束，具体工具仍由 LangChain4j Agent 按计划调用。");
+        schema.put("note", "Planner 生成工具约束，Executor 按计划步骤确定性调用工具。");
         return schema;
     }
 

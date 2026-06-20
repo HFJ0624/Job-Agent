@@ -2,8 +2,9 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.agent.JobAgentAssistant;
+import com.job.agent.JobAgentSummaryAssistant;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
@@ -11,6 +12,7 @@ import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentChatService;
+import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AiConversation;
@@ -60,10 +62,10 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AiMessageMapper aiMessageMapper;
 
     /**
-     * LangChain4j AI Service 代理对象。
-     * 后续会在配置类中注册工具，让模型可以调用 Java 方法。
+     * 不带工具能力的总结助手。
+     * Executor 执行完后，由它负责把工具结果整理成用户可读中文。
      */
-    private final JobAgentAssistant jobAgentAssistant;
+    private final JobAgentSummaryAssistant jobAgentSummaryAssistant;
 
     /**
      * Agent Trace 统一记录服务。
@@ -88,6 +90,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AgentPlanningService agentPlanningService;
 
     /**
+     * Agent 计划执行器。
+     */
+    private final AgentPlanExecutorService agentPlanExecutorService;
+
+    /**
      * Agent 工具 Schema 注册中心。
      */
     private final AgentToolSchemaRegistry agentToolSchemaRegistry;
@@ -102,13 +109,20 @@ public class AgentChatServiceImpl implements AgentChatService {
      *
      * @param userId 当前登录用户ID
      * @param conversationId 会话ID，可以为空
+     * @param planId 已存在的计划ID，可以为空
      * @param message 用户输入
      * @param confirmedToolNames 本轮用户已确认允许执行的工具名
      * @return Agent 回复
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public AgentChatVO chat(Long userId, Long conversationId, String message, List<String> confirmedToolNames) {
+    public AgentChatVO chat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames
+    ) {
         long start = System.currentTimeMillis();
 
         /*
@@ -129,6 +143,19 @@ public class AgentChatServiceImpl implements AgentChatService {
         AgentIntentCode intentCode = agentIntentRouter.route(message);
 
         /*
+         * 3. 如果前端传入 planId，说明这是“继续执行已有计划”。
+         *    典型场景是上轮返回需要用户确认，用户确认后带 planId 和 confirmedToolNames 再次请求。
+         *    这里先读取计划，是为了复用原计划的 conversationId，避免重新创建一条会话。
+         */
+        AgentPlanVO existingPlan = null;
+        if (planId != null) {
+            existingPlan = agentPlanningService.getUserPlan(userId, planId);
+            if (conversationId == null) {
+                conversationId = existingPlan.getConversationId();
+            }
+        }
+
+        /*
          * 3. 获取或创建会话。
          *    conversationId 为空时自动创建新会话。
          */
@@ -142,16 +169,20 @@ public class AgentChatServiceImpl implements AgentChatService {
         AgentPlanVO plan = null;
         try {
             /*
-             * 先由后端 Planner 生成计划。
-             * 第一版只负责拆目标、识别缺参、给模型明确工具选择约束。
+             * 先确定本轮要执行的计划。
+             * - 没有 planId：创建新计划。
+             * - 有 planId：继续执行已有计划，不重新规划。
              */
-            plan = agentPlanningService.createPlan(
-                    userId,
-                    conversation.getId(),
-                    traceId,
-                    intentCode,
-                    message
-            );
+            plan = existingPlan != null
+                    ? existingPlan
+                    : agentPlanningService.createPlan(
+                            userId,
+                            conversation.getId(),
+                            traceId,
+                            intentCode,
+                            message
+                    );
+            String activeIntentCode = plan.getIntentCode();
 
             if (needClarification(plan)) {
                 String answer = buildClarificationAnswer(plan);
@@ -162,7 +193,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                         traceId,
                         userId,
                         conversation.getId(),
-                        intentCode.name(),
+                        activeIntentCode,
                         null,
                         buildPlanOnlyTraceInput(message, plan),
                         buildPlanOnlyTraceOutput(answer, plan),
@@ -173,6 +204,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
                 AgentChatVO vo = new AgentChatVO();
                 vo.setConversationId(conversation.getId());
+                vo.setPlanId(plan.getId());
                 vo.setAnswer(answer);
                 vo.setRequiresUserConfirmation(false);
                 vo.setRequiredConfirmationToolNames(List.of());
@@ -189,7 +221,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                         traceId,
                         userId,
                         conversation.getId(),
-                        intentCode.name(),
+                        activeIntentCode,
                         null,
                         buildPlanOnlyTraceInput(message, plan, confirmedToolNames),
                         buildPlanOnlyTraceOutput(answer, plan, unconfirmedTools),
@@ -200,6 +232,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
                 AgentChatVO vo = new AgentChatVO();
                 vo.setConversationId(conversation.getId());
+                vo.setPlanId(plan.getId());
                 vo.setAnswer(answer);
                 vo.setRequiresUserConfirmation(true);
                 vo.setRequiredConfirmationToolNames(toToolNames(unconfirmedTools));
@@ -219,36 +252,30 @@ public class AgentChatServiceImpl implements AgentChatService {
                     userId,
                     conversation.getId(),
                     traceId,
-                    intentCode.name(),
+                    activeIntentCode,
                     confirmedToolNames
             );
 
             /*
-             * 6. 前置 RAG 检索。
+             * 6. 执行计划。
              *
-             * 这里是本次改造的核心:
-             * - 之前的 RagSearchTool 是“模型决定是否调用”，不够稳定。
-             * - 现在每次用户询问都会先检索知识库，再把召回片段塞进本轮提示词。
-             * - 用户前端不会看到 chunk、score、metadata，来源只写入后台 Agent Trace。
+             * 关键变化:
+             * - 之前是“模型看到计划后自己决定是否调用工具”。
+             * - 现在是“后端 Executor 按 agent_plan_step 顺序确定性执行工具”。
+             * - 每一步都会回写 step.status/resultSummary/errorMsg。
              */
-            RagContext ragContext = retrieveRagContext(
-                    userId,
-                    conversation.getId(),
-                    intentCode.name(),
-                    message
-            );
+            AgentPlanExecutionResult executionResult = agentPlanExecutorService.executePlan(userId, plan.getId());
 
             /*
-             * 7. 调用 Agent。
-             *    conversation.getId() 作为 memoryId，用于绑定多轮对话上下文。
-             *    传给模型的是增强后的 message，里面包含:
-             *    - 用户原始问题
-             *    - 后端已召回的 RAG 知识片段
-             *    - 回答约束
+             * 7. 总结执行结果。
+             *
+             * 注意:
+             * 1. 这里使用不带 tools 的 Summary Assistant。
+             * 2. 它只能总结 Executor 结果，不能再次调用工具。
+             * 3. 这样可以避免已经执行过的工具被模型重复调用。
              */
-            String answer = jobAgentAssistant.chat(
-                    conversation.getId(),
-                    buildPlannedAgentMessage(ragContext.enhancedMessage(), plan)
+            String answer = jobAgentSummaryAssistant.summarize(
+                    buildExecutorSummaryMessage(message, plan, executionResult)
             );
 
             /*
@@ -264,20 +291,17 @@ public class AgentChatServiceImpl implements AgentChatService {
 
             /*
              * 10. 保存主对话 Trace。
-             *    工具调用 Trace 会在 Tool 内部单独保存。
-             *    RAG 前置检索不是前端展示内容，但必须记录到 outputData 里，方便后台排查:
-             *    - 本轮是否真的走了 RAG
-             *    - 命中了哪些 chunk
-             *    - 回答依据来自简历、JD、公司还是沟通记录
+             *     工具调用 Trace 会在 Tool 内部单独保存，并且会带上 planId/stepId。
+             *     主 Trace 记录计划执行汇总，方便从一条链路看到整体状态。
              */
             agentTraceService.saveTrace(
                     traceId,
                     userId,
                     conversation.getId(),
-                    intentCode.name(),
+                    activeIntentCode,
                     null,
-                    buildChatTraceInput(message, ragContext, plan),
-                    buildChatTraceOutput(answer, ragContext, plan),
+                    buildExecutorTraceInput(message, plan, confirmedToolNames),
+                    buildExecutorTraceOutput(answer, plan, executionResult),
                     "SUCCESS",
                     null,
                     System.currentTimeMillis() - start
@@ -286,6 +310,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             //返回结果
             AgentChatVO vo = new AgentChatVO();
             vo.setConversationId(conversation.getId());
+            vo.setPlanId(plan.getId());
             vo.setAnswer(answer);
             vo.setRequiresUserConfirmation(false);
             vo.setRequiredConfirmationToolNames(List.of());
@@ -300,7 +325,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     traceId,
                     userId,
                     conversation.getId(),
-                    intentCode.name(),
+                    plan == null ? intentCode.name() : plan.getIntentCode(),
                     null,
                     buildPlanOnlyTraceInput(message, plan),
                     null,
@@ -518,6 +543,63 @@ public class AgentChatServiceImpl implements AgentChatService {
             return List.of();
         }
         return schemas.stream().map(AgentToolSchema::getToolName).toList();
+    }
+
+    private String buildExecutorSummaryMessage(
+            String originalMessage,
+            AgentPlanVO plan,
+            AgentPlanExecutionResult executionResult
+    ) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("【当前用户输入】\n")
+                .append(originalMessage)
+                .append("\n\n");
+
+        builder.append("【计划原始目标】\n")
+                .append(plan.getUserGoal())
+                .append("\n\n");
+
+        builder.append("【后端执行计划】\n");
+        builder.append("计划ID: ").append(plan.getId()).append("\n");
+        builder.append("计划标题: ").append(nullToDash(plan.getPlanTitle())).append("\n");
+        builder.append("计划摘要: ").append(nullToDash(plan.getPlanSummary())).append("\n");
+        builder.append("意图: ").append(nullToDash(plan.getIntentCode())).append("\n\n");
+
+        builder.append("【Executor 执行结果】\n");
+        builder.append(toJson(executionResult)).append("\n\n");
+
+        builder.append("【总结要求】\n");
+        builder.append("1. 只总结 Executor 已经完成的步骤和工具结果。\n");
+        builder.append("2. 不要再次调用工具，不要说“我将要调用”。\n");
+        builder.append("3. 如果执行成功，直接给用户可读结论和下一步建议。\n");
+        builder.append("4. 如果执行失败，说明失败步骤、原因和用户可以补充什么。\n");
+        return builder.toString();
+    }
+
+    private Map<String, Object> buildExecutorTraceInput(
+            String message,
+            AgentPlanVO plan,
+            List<String> confirmedToolNames
+    ) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("message", message);
+        input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
+        input.put("agentPlan", buildPlanSnapshot(plan));
+        input.put("executionMode", "PLAN_EXECUTOR");
+        return input;
+    }
+
+    private Map<String, Object> buildExecutorTraceOutput(
+            String answer,
+            AgentPlanVO plan,
+            AgentPlanExecutionResult executionResult
+    ) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("answer", answer);
+        output.put("planId", plan == null ? null : plan.getId());
+        output.put("executionResult", executionResult);
+        output.put("executionMode", "PLAN_EXECUTOR");
+        return output;
     }
 
     private List<String> readStringList(String json) {
@@ -750,6 +832,14 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     private String nullToDash(Object value) {
         return value == null ? "-" : String.valueOf(value);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            return "{}";
+        }
     }
 
     /**

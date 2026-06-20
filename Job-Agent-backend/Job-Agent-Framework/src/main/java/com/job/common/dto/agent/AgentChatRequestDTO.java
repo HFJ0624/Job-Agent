@@ -20,6 +20,16 @@ public class AgentChatRequestDTO {
     private Long conversationId;
 
     /**
+     * 已存在的 Agent 计划ID。
+     *
+     * 说明:
+     * 1. 第一次对话一般不传，后端会生成新计划。
+     * 2. 如果上一次返回 requiresUserConfirmation=true，前端确认后应把 planId 原样传回。
+     * 3. 这样 Executor 会继续执行同一份计划，而不是重新生成一份计划。
+     */
+    private Long planId;
+
+    /**
      * 用户输入内容。
      */
     @NotBlank(message = "消息内容不能为空")

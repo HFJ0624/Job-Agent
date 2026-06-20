@@ -21,4 +21,13 @@ public interface AgentPlanningService {
      * @return 计划信息
      */
     AgentPlanVO createPlan(Long userId, Long conversationId, String traceId, AgentIntentCode intentCode, String userGoal);
+
+    /**
+     * 查询当前用户的一份 Agent 计划。
+     *
+     * @param userId 当前登录用户ID
+     * @param planId 计划ID
+     * @return 计划详情
+     */
+    AgentPlanVO getUserPlan(Long userId, Long planId);
 }
