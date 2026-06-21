@@ -184,6 +184,10 @@ public class RagIndexServiceImpl implements RagIndexService {
         return result;
     }
 
+    /***
+     *  重建公共知识
+     * @param result 返回rag响应对象
+     */
     private void rebuildPublicKnowledge(RagIndexResultVO result) {
         ragKnowledgeService.markDocumentsDeleted(
                 PUBLIC_USER_ID,
@@ -327,6 +331,13 @@ public class RagIndexServiceImpl implements RagIndexService {
         return metadata;
     }
 
+    /***
+     *
+     * @param userId 用户id
+     * @param documentType 文档类型
+     * @param businessId 来源业务id
+     * @return 加载文档来源
+     */
     private RagDocumentSource loadDocumentSource(Long userId, String documentType, Long businessId) {
         if (businessId == null) {
             throw new IllegalArgumentException("businessId 不能为空");

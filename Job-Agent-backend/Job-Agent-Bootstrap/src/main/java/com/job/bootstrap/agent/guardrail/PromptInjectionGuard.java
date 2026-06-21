@@ -14,12 +14,15 @@ import java.util.regex.Pattern;
 
 /**
  * 作者:hfj
- * 功能:Prompt 注入检测
+ * 功能:Prompt注入攻击检测守护组件
+ * 在用户输入进入Agent Planner之前进行快速安全扫描，拦截高风险的Prompt注入攻击
+ * 属于Agent系统的第一道安全防线，专门针对OWASP LLM Top 10中的LLM01: Prompt Injection风险
  * 日期:2026/6/21
  */
 @Component
 public class PromptInjectionGuard {
 
+    //高风险Prompt注入规则列表
     private final List<Rule> highRiskRules = List.of(
             rule("IGNORE_PREVIOUS_INSTRUCTIONS", "(?i)(ignore|forget|discard)\\s+(all\\s+)?(previous|prior|above)\\s+(instructions|rules|messages)"),
             rule("REVEAL_SYSTEM_PROMPT", "(?i)(show|print|reveal|leak|dump).{0,20}(system prompt|developer message|hidden prompt|internal prompt)"),
@@ -33,51 +36,57 @@ public class PromptInjectionGuard {
             rule("ZH_NO_TRACE_LOG", "(不要|禁止).{0,12}(记录|写入).{0,12}(日志|Trace|trace)")
     );
 
-    /**
-     * 检查用户输入是否包含 Prompt 注入。
+    /***
+     * 检查用户输入是否包含高风险Prompt注入攻击
      *
-     * 方法步骤:
-     * 1. 空文本直接放行，真正的必填校验由 DTO 和业务入口处理。
-     * 2. 先匹配高风险规则，例如要求泄露系统提示词、绕过工具确认、伪造工具结果。
-     * 3. 如果命中高风险规则，直接返回 BLOCK，避免 Planner 被恶意目标污染。
-     * 4. 如果没有命中，返回 ALLOW，让后续 Planner/Executor 正常工作。
+     * @param message 用户输入的原始消息
+     * @return 安全检测结果，包含拦截/放行决定、风险等级、命中规则等信息
      */
     public AgentGuardrailResult check(String message) {
+
+        // 空输入直接放行，避免与业务层的必填校验重复
         if (!StringUtils.hasText(message)) {
             return AgentGuardrailResult.allow();
         }
 
+        // 存储所有命中的规则名称，用于审计和日志记录
         List<String> matchedRules = new ArrayList<>();
         for (Rule rule : highRiskRules) {
+            // 使用find()而不是matches()，因为攻击可能隐藏在正常文本中间
             if (rule.pattern().matcher(message).find()) {
                 matchedRules.add(rule.name());
             }
         }
 
+        // 没有命中任何规则，允许通过
         if (matchedRules.isEmpty()) {
             return AgentGuardrailResult.allow();
         }
 
+        // 构建检测结果元数据，用于安全审计和后续优化
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("inputLength", message.length());
         metadata.put("strategy", "RULE_BASED_V1");
 
+        // 命中高风险规则，直接拦截
         return AgentGuardrailResult.builder()
-                .action(AgentGuardrailAction.BLOCK)
-                .riskType(AgentGuardrailRiskType.PROMPT_INJECTION)
-                .riskLevel(9)
-                .message("用户输入命中 Prompt 注入高风险规则")
-                .userMessage("这条消息包含绕过系统规则或工具权限的要求，我不能按这个方式执行。你可以改成正常的求职问题或具体任务。")
-                .matchedRules(matchedRules)
-                .sanitizedText(null)
-                .metadata(metadata)
+                .action(AgentGuardrailAction.BLOCK) // 执行动作：拦截
+                .riskType(AgentGuardrailRiskType.PROMPT_INJECTION) // 风险类型：Prompt注入
+                .riskLevel(9) // 风险等级
+                .message("用户输入命中 Prompt 注入高风险规则") // 内部日志消息
+                .userMessage("这条消息包含绕过系统规则或工具权限的要求，我不能按这个方式执行。你可以改成正常的求职问题或具体任务。") // 给用户的友好提示
+                .matchedRules(matchedRules) // 命中的规则列表
+                .sanitizedText(null) // 基于规则的检测不修改原始输入
+                .metadata(metadata) // 附加元数据
                 .build();
     }
 
+    //创建Prompt注入检测规则的工厂方法
     private Rule rule(String name, String regex) {
         return new Rule(name, Pattern.compile(regex));
     }
 
+    //Prompt注入检测规则数据结构
     private record Rule(String name, Pattern pattern) {
     }
 }

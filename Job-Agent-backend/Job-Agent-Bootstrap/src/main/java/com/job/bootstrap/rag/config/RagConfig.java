@@ -27,27 +27,30 @@ public class RagConfig {
      */
     @Bean("ragJdbcTemplate")
     public JdbcTemplate ragJdbcTemplate() {
+        //1.获取pgvector数据库的专用配置节点和pgvector数据源的详细配置
         RagProperties.Pgvector pgvector = ragProperties.getPgvector();
         RagProperties.DataSource datasourceProperties = pgvector.getDatasource();
 
+        //2.使用DriverManagerDataSource创建临时数据源（非连接池实现）
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName(defaultIfBlank(
                 datasourceProperties.getDriverClassName(),
                 "org.postgresql.Driver"
         ));
+
+        //3.配置数据库用户名：优先使用datasource显式配置，未配置则使用pgvector全局用户名
         dataSource.setUrl(resolveJdbcUrl(pgvector, datasourceProperties));
         dataSource.setUsername(defaultIfBlank(datasourceProperties.getUsername(), pgvector.getUser()));
         dataSource.setPassword(defaultIfBlank(datasourceProperties.getPassword(), ""));
 
-        /*
-         * 注意:
-         * 1. 这里没有声明 DataSource Bean，只声明 JdbcTemplate Bean。
-         * 2. 这样不会影响 Spring Boot 为主业务库创建的 MySQL DataSource。
-         * 3. MyBatis-Plus 仍然使用原来的 spring.datasource。
-         */
+        //4.返回基于pgvector专用数据源创建JdbcTemplate实例
         return new JdbcTemplate(dataSource);
     }
 
+    /***
+     *
+     * @return 解析pgvector数据库的JDBC连接URL
+     */
     private String resolveJdbcUrl(RagProperties.Pgvector pgvector, RagProperties.DataSource datasourceProperties) {
         if (StringUtils.hasText(datasourceProperties.getJdbcUrl())) {
             return datasourceProperties.getJdbcUrl();
@@ -58,6 +61,12 @@ public class RagConfig {
         return "jdbc:postgresql://" + pgvector.getHost() + ":" + pgvector.getPort() + "/" + pgvector.getDatabase();
     }
 
+    /***
+     *
+     * @param value 待检查的字符串值
+     * @param defaultValue 字符串为空时的默认值
+     * @return 简化的字符串空值处理工具方法
+     */
     private String defaultIfBlank(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
     }
