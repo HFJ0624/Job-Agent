@@ -1,10 +1,12 @@
 package com.job.bootstrap.agent.schema;
 
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.guardrail.SensitiveOperationGuard;
 import com.job.common.agent.tool.AgentToolParamSchema;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolErrorCode;
 import com.job.enums.AgentToolPermissionType;
+import com.job.enums.AgentToolValueType;
 import com.job.exception.AgentToolException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
@@ -21,9 +23,11 @@ import java.util.Map;
 public class AgentToolGuard {
 
     private final AgentToolSchemaRegistry schemaRegistry;
+    private final SensitiveOperationGuard sensitiveOperationGuard;
 
-    public AgentToolGuard(AgentToolSchemaRegistry schemaRegistry) {
+    public AgentToolGuard(AgentToolSchemaRegistry schemaRegistry, SensitiveOperationGuard sensitiveOperationGuard) {
         this.schemaRegistry = schemaRegistry;
+        this.sensitiveOperationGuard = sensitiveOperationGuard;
     }
 
     /**
@@ -39,7 +43,9 @@ public class AgentToolGuard {
 
         validatePermission(schema, context);
         validateRequiredParams(schema, input);
+        validateParamTypes(schema, input);
         validateConfirmation(schema, context);
+        sensitiveOperationGuard.assertSensitiveOperationAllowed(schema);
 
         return schema;
     }
@@ -134,6 +140,33 @@ public class AgentToolGuard {
         }
     }
 
+    private void validateParamTypes(AgentToolSchema schema, Map<String, Object> input) {
+        if (CollectionUtils.isEmpty(schema.getInputParams()) || input == null) {
+            return;
+        }
+
+        for (AgentToolParamSchema param : schema.getInputParams()) {
+            Object value = input.get(param.getName());
+            if (isBlankValue(value) || param.getType() == null) {
+                continue;
+            }
+
+            /*
+             * 工具入参类型第一版做轻量校验:
+             * 1. 数字类型允许 Number 或可解析的数字字符串。
+             * 2. String 允许任意值转字符串，因为前端和 Planner 常会把枚举值写成文本。
+             * 3. 其它复杂类型暂不拦截，由具体业务工具做更细校验。
+             */
+            if (!matchesParamType(value, param.getType())) {
+                throw new AgentToolException(
+                        AgentToolErrorCode.TOOL_GUARDRAIL_BLOCKED,
+                        schema.getToolName(),
+                        "工具参数类型不符合 Schema: " + param.getName()
+                );
+            }
+        }
+    }
+
     private void validateConfirmation(AgentToolSchema schema, AgentRuntimeContext.Context context) {
         if (!Boolean.TRUE.equals(schema.getRequiresUserConfirmation())) {
             return;
@@ -156,5 +189,25 @@ public class AgentToolGuard {
             return text.isBlank();
         }
         return false;
+    }
+
+    private boolean matchesParamType(Object value, AgentToolValueType type) {
+        return switch (type) {
+            case STRING -> true;
+            case LONG, INTEGER -> value instanceof Number || parseNumber(value);
+            case BOOLEAN -> value instanceof Boolean || "true".equalsIgnoreCase(String.valueOf(value))
+                    || "false".equalsIgnoreCase(String.valueOf(value));
+            case ARRAY -> value instanceof Iterable<?> || value.getClass().isArray();
+            case OBJECT -> value instanceof Map<?, ?>;
+        };
+    }
+
+    private boolean parseNumber(Object value) {
+        try {
+            Long.parseLong(String.valueOf(value).trim());
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
     }
 }

@@ -285,10 +285,10 @@ public class AgentToolSchemaRegistry {
                 ),
                 List.of(
                         output("totalScore", AgentToolValueType.INTEGER, "复盘总分", true, "78"),
-                        output("level", AgentToolValueType.STRING, "表现等级", true, "中等"),
-                        output("advantages", AgentToolValueType.ARRAY, "优势", true, "[\"表达清晰\"]"),
-                        output("weaknesses", AgentToolValueType.ARRAY, "短板", true, "[\"项目细节不够\"]"),
-                        output("improvementPlan", AgentToolValueType.ARRAY, "提升计划", true, "[\"补充项目复盘\"]")
+                        output("reviewLevel", AgentToolValueType.STRING, "表现等级", true, "中等"),
+                        output("strengthSummary", AgentToolValueType.STRING, "优势总结", true, "表达清晰"),
+                        output("weaknessSummary", AgentToolValueType.STRING, "短板总结", true, "项目细节不够"),
+                        output("improvementPlan", AgentToolValueType.STRING, "提升计划", true, "补充项目复盘")
                 )
         );
     }
@@ -396,6 +396,9 @@ public class AgentToolSchemaRegistry {
         if (includeConfirmationError) {
             errors.add(error(AgentToolErrorCode.TOOL_CONFIRMATION_REQUIRED, "工具需要用户确认", "该操作需要你确认后才能执行", true));
         }
+        errors.add(error(AgentToolErrorCode.TOOL_OUTPUT_INVALID_JSON, "工具输出不是合法 JSON", "工具返回格式异常，请稍后重试", true));
+        errors.add(error(AgentToolErrorCode.TOOL_OUTPUT_SCHEMA_MISMATCH, "工具输出和 Schema 不一致", "工具返回字段异常，请稍后重试", true));
+        errors.add(error(AgentToolErrorCode.TOOL_GUARDRAIL_BLOCKED, "工具被 Guardrails 拦截", "该操作没有通过安全校验", false));
         errors.add(error(AgentToolErrorCode.TOOL_EXECUTION_FAILED, "工具业务执行失败", "工具执行失败，请稍后重试", true));
         return errors;
     }

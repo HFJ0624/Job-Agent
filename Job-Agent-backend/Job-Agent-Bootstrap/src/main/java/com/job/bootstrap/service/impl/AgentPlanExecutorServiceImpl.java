@@ -8,6 +8,8 @@ import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;
+import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
@@ -16,6 +18,8 @@ import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
 import com.job.enums.AgentPlanStatus;
 import com.job.enums.AgentPlanStepStatus;
+import com.job.enums.AgentToolErrorCode;
+import com.job.exception.AgentToolException;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +50,8 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     private final AgentPlanStepMapper agentPlanStepMapper;
     private final AgentToolInvoker agentToolInvoker;
     private final AgentMemoryExtractionService agentMemoryExtractionService;
+    private final AgentToolSchemaRegistry agentToolSchemaRegistry;
+    private final AgentGuardrailService agentGuardrailService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -181,7 +187,19 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             AgentRuntimeContext.setCurrentPlanStep(plan.getId(), step.getId());
 
             /*
-             * 3. 调用统一工具调用器。
+             * 3. 执行前做 Guardrails 校验。
+             *    这里校验的是“Executor 实际要执行的工具”是否属于当前计划步骤允许范围。
+             *    这一步不依赖模型自觉，可以防止计划外工具被越权调用。
+             */
+            agentGuardrailService.assertToolExecutionAllowed(
+                    plan,
+                    step,
+                    toolName,
+                    agentToolSchemaRegistry.getRequired(toolName)
+            );
+
+            /*
+             * 4. 调用统一工具调用器。
              *    Invoker 内部会复用现有 Tool，因此原有业务 Service、Tool Guard、Tool Trace 都不会绕过。
              */
             AgentToolExecutionResult toolResult = agentToolInvoker.invoke(
@@ -193,6 +211,24 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             if (Boolean.TRUE.equals(toolResult.getSuccess())) {
                 return markStepCompleted(step, toolName, toolResult);
             }
+            return markStepFailed(step, toolName, toolResult);
+        } catch (AgentToolException exception) {
+            AgentToolExecutionResult toolResult = AgentToolExecutionResult.builder()
+                    .success(false)
+                    .toolName(toolName)
+                    .errorCode(exception.getToolErrorCode().name())
+                    .message(exception.getMessage())
+                    .costTime(0L)
+                    .build();
+            return markStepFailed(step, toolName, toolResult);
+        } catch (Exception exception) {
+            AgentToolExecutionResult toolResult = AgentToolExecutionResult.builder()
+                    .success(false)
+                    .toolName(toolName)
+                    .errorCode(AgentToolErrorCode.TOOL_GUARDRAIL_BLOCKED.name())
+                    .message(exception.getMessage())
+                    .costTime(0L)
+                    .build();
             return markStepFailed(step, toolName, toolResult);
         } finally {
             AgentRuntimeContext.clearCurrentPlanStep();

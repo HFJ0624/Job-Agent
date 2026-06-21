@@ -2,6 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AgentTraceLog;
@@ -27,6 +28,7 @@ public class AgentTraceServiceImpl implements AgentTraceService {
 
     private final AgentTraceLogMapper agentTraceLogMapper;
     private final ObjectMapper objectMapper;
+    private final AgentGuardrailService agentGuardrailService;
 
     /**
      * 保存一条 Agent Trace。
@@ -115,7 +117,12 @@ public class AgentTraceServiceImpl implements AgentTraceService {
             return null;
         }
         try {
-            return objectMapper.writeValueAsString(value);
+            /*
+             * Trace 是后台排查用数据，不应该保存明文手机号、邮箱、身份证、token、密码。
+             * 这里统一做脱敏，避免每个 Tool、ChatService、Executor 各自重复处理。
+             */
+            Object maskedValue = agentGuardrailService.maskSensitiveData(value);
+            return objectMapper.writeValueAsString(maskedValue);
         } catch (Exception e) {
             return "{}";
         }

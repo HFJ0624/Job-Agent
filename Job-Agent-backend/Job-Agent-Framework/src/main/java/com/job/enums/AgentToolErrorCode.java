@@ -35,5 +35,20 @@ public enum AgentToolErrorCode {
     /**
      * 工具内部业务执行失败。
      */
-    TOOL_EXECUTION_FAILED
+    TOOL_EXECUTION_FAILED,
+
+    /**
+     * 工具输出不是合法 JSON。
+     */
+    TOOL_OUTPUT_INVALID_JSON,
+
+    /**
+     * 工具输出和 Schema 不一致。
+     */
+    TOOL_OUTPUT_SCHEMA_MISMATCH,
+
+    /**
+     * 工具被 Agent Guardrails 拦截。
+     */
+    TOOL_GUARDRAIL_BLOCKED
 }

@@ -8,6 +8,9 @@ import com.job.bootstrap.agent.tools.JobSearchTool;
 import com.job.bootstrap.agent.tools.MockInterviewReviewTool;
 import com.job.bootstrap.agent.tools.RagSearchTool;
 import com.job.bootstrap.agent.tools.ResumeAnalyzeTool;
+import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolErrorCode;
 import com.job.exception.AgentToolException;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +35,8 @@ public class AgentToolInvoker {
     private final InterviewPrepareTool interviewPrepareTool;
     private final MockInterviewReviewTool mockInterviewReviewTool;
     private final RagSearchTool ragSearchTool;
+    private final AgentToolSchemaRegistry agentToolSchemaRegistry;
+    private final AgentGuardrailService agentGuardrailService;
 
     /**
      * 执行指定工具。
@@ -97,7 +102,15 @@ public class AgentToolInvoker {
             };
 
             /*
-             * 2. 工具执行成功后统一包装结果。
+             * 2. 工具输出 JSON 校验。
+             *    工具类返回 String 是为了兼容 LangChain4j Tool 调用，但 Executor 不能盲信这个 String。
+             *    这里统一校验 JSON 语法和关键字段，避免 Summary Assistant 基于非法输出产生幻觉。
+             */
+            AgentToolSchema schema = agentToolSchemaRegistry.getRequired(toolName);
+            agentGuardrailService.validateToolOutput(toolName, schema, dataJson);
+
+            /*
+             * 3. 工具执行成功后统一包装结果。
              *    真实业务 Trace 已经由各 Tool 内部记录，这里只返回给 Executor 更新 step。
              */
             return AgentToolExecutionResult.builder()
