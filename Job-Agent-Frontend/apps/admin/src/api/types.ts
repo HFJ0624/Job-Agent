@@ -404,3 +404,166 @@ export interface PageResult<T> {
   current: number;
   pages: number;
 }
+
+/**
+ * AI 模型配置查询参数。
+ */
+export interface AiModelConfigQuery {
+  pageNum: number;
+  pageSize: number;
+  modelCode?: string;
+  modelName?: string;
+  provider?: string;
+  status?: string;
+}
+
+/**
+ * AI 模型配置展示数据。
+ */
+export interface AiModelConfigInfo {
+  id?: number;
+  modelCode: string;
+  modelName: string;
+  provider: string;
+  baseUrl: string;
+  apiKey?: string;
+  chatPath?: string;
+  modelIdentifier: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutSeconds?: number;
+  maxRetries?: number;
+  inputPricePer1k?: number;
+  outputPricePer1k?: number;
+  circuitEnabled?: number;
+  failureThreshold?: number;
+  cooldownSeconds?: number;
+  status?: string;
+  remark?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * AI Prompt 模板查询参数。
+ */
+export interface AiPromptTemplateQuery {
+  pageNum: number;
+  pageSize: number;
+  promptCode?: string;
+  sceneCode?: string;
+  status?: string;
+}
+
+/**
+ * AI Prompt 模板展示数据。
+ */
+export interface AiPromptTemplateInfo {
+  id?: number;
+  promptCode: string;
+  promptName: string;
+  sceneCode: string;
+  description?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * AI Prompt 版本展示数据。
+ */
+export interface AiPromptVersionInfo {
+  id?: number;
+  templateId: number;
+  versionNo: string;
+  title: string;
+  content: string;
+  variablesJson?: string;
+  status?: string;
+  grayPercent?: number;
+  abGroup?: string;
+  publishTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * AI 模型路由查询参数。
+ */
+export interface AiModelRouteQuery {
+  pageNum: number;
+  pageSize: number;
+  sceneCode?: string;
+  promptCode?: string;
+  primaryModelCode?: string;
+  status?: string;
+}
+
+/**
+ * AI 模型路由展示数据。
+ */
+export interface AiModelRouteInfo {
+  id?: number;
+  sceneCode: string;
+  routeName: string;
+  primaryModelCode: string;
+  fallbackModelCode?: string;
+  promptCode: string;
+  promptVersionId?: number | null;
+  grayPercent?: number;
+  abGroup?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * AI 模型调用日志查询参数。
+ */
+export interface AiModelCallLogQuery {
+  pageNum: number;
+  pageSize: number;
+  traceId?: string;
+  userId?: string | number;
+  sceneCode?: string;
+  modelCode?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * AI 模型调用日志展示数据。
+ */
+export interface AiModelCallLogInfo {
+  id: number;
+  traceId?: string;
+  userId?: number;
+  sceneCode?: string;
+  promptCode?: string;
+  promptVersionId?: number;
+  modelCode?: string;
+  fallbackUsed?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  inputCost?: number;
+  outputCost?: number;
+  totalCost?: number;
+  costTime?: number;
+  status?: string;
+  errorMsg?: string;
+  createTime?: string;
+}
+
+/**
+ * AI 模型成本统计。
+ */
+export interface AiModelCostStats {
+  totalCalls: number;
+  successCalls: number;
+  failedCalls: number;
+  totalTokens: number;
+  totalCost: number;
+  avgCostTime: number;
+}

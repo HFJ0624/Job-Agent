@@ -17,6 +17,7 @@ import com.job.bootstrap.service.AgentMemoryService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.bootstrap.service.AgentTraceService;
+import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
@@ -64,6 +65,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private static final int MEMORY_RETRIEVAL_LIMIT = 5;
     private static final int RAG_CONTENT_PREVIEW_LENGTH = 500;
     private static final String RAG_PRE_RETRIEVAL_TOOL_NAME = "RagPreRetrieval.searchKnowledge";
+    private static final String AI_SCENE_AGENT_SUMMARY = "AGENT_SUMMARY";
 
     private final AiConversationMapper aiConversationMapper;
     private final AiMessageMapper aiMessageMapper;
@@ -73,6 +75,12 @@ public class AgentChatServiceImpl implements AgentChatService {
      * Executor 执行完后，由它负责把工具结果整理成用户可读中文。
      */
     private final JobAgentSummaryAssistant jobAgentSummaryAssistant;
+
+    /**
+     * 模型与 Prompt 动态网关。
+     * 第一版先接入 Executor 总结场景，让管理员可以在后台改总结 Prompt 和模型路由。
+     */
+    private final AiModelGatewayService aiModelGatewayService;
 
     /**
      * Agent Trace 统一记录服务。
@@ -316,12 +324,17 @@ public class AgentChatServiceImpl implements AgentChatService {
              * 7. 总结执行结果。
              *
              * 注意:
-             * 1. 这里使用不带 tools 的 Summary Assistant。
-             * 2. 它只能总结 Executor 结果，不能再次调用工具。
-             * 3. 这样可以避免已经执行过的工具被模型重复调用。
+             * 1. 这里优先使用“后台可配置的模型与 Prompt 网关”。
+             * 2. 新网关会按 AGENT_SUMMARY 场景读取数据库里的 Prompt 版本、模型路由、重试和降级策略。
+             * 3. 数据库配置缺失或调用失败时，降级到旧的 Summary Assistant，保证第一版上线不会卡住主流程。
              */
-            String rawAnswer = jobAgentSummaryAssistant.summarize(
-                    buildExecutorSummaryMessage(safeMessage, plan, executionResult, retrievedMemories)
+            String rawAnswer = summarizeExecutorResult(
+                    userId,
+                    traceId,
+                    safeMessage,
+                    plan,
+                    executionResult,
+                    retrievedMemories
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
 
@@ -709,6 +722,95 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (StringUtils.hasText(value)) {
             builder.append(value).append(' ');
         }
+    }
+
+    /**
+     * 总结 Executor 执行结果。
+     *
+     * 方法步骤:
+     * 1. 先构建原有 Summary Assistant 使用的完整上下文，保证旧提示词语义不丢失。
+     * 2. 再构建数据库 Prompt 可以引用的结构化变量，方便管理员在后台调整模板。
+     * 3. 优先通过模型网关按 AGENT_SUMMARY 场景调用动态模型。
+     * 4. 如果数据库路由、Prompt 或模型调用失败，则降级到旧 Summary Assistant。
+     *
+     * @param userId 用户 ID
+     * @param traceId 链路 ID
+     * @param safeMessage 已脱敏的用户输入
+     * @param plan Agent 计划
+     * @param executionResult Executor 执行结果
+     * @param retrievedMemories 已召回长期记忆
+     * @return 模型总结文本
+     */
+    private String summarizeExecutorResult(
+            Long userId,
+            String traceId,
+            String safeMessage,
+            AgentPlanVO plan,
+            AgentPlanExecutionResult executionResult,
+            List<AgentMemoryVO> retrievedMemories
+    ) {
+        String executorSummaryMessage = buildExecutorSummaryMessage(
+                safeMessage,
+                plan,
+                executionResult,
+                retrievedMemories
+        );
+
+        try {
+            return aiModelGatewayService.chat(
+                    AI_SCENE_AGENT_SUMMARY,
+                    buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories),
+                    executorSummaryMessage,
+                    userId,
+                    traceId
+            );
+        } catch (Exception exception) {
+            log.warn(
+                    "动态模型网关总结失败，降级到旧 Summary Assistant，traceId={}, planId={}, error={}",
+                    traceId,
+                    plan == null ? null : plan.getId(),
+                    exception.getMessage(),
+                    exception
+            );
+            return jobAgentSummaryAssistant.summarize(executorSummaryMessage);
+        }
+    }
+
+    /**
+     * 构建 AGENT_SUMMARY 场景 Prompt 变量。
+     *
+     * @param safeMessage 已脱敏的用户输入
+     * @param plan Agent 计划
+     * @param executionResult Executor 执行结果
+     * @param retrievedMemories 已召回长期记忆
+     * @return Prompt 变量
+     */
+    private Map<String, Object> buildExecutorSummaryVariables(
+            String safeMessage,
+            AgentPlanVO plan,
+            AgentPlanExecutionResult executionResult,
+            List<AgentMemoryVO> retrievedMemories
+    ) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("currentUserInput", safeMessage);
+        variables.put("current_user_input", safeMessage);
+        variables.put("planJson", toJson(buildPlanSnapshot(plan)));
+        variables.put("plan_json", toJson(buildPlanSnapshot(plan)));
+        variables.put("executionResultJson", toJson(executionResult));
+        variables.put("execution_result_json", toJson(executionResult));
+        variables.put("retrievedMemoriesJson", toJson(buildMemorySnapshots(retrievedMemories)));
+        variables.put("retrieved_memories_json", toJson(buildMemorySnapshots(retrievedMemories)));
+        variables.put("summaryRequirements", """
+                1. 只总结 Executor 已经完成的步骤和工具结果。
+                2. 不要再次调用工具，不要说“我将要调用”。
+                3. 如果执行成功，直接给用户可读结论和下一步建议。
+                4. 如果执行失败，说明失败步骤、原因和用户可以补充什么。
+                5. 不要编造 Executor 结果里没有的分数、公司、岗位、简历内容或沟通记录。
+                6. 如果缺少工具结果或知识依据，要明确说“当前没有足够依据”。
+                7. 不要输出手机号、邮箱、身份证、token、密码等敏感信息。
+                """);
+        variables.put("summary_requirements", variables.get("summaryRequirements"));
+        return variables;
     }
 
     private String buildExecutorSummaryMessage(
