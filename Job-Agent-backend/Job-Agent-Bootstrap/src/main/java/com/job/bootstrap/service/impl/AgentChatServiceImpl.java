@@ -475,10 +475,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                 builder.append("【知识片段 ")
                         .append(i + 1)
                         .append("】\n");
+                builder.append("引用标题: ").append(nullToDash(result.getReferenceTitle())).append("\n");
+                builder.append("文档ID: ").append(result.getDocumentId()).append("\n");
+                builder.append("切块ID: ").append(result.getChunkId()).append("\n");
                 builder.append("来源类型: ").append(nullToDash(result.getDocumentType())).append("\n");
                 builder.append("标题: ").append(nullToDash(result.getTitle())).append("\n");
                 builder.append("业务ID: ").append(result.getBusinessId()).append("\n");
                 builder.append("分片序号: ").append(result.getChunkIndex()).append("\n");
+                builder.append("权限范围: ").append(nullToDash(result.getPermissionScope())).append("\n");
                 builder.append("相似度: ").append(formatScore(result.getScore())).append("\n");
                 builder.append("内容:\n")
                         .append(result.getContent())
@@ -918,6 +922,10 @@ public class AgentChatServiceImpl implements AgentChatService {
             Map<String, Object> reference = new LinkedHashMap<>();
             reference.put("rank", i + 1);
             reference.put("knowledgeId", result.getId());
+            reference.put("documentId", result.getDocumentId());
+            reference.put("chunkId", result.getChunkId());
+            reference.put("referenceNo", result.getReferenceNo());
+            reference.put("referenceTitle", result.getReferenceTitle());
             reference.put("owner", result.getUserId() != null && result.getUserId() == 0 ? "PUBLIC" : "PRIVATE");
             reference.put("userId", result.getUserId());
             reference.put("documentType", result.getDocumentType());
@@ -925,6 +933,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             reference.put("chunkIndex", result.getChunkIndex());
             reference.put("title", result.getTitle());
             reference.put("source", result.getSource());
+            reference.put("permissionScope", result.getPermissionScope());
             reference.put("score", result.getScore());
             reference.put("metadata", result.getMetadata());
             if (includeContent) {

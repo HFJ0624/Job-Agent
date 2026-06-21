@@ -229,7 +229,14 @@ public class RagVectorStoreServiceImpl implements RagVectorStoreService {
                     vo.setContent(rs.getString("content"));
                     vo.setSource(rs.getString("source"));
                     vo.setScore(rs.getDouble("score"));
-                    vo.setMetadata(readMetadata(rs.getString(metadataColumn())));
+                    vo.setVectorScore(vo.getScore());
+                    vo.setRetrievalSource("VECTOR");
+
+                    Map<String, Object> metadata = readMetadata(rs.getString(metadataColumn()));
+                    vo.setMetadata(metadata);
+                    vo.setDocumentId(getLong(metadata, "documentId"));
+                    vo.setChunkId(getLong(metadata, "chunkId"));
+                    vo.setPermissionScope(getString(metadata, "permissionScope"));
                     return vo;
                 },
                 vectorLiteral(queryVector),
@@ -381,6 +388,28 @@ public class RagVectorStoreServiceImpl implements RagVectorStoreService {
         } catch (Exception e) {
             return Map.of("raw", metadataJson);
         }
+    }
+
+    private Long getLong(Map<String, Object> metadata, String key) {
+        if (metadata == null || !metadata.containsKey(key)) {
+            return null;
+        }
+        Object value = metadata.get(key);
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text && StringUtils.hasText(text)) {
+            return Long.valueOf(text.trim());
+        }
+        return null;
+    }
+
+    private String getString(Map<String, Object> metadata, String key) {
+        if (metadata == null || !metadata.containsKey(key)) {
+            return null;
+        }
+        Object value = metadata.get(key);
+        return value == null ? null : String.valueOf(value);
     }
 
     private String vectorLiteral(float[] vector) {

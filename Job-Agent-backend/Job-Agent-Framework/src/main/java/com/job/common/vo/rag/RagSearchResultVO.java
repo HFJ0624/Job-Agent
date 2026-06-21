@@ -18,6 +18,21 @@ public class RagSearchResultVO {
     private Long id;
 
     /**
+     * RAG 文档 ID，对应 MySQL rag_document.id。
+     */
+    private Long documentId;
+
+    /**
+     * RAG 切块 ID，对应 MySQL rag_chunk.id。
+     */
+    private Long chunkId;
+
+    /**
+     * 本轮引用序号，从 1 开始。
+     */
+    private Integer referenceNo;
+
+    /**
      * 知识归属用户 ID。
      * 0 表示公共知识，例如岗位 JD 和公司信息。
      */
@@ -55,10 +70,40 @@ public class RagSearchResultVO {
     private String source;
 
     /**
-     * 相似度得分。
-     * 当前实现使用 1 - cosine distance，越接近 1 表示越相似。
+     * 权限范围，PUBLIC 或 PRIVATE。
+     */
+    private String permissionScope;
+
+    /**
+     * 引用标题，用于前端和 Agent 展示来源。
+     */
+    private String referenceTitle;
+
+    /**
+     * 最终排序得分。
+     * 混合检索开启后，这里保存重排序后的得分，越接近 1 表示越应该排在前面。
      */
     private Double score;
+
+    /**
+     * 向量相似度得分。
+     */
+    private Double vectorScore;
+
+    /**
+     * 关键词匹配得分。
+     */
+    private Double keywordScore;
+
+    /**
+     * 重排序得分。
+     */
+    private Double rerankScore;
+
+    /**
+     * 召回来源: VECTOR、KEYWORD 或 HYBRID。
+     */
+    private String retrievalSource;
 
     /**
      * 结构化元数据。

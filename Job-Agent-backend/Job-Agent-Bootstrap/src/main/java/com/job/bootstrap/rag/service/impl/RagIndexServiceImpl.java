@@ -8,6 +8,7 @@ import com.job.bootstrap.rag.model.RagDocumentType;
 import com.job.bootstrap.rag.model.RagTextChunk;
 import com.job.bootstrap.rag.service.RagEmbeddingService;
 import com.job.bootstrap.rag.service.RagIndexService;
+import com.job.bootstrap.rag.service.RagKnowledgeService;
 import com.job.bootstrap.rag.utils.RagTextSplitter;
 import com.job.bootstrap.rag.service.RagVectorStoreService;
 import com.job.bootstrap.service.JobCompanyService;
@@ -17,6 +18,7 @@ import com.job.common.entity.communication.JobCommunicationMessage;
 import com.job.common.entity.communication.JobCommunicationRecord;
 import com.job.common.entity.company.JobCompany;
 import com.job.common.entity.position.JobPosition;
+import com.job.common.entity.rag.RagChunk;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.rag.RagIndexResultVO;
 import lombok.RequiredArgsConstructor;
@@ -25,8 +27,6 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,6 +60,7 @@ public class RagIndexServiceImpl implements RagIndexService {
     private final RagTextSplitter ragTextSplitter;
     private final RagEmbeddingService ragEmbeddingService;
     private final RagVectorStoreService ragVectorStoreService;
+    private final RagKnowledgeService ragKnowledgeService;
 
     /**
      * 重建当前用户可用的全部知识。
@@ -137,7 +138,57 @@ public class RagIndexServiceImpl implements RagIndexService {
         return result;
     }
 
+    /**
+     * 增量索引单个业务文档。
+     *
+     * 方法步骤:
+     * 1. 根据 documentType 和 businessId 读取来源业务数据。
+     * 2. 删除同一文档旧的 pgvector 向量记录。
+     * 3. 重新切块并写入 MySQL 可视化表。
+     * 4. 重新生成 embedding 并写入 pgvector。
+     */
+    @Override
+    public RagIndexResultVO indexDocument(Long userId, String documentType, Long businessId) {
+        RagIndexResultVO result = new RagIndexResultVO();
+        ragVectorStoreService.ensureSchema();
+
+        RagDocumentSource document = loadDocumentSource(userId, documentType, businessId);
+        ragVectorStoreService.deleteDocument(
+                document.getUserId(),
+                document.getDocumentType().name(),
+                document.getBusinessId()
+        );
+        indexDocument(document, result);
+        return result;
+    }
+
+    /**
+     * 同步删除单个业务文档的 RAG 索引。
+     *
+     * 说明:
+     * 1. MySQL 可视化层标记删除。
+     * 2. pgvector 向量层物理删除，避免继续召回旧知识。
+     */
+    @Override
+    public RagIndexResultVO deleteDocument(Long userId, String documentType, Long businessId) {
+        RagDocumentType type = parseDocumentType(documentType);
+        Long actualUserId = resolveIndexUserId(userId, type);
+
+        ragKnowledgeService.markDocumentDeleted(actualUserId, type.name(), businessId);
+        ragVectorStoreService.deleteDocument(actualUserId, type.name(), businessId);
+
+        RagIndexResultVO result = new RagIndexResultVO();
+        result.getWarnings().add("已同步删除 RAG 文档: userId=" + actualUserId
+                + ", documentType=" + type.name()
+                + ", businessId=" + businessId);
+        return result;
+    }
+
     private void rebuildPublicKnowledge(RagIndexResultVO result) {
+        ragKnowledgeService.markDocumentsDeleted(
+                PUBLIC_USER_ID,
+                List.of(RagDocumentType.JOB.name(), RagDocumentType.COMPANY.name())
+        );
         ragVectorStoreService.deleteDocuments(
                 PUBLIC_USER_ID,
                 List.of(RagDocumentType.JOB.name(), RagDocumentType.COMPANY.name())
@@ -160,6 +211,14 @@ public class RagIndexServiceImpl implements RagIndexService {
     }
 
     private void rebuildUserKnowledge(Long userId, RagIndexResultVO result) {
+        ragKnowledgeService.markDocumentsDeleted(
+                userId,
+                List.of(
+                        RagDocumentType.RESUME.name(),
+                        RagDocumentType.COMMUNICATION.name(),
+                        RagDocumentType.COMMUNICATION_MESSAGE.name()
+                )
+        );
         ragVectorStoreService.deleteDocuments(
                 userId,
                 List.of(
@@ -207,26 +266,142 @@ public class RagIndexServiceImpl implements RagIndexService {
          * 2. 每个 chunk 单独生成 embedding，便于后续精确召回最相关段落。
          * 3. businessId + chunkIndex 保证同一业务文档可以被幂等更新。
          */
-        List<RagTextChunk> chunks = new ArrayList<>();
-        for (int i = 0; i < texts.size(); i++) {
-            String text = texts.get(i);
-            chunks.add(RagTextChunk.builder()
-                    .userId(document.getUserId())
-                    .documentType(document.getDocumentType())
-                    .businessId(document.getBusinessId())
-                    .chunkIndex(i)
-                    .title(document.getTitle())
-                    .content(text)
-                    .source(document.getSource())
-                    .metadata(document.getMetadata())
-                    .embedding(ragEmbeddingService.embed(text))
-                    .contentHash(sha256(text))
-                    .build());
+        try {
+            /*
+             * 1. 先把文档和切块写入 MySQL，拿到 documentId/chunkId。
+             * 2. 再把 chunkId 写进 pgvector metadata，后续命中时可以回到主库展示引用。
+             * 3. 向量写入成功后回写 INDEXED 状态，admin 页面才能看到索引是否成功。
+             */
+            List<RagChunk> storedChunks = ragKnowledgeService.saveDocumentChunks(document, texts);
+            List<RagTextChunk> vectorChunks = new ArrayList<>();
+            for (RagChunk chunk : storedChunks) {
+                vectorChunks.add(RagTextChunk.builder()
+                        .userId(chunk.getUserId())
+                        .documentType(document.getDocumentType())
+                        .businessId(chunk.getBusinessId())
+                        .chunkIndex(chunk.getChunkIndex())
+                        .title(chunk.getTitle())
+                        .content(chunk.getContent())
+                        .source(chunk.getSource())
+                        .metadata(buildChunkMetadata(document, chunk))
+                        .embedding(ragEmbeddingService.embed(chunk.getContent()))
+                        .contentHash(chunk.getContentHash())
+                        .build());
+            }
+
+            ragVectorStoreService.saveChunks(vectorChunks);
+            ragKnowledgeService.markDocumentIndexed(
+                    document.getUserId(),
+                    document.getDocumentType().name(),
+                    document.getBusinessId()
+            );
+            result.addIndexedDocument(vectorChunks.size());
+            increaseTypeCount(result, document.getDocumentType());
+        } catch (Exception exception) {
+            ragKnowledgeService.markDocumentIndexFailed(
+                    document.getUserId(),
+                    document.getDocumentType().name(),
+                    document.getBusinessId(),
+                    exception.getMessage()
+            );
+            result.getWarnings().add("RAG 文档索引失败: "
+                    + document.getDocumentType().name()
+                    + "#"
+                    + document.getBusinessId()
+                    + ", error="
+                    + exception.getMessage());
+        }
+    }
+
+    private Map<String, Object> buildChunkMetadata(RagDocumentSource document, RagChunk chunk) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (document.getMetadata() != null) {
+            metadata.putAll(document.getMetadata());
+        }
+        metadata.put("documentId", chunk.getDocumentId());
+        metadata.put("chunkId", chunk.getId());
+        metadata.put("chunkIndex", chunk.getChunkIndex());
+        metadata.put("permissionScope", chunk.getUserId() != null && chunk.getUserId().equals(PUBLIC_USER_ID)
+                ? "PUBLIC"
+                : "PRIVATE");
+        return metadata;
+    }
+
+    private RagDocumentSource loadDocumentSource(Long userId, String documentType, Long businessId) {
+        if (businessId == null) {
+            throw new IllegalArgumentException("businessId 不能为空");
         }
 
-        ragVectorStoreService.saveChunks(chunks);
-        result.addIndexedDocument(chunks.size());
-        increaseTypeCount(result, document.getDocumentType());
+        RagDocumentType type = parseDocumentType(documentType);
+        Long actualUserId = resolveIndexUserId(userId, type);
+
+        return switch (type) {
+            case JOB -> {
+                JobPosition position = jobPositionService.getPositionRequired(businessId);
+                JobCompany company = position.getCompanyId() == null
+                        ? null
+                        : jobCompanyService.getCompanyRequired(position.getCompanyId());
+                yield toJobDocument(position, company);
+            }
+            case COMPANY -> toCompanyDocument(jobCompanyService.getCompanyRequired(businessId));
+            case RESUME -> toResumeDocument(jobResumeService.getUserResumeRequired(actualUserId, businessId));
+            case COMMUNICATION -> {
+                JobCommunicationRecord record = loadUserCommunicationRecord(actualUserId, businessId);
+                JobPosition position = record.getJobId() == null ? null : jobPositionService.getById(record.getJobId());
+                JobCompany company = position == null || position.getCompanyId() == null
+                        ? null
+                        : jobCompanyService.getById(position.getCompanyId());
+                yield toCommunicationDocument(record, position, company);
+            }
+            case COMMUNICATION_MESSAGE -> toCommunicationMessageDocument(loadUserCommunicationMessage(actualUserId, businessId));
+        };
+    }
+
+    private RagDocumentType parseDocumentType(String documentType) {
+        if (!StringUtils.hasText(documentType)) {
+            throw new IllegalArgumentException("documentType 不能为空");
+        }
+        try {
+            return RagDocumentType.valueOf(documentType.trim().toUpperCase());
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("不支持的 RAG 文档类型: " + documentType, exception);
+        }
+    }
+
+    private Long resolveIndexUserId(Long userId, RagDocumentType type) {
+        if (type == RagDocumentType.JOB || type == RagDocumentType.COMPANY) {
+            return PUBLIC_USER_ID;
+        }
+        validateUserId(userId);
+        return userId;
+    }
+
+    private JobCommunicationRecord loadUserCommunicationRecord(Long userId, Long businessId) {
+        JobCommunicationRecord record = jobCommunicationRecordMapper.selectOne(
+                new LambdaQueryWrapper<JobCommunicationRecord>()
+                        .eq(JobCommunicationRecord::getId, businessId)
+                        .eq(JobCommunicationRecord::getUserId, userId)
+                        .eq(JobCommunicationRecord::getIsDeleted, NOT_DELETED)
+                        .last("LIMIT 1")
+        );
+        if (record == null) {
+            throw new IllegalArgumentException("沟通记录不存在或无权索引: " + businessId);
+        }
+        return record;
+    }
+
+    private JobCommunicationMessage loadUserCommunicationMessage(Long userId, Long businessId) {
+        JobCommunicationMessage message = jobCommunicationMessageMapper.selectOne(
+                new LambdaQueryWrapper<JobCommunicationMessage>()
+                        .eq(JobCommunicationMessage::getId, businessId)
+                        .eq(JobCommunicationMessage::getUserId, userId)
+                        .eq(JobCommunicationMessage::getIsDeleted, NOT_DELETED)
+                        .last("LIMIT 1")
+        );
+        if (message == null) {
+            throw new IllegalArgumentException("沟通消息不存在或无权索引: " + businessId);
+        }
+        return message;
     }
 
     private RagDocumentSource toResumeDocument(JobResume resume) {
@@ -549,20 +724,6 @@ public class RagIndexServiceImpl implements RagIndexService {
             }
         }
         return metadata;
-    }
-
-    private String sha256(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (byte value : hash) {
-                builder.append(String.format("%02x", value));
-            }
-            return builder.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("计算 RAG 文本哈希失败", e);
-        }
     }
 
     private void validateUserId(Long userId) {

@@ -40,4 +40,24 @@ public interface RagIndexService {
      * @return 索引结果
      */
     RagIndexResultVO rebuildUserKnowledge(Long userId);
+
+    /**
+     * 增量索引单个业务文档。
+     *
+     * @param userId 用户 ID；公共文档可传 0
+     * @param documentType 文档类型，例如 JOB、COMPANY、RESUME
+     * @param businessId 来源业务 ID
+     * @return 索引结果
+     */
+    RagIndexResultVO indexDocument(Long userId, String documentType, Long businessId);
+
+    /**
+     * 同步删除单个业务文档的 RAG 索引。
+     *
+     * @param userId 用户 ID；公共文档可传 0
+     * @param documentType 文档类型
+     * @param businessId 来源业务 ID
+     * @return 删除同步结果
+     */
+    RagIndexResultVO deleteDocument(Long userId, String documentType, Long businessId);
 }

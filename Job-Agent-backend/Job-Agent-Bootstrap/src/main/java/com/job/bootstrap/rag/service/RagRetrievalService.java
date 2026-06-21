@@ -1,5 +1,7 @@
 package com.job.bootstrap.rag.service;
 
+import com.job.common.dto.rag.RagRetrievalEvalDTO;
+import com.job.common.vo.rag.RagRetrievalEvalVO;
 import com.job.common.vo.rag.RagSearchResultVO;
 
 import java.util.List;
@@ -20,4 +22,12 @@ public interface RagRetrievalService {
      * @return 相似度最高的知识分片
      */
     List<RagSearchResultVO> search(Long userId, String query, Integer limit);
+
+    /**
+     * 后台评测单条 query 的召回质量。
+     *
+     * @param query 评测参数
+     * @return 命中、排名和本次召回明细
+     */
+    RagRetrievalEvalVO evaluate(RagRetrievalEvalDTO query);
 }

@@ -297,6 +297,9 @@ export interface RagIndexResult {
  */
 export interface RagSearchResult {
   id: number;
+  documentId?: number;
+  chunkId?: number;
+  referenceNo?: number;
   userId: number;
   documentType: string;
   businessId: number;
@@ -304,8 +307,94 @@ export interface RagSearchResult {
   title?: string;
   content: string;
   source?: string;
+  permissionScope?: string;
+  referenceTitle?: string;
   score: number;
+  vectorScore?: number;
+  keywordScore?: number;
+  rerankScore?: number;
+  retrievalSource?: string;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * RAG 文档分页查询参数。
+ */
+export interface RagDocumentQuery {
+  pageNum: number;
+  pageSize: number;
+  userId?: string | number;
+  documentType?: string;
+  businessId?: string | number;
+  title?: string;
+  permissionScope?: string;
+  status?: string;
+  indexStatus?: string;
+  keyword?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * RAG 切片分页查询参数。
+ */
+export interface RagChunkQuery {
+  pageNum: number;
+  pageSize: number;
+  documentId?: string | number;
+  userId?: string | number;
+  documentType?: string;
+  businessId?: string | number;
+  title?: string;
+  status?: string;
+  vectorStatus?: string;
+  keyword?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * RAG 文档展示数据。
+ */
+export interface RagDocumentInfo {
+  id: number;
+  userId: number;
+  documentType: string;
+  businessId: number;
+  title?: string;
+  source?: string;
+  permissionScope: string;
+  contentHash?: string;
+  chunkCount: number;
+  status: string;
+  indexStatus: string;
+  errorMsg?: string;
+  lastIndexTime?: string;
+  metadataJson?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * RAG 切片展示数据。
+ */
+export interface RagChunkInfo {
+  id: number;
+  documentId: number;
+  userId: number;
+  documentType: string;
+  businessId: number;
+  chunkIndex: number;
+  title?: string;
+  content: string;
+  contentHash?: string;
+  source?: string;
+  metadataJson?: string;
+  status: string;
+  vectorStatus: string;
+  lastIndexTime?: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
 export interface PageResult<T> {
