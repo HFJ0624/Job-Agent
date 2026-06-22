@@ -84,6 +84,22 @@
           </button>
         </div>
 
+        <div v-if="pendingConfirmation.planId" class="confirmation-panel">
+          <div>
+            <strong>需要确认后继续执行</strong>
+            <p>{{ pendingConfirmation.message }}</p>
+            <small>工具：{{ pendingConfirmation.toolNames.join("、") }}</small>
+          </div>
+          <div class="confirmation-actions">
+            <button class="secondary-button" type="button" :disabled="loading" @click="cancelConfirmation">
+              取消
+            </button>
+            <button class="primary-button" type="button" :disabled="loading" @click="confirmToolExecution">
+              确认执行
+            </button>
+          </div>
+        </div>
+
         <form class="agent-input-area" @submit.prevent="sendMessage">
           <textarea
             v-model.trim="inputMessage"
@@ -149,6 +165,24 @@ const loading = ref(false);
 const conversationLoading = ref(false);
 const errorMessage = ref("");
 const messageListRef = ref<HTMLElement | null>(null);
+
+/**
+ * 待用户确认的工具执行信息。
+ *
+ * 说明:
+ * 1. 后端返回 requiresUserConfirmation=true 时写入这里。
+ * 2. 用户点击“确认执行”后，前端把 planId 和 confirmedToolNames 原样传回后端。
+ * 3. 这样后端会继续执行同一份计划，而不是把“确认”当作一条新任务重新规划。
+ */
+const pendingConfirmation = ref<{
+  planId: number | null;
+  toolNames: string[];
+  message: string;
+}>({
+  planId: null,
+  toolNames: [],
+  message: ""
+});
 
 /**
  * 快捷提示词。
@@ -223,6 +257,7 @@ function startNewConversation() {
   conversationId.value = null;
   inputMessage.value = "";
   errorMessage.value = "";
+  clearPendingConfirmation();
   messages.value = [
     {
       role: "ASSISTANT",
@@ -301,35 +336,125 @@ async function sendMessage() {
   });
 
   inputMessage.value = "";
+  clearPendingConfirmation();
   loading.value = true;
   errorMessage.value = "";
 
   await scrollToBottom();
 
   try {
-    const result = await chatWithAgent(conversationId.value, message);
-
-    /*
-     * 后端第一次对话会自动创建 conversationId。
-     */
-    conversationId.value = result.conversationId;
-
-    messages.value.push({
-      role: "ASSISTANT",
-      content: result.answer
+    const result = await chatWithAgent({
+      conversationId: conversationId.value,
+      message
     });
 
-    /*
-     * 发送成功后刷新左侧会话列表。
-     */
-    await loadConversations();
-    await scrollToBottom();
+    await handleAgentResult(result);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
     ElMessage.error(errorMessage.value);
   } finally {
     loading.value = false;
   }
+}
+
+/**
+ * 用户确认执行需要确认的工具。
+ *
+ * 方法步骤:
+ * 1. 校验当前确实存在待确认计划。
+ * 2. 在页面中追加一条用户确认消息，保证聊天上下文可读。
+ * 3. 请求后端时带上 planId 和 confirmedToolNames，继续执行同一份计划。
+ * 4. 请求成功后清理待确认状态，避免重复确认。
+ */
+async function confirmToolExecution() {
+  if (!pendingConfirmation.value.planId || !pendingConfirmation.value.toolNames.length) {
+    return;
+  }
+
+  const confirmedPlanId = pendingConfirmation.value.planId;
+  const confirmedToolNames = [...pendingConfirmation.value.toolNames];
+
+  messages.value.push({
+    role: "USER",
+    content: "确认执行"
+  });
+
+  clearPendingConfirmation();
+  loading.value = true;
+  errorMessage.value = "";
+  await scrollToBottom();
+
+  try {
+    const result = await chatWithAgent({
+      conversationId: conversationId.value,
+      planId: confirmedPlanId,
+      message: "确认执行",
+      confirmedToolNames
+    });
+
+    await handleAgentResult(result);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
+    ElMessage.error(errorMessage.value);
+  } finally {
+    loading.value = false;
+  }
+}
+
+/**
+ * 取消本轮待确认工具。
+ */
+function cancelConfirmation() {
+  clearPendingConfirmation();
+  messages.value.push({
+    role: "ASSISTANT",
+    content: "已取消本次工具执行。你可以重新描述需求，或换一个不需要确认的操作。"
+  });
+  scrollToBottom();
+}
+
+/**
+ * 统一处理后端 AI 助手返回结果。
+ *
+ * @param result 后端返回结果
+ */
+async function handleAgentResult(result: Awaited<ReturnType<typeof chatWithAgent>>) {
+  /*
+   * 后端第一次对话会自动创建 conversationId。
+   */
+  conversationId.value = result.conversationId;
+
+  messages.value.push({
+    role: "ASSISTANT",
+    content: result.answer
+  });
+
+  if (result.requiresUserConfirmation && result.planId && result.requiredConfirmationToolNames?.length) {
+    pendingConfirmation.value = {
+      planId: result.planId,
+      toolNames: result.requiredConfirmationToolNames,
+      message: result.confirmationMessage || "该操作需要你确认后才能继续执行。"
+    };
+  } else {
+    clearPendingConfirmation();
+  }
+
+  /*
+   * 发送成功后刷新左侧会话列表。
+   */
+  await loadConversations();
+  await scrollToBottom();
+}
+
+/**
+ * 清理待确认状态。
+ */
+function clearPendingConfirmation() {
+  pendingConfirmation.value = {
+    planId: null,
+    toolNames: [],
+    message: ""
+  };
 }
 
 /**
@@ -523,6 +648,33 @@ async function scrollToBottom() {
   margin: 14px 0;
 }
 
+.confirmation-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 14px;
+  background: #fff7ed;
+}
+
+.confirmation-panel p {
+  margin: 4px 0;
+  color: #9a3412;
+}
+
+.confirmation-panel small {
+  color: #6b7280;
+}
+
+.confirmation-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .agent-input-area {
   display: flex;
   gap: 12px;
@@ -562,6 +714,11 @@ async function scrollToBottom() {
 
 @media (max-width: 768px) {
   .agent-input-area {
+    flex-direction: column;
+  }
+
+  .confirmation-panel {
+    align-items: stretch;
     flex-direction: column;
   }
 

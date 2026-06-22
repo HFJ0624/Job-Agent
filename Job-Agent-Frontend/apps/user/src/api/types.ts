@@ -324,23 +324,11 @@ export interface GreetingInfo {
  */
 export interface AgentChatInfo {
   conversationId: number;
+  planId?: number | null;
   answer: string;
-}
-
-/**
- * 前端展示用的聊天消息。
- */
-export interface AgentChatMessage {
-  role: "USER" | "ASSISTANT";
-  content: string;
-}
-
-/**
- * AI 助手回复结果。
- */
-export interface AgentChatInfo {
-  conversationId: number;
-  answer: string;
+  requiresUserConfirmation?: boolean;
+  requiredConfirmationToolNames?: string[];
+  confirmationMessage?: string;
 }
 
 /**

@@ -7,8 +7,6 @@ import com.job.enums.AgentToolSideEffectType;
 import com.job.exception.AgentToolException;
 import org.springframework.stereotype.Component;
 
-import java.util.Locale;
-
 /**
  * 作者:hfj
  * 功能:Agent敏感操作拦截守护组件
@@ -26,13 +24,17 @@ public class SensitiveOperationGuard {
      */
     public void assertSensitiveOperationAllowed(AgentToolSchema schema) {
 
-        // 空工具定义或只读工具直接放行
-        // 设计决策：只读操作不会产生任何副作用，无需用户确认
+        // 1. 空工具定义或只读工具直接放行。
+        // 设计决策：只读操作不会产生任何副作用，无需用户确认。
         if (schema == null || AgentToolSideEffectType.READ_ONLY.equals(schema.getSideEffectType())) {
             return;
         }
 
-        // 判断是否需要用户确认，且当前上下文中没有确认记录
+        // 2. 只有明确需要确认的工具才检查 confirmedToolNames。
+        // 关键原因：
+        // - 是否需要确认应由 Tool Schema 和副作用类型决定，不能靠描述里的关键词猜测。
+        // - 岗位匹配工具的描述里有“投递建议”，旧关键词规则会把它误判成真实投递操作。
+        // - 真实高风险工具仍然会通过 REQUIRED_BEFORE_EXECUTION、EXTERNAL_ACTION 或 UPDATE_USER_STATE 强制确认。
         if (mustConfirm(schema) && !AgentRuntimeContext.isToolConfirmed(schema.getToolName())) {
             throw new AgentToolException(
                     AgentToolErrorCode.TOOL_CONFIRMATION_REQUIRED,
@@ -53,41 +55,14 @@ public class SensitiveOperationGuard {
      */
     private boolean mustConfirm(AgentToolSchema schema) {
 
-        // 1.工具显式配置了需要确认（最高优先级）
+        // 1. 工具显式配置了需要确认，最高优先级。
         if (Boolean.TRUE.equals(schema.getRequiresUserConfirmation())) {
             return true;
         }
 
-        //2.高风险副作用类型强制确认
-        if (AgentToolSideEffectType.EXTERNAL_ACTION.equals(schema.getSideEffectType())
-                || AgentToolSideEffectType.UPDATE_USER_STATE.equals(schema.getSideEffectType())) {
-            return true;
-        }
-
-        // 3.关键词匹配检测（兜底机制）
-        // 拼接工具的所有文本信息进行不区分大小写的匹配
-        String text = (
-                nullToEmpty(schema.getToolName())
-                        + " "
-                        + nullToEmpty(schema.getDisplayName())
-                        + " "
-                        + nullToEmpty(schema.getDescription())
-        ).toLowerCase(Locale.ROOT);
-
-        // 匹配中英文敏感操作关键词
-        return text.contains("delete")
-                || text.contains("remove")
-                || text.contains("send")
-                || text.contains("submit")
-                || text.contains("apply")
-                || text.contains("删除")
-                || text.contains("发送")
-                || text.contains("投递")
-                || text.contains("沟通记录");
-    }
-
-    //空值处理工具方法
-    private String nullToEmpty(String value) {
-        return value == null ? "" : value;
+        // 2. 高风险副作用类型强制确认。
+        // WRITE_BUSINESS_RECORD 不在这里强制确认，因为简历评分、岗位匹配、面试准备都只是生成站内分析记录。
+        return AgentToolSideEffectType.EXTERNAL_ACTION.equals(schema.getSideEffectType())
+                || AgentToolSideEffectType.UPDATE_USER_STATE.equals(schema.getSideEffectType());
     }
 }
