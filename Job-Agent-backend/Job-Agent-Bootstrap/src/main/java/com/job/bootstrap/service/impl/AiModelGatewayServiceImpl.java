@@ -9,6 +9,8 @@ import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelCircuitStateMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiModelRouteMapper;
+import com.job.bootstrap.observability.AgentObservationRecord;
+import com.job.bootstrap.service.AgentObservationService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.AiPromptRuntimeService;
 import com.job.common.entity.ai.AiModelCallLog;
@@ -16,6 +18,9 @@ import com.job.common.entity.ai.AiModelCircuitState;
 import com.job.common.entity.ai.AiModelConfig;
 import com.job.common.entity.ai.AiModelRoute;
 import com.job.common.entity.base.ResultCodeEnum;
+import com.job.enums.AgentObservationErrorCategory;
+import com.job.enums.AgentObservationEventType;
+import com.job.enums.AgentObservationStatus;
 import com.job.enums.AiCircuitStatus;
 import com.job.enums.AiConfigStatus;
 import com.job.enums.AiModelCallStatus;
@@ -61,6 +66,7 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
     private final AiModelCallLogMapper aiModelCallLogMapper;
     private final AiModelCircuitStateMapper aiModelCircuitStateMapper;
     private final AiPromptRuntimeService aiPromptRuntimeService;
+    private final AgentObservationService agentObservationService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -93,6 +99,15 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
 
             if (isCircuitOpen(model)) {
                 lastException = new BizException("模型熔断中：" + model.getModelCode());
+                recordCircuitOpenObservation(
+                        traceId,
+                        userId,
+                        sceneCode,
+                        route.getPromptCode(),
+                        renderedPrompt.promptVersion().getId(),
+                        model,
+                        fallbackUsed
+                );
                 continue;
             }
 
@@ -339,6 +354,103 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
         log.setCreateTime(now);
         log.setUpdateTime(now);
         aiModelCallLogMapper.insert(log);
+        recordModelObservation(log, model, promptCode, promptVersionId, fallbackUsed, errorMsg);
+    }
+
+    /**
+     * 同步写入模型调用观测事件。
+     *
+     * 方法步骤:
+     * 1. 复用 ai_model_call_log 已经计算好的 token、费用和耗时，避免重复计算。
+     * 2. 请求快照只保存路由和 Prompt 元信息，不保存完整 Prompt，减少敏感信息暴露。
+     * 3. 失败时写入统一失败分类，后台可以直接按 MODEL_ERROR 查询。
+     *
+     * @param log 模型调用日志
+     * @param model 模型配置
+     * @param promptCode Prompt 编码
+     * @param promptVersionId Prompt 版本 ID
+     * @param fallbackUsed 是否使用备用模型
+     * @param errorMsg 错误信息
+     */
+    private void recordModelObservation(
+            AiModelCallLog log,
+            AiModelConfig model,
+            String promptCode,
+            Long promptVersionId,
+            boolean fallbackUsed,
+            String errorMsg
+    ) {
+        boolean success = AiModelCallStatus.SUCCESS.name().equals(log.getStatus());
+
+        Map<String, Object> requestSnapshot = new LinkedHashMap<>();
+        requestSnapshot.put("sceneCode", log.getSceneCode());
+        requestSnapshot.put("promptCode", promptCode);
+        requestSnapshot.put("promptVersionId", promptVersionId);
+        requestSnapshot.put("provider", model.getProvider());
+        requestSnapshot.put("modelIdentifier", model.getModelIdentifier());
+        requestSnapshot.put("fallbackUsed", fallbackUsed);
+
+        Map<String, Object> responseSnapshot = new LinkedHashMap<>();
+        responseSnapshot.put("status", log.getStatus());
+        responseSnapshot.put("errorMsg", errorMsg);
+
+        agentObservationService.recordEvent(AgentObservationRecord.builder()
+                .traceId(log.getTraceId())
+                .userId(log.getUserId())
+                .sceneCode(log.getSceneCode())
+                .eventType(AgentObservationEventType.MODEL)
+                .eventName(log.getSceneCode())
+                .status(success ? AgentObservationStatus.SUCCESS : AgentObservationStatus.FAILED)
+                .errorCategory(success ? AgentObservationErrorCategory.NONE : AgentObservationErrorCategory.MODEL_ERROR)
+                .errorCode(success ? null : "MODEL_CALL_FAILED")
+                .errorMsg(errorMsg)
+                .modelCode(log.getModelCode())
+                .inputTokens(log.getInputTokens())
+                .outputTokens(log.getOutputTokens())
+                .totalTokens(log.getTotalTokens())
+                .totalCost(log.getTotalCost())
+                .durationMs(log.getCostTime())
+                .requestSnapshot(requestSnapshot)
+                .responseSnapshot(responseSnapshot)
+                .build());
+    }
+
+    /**
+     * 记录模型熔断事件。
+     *
+     * 说明:
+     * 1. 熔断时不会真正请求供应商，因此不写 ai_model_call_log。
+     * 2. 但它属于线上排障的关键事件，必须写入统一观测表。
+     */
+    private void recordCircuitOpenObservation(
+            String traceId,
+            Long userId,
+            String sceneCode,
+            String promptCode,
+            Long promptVersionId,
+            AiModelConfig model,
+            boolean fallbackUsed
+    ) {
+        Map<String, Object> requestSnapshot = new LinkedHashMap<>();
+        requestSnapshot.put("sceneCode", sceneCode);
+        requestSnapshot.put("promptCode", promptCode);
+        requestSnapshot.put("promptVersionId", promptVersionId);
+        requestSnapshot.put("fallbackUsed", fallbackUsed);
+
+        agentObservationService.recordEvent(AgentObservationRecord.builder()
+                .traceId(traceId)
+                .userId(userId)
+                .sceneCode(sceneCode)
+                .eventType(AgentObservationEventType.MODEL)
+                .eventName(sceneCode)
+                .status(AgentObservationStatus.FAILED)
+                .errorCategory(AgentObservationErrorCategory.MODEL_ERROR)
+                .errorCode("MODEL_CIRCUIT_OPEN")
+                .errorMsg("模型熔断中：" + model.getModelCode())
+                .modelCode(model.getModelCode())
+                .durationMs(0L)
+                .requestSnapshot(requestSnapshot)
+                .build());
     }
 
     /**

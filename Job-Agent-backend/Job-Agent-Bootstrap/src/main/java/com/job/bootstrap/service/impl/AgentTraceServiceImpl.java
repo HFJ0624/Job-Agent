@@ -4,8 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
+import com.job.bootstrap.observability.AgentObservationRecord;
+import com.job.bootstrap.service.AgentObservationService;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.entity.agent.AgentTraceLog;
+import com.job.enums.AgentObservationEventType;
+import com.job.enums.AgentObservationStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +33,7 @@ public class AgentTraceServiceImpl implements AgentTraceService {
     private final AgentTraceLogMapper agentTraceLogMapper;
     private final ObjectMapper objectMapper;
     private final AgentGuardrailService agentGuardrailService;
+    private final AgentObservationService agentObservationService;
 
     /**
      * 保存一条 Agent Trace。
@@ -66,6 +71,7 @@ public class AgentTraceServiceImpl implements AgentTraceService {
         log.setIsDeleted(NOT_DELETED);
 
         agentTraceLogMapper.insert(log);
+        recordObservationEvent(log, input, output);
     }
 
     /**
@@ -133,6 +139,65 @@ public class AgentTraceServiceImpl implements AgentTraceService {
      */
     private String newTraceId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * 同步写入统一观测事件。
+     *
+     * 方法步骤:
+     * 1. toolName 不为空时记录为 TOOL 事件，表示真实工具调用。
+     * 2. status 为 BLOCKED 时记录为 GUARDRAIL 事件，方便后台单独筛出安全拦截。
+     * 3. 其他 Agent 主流程日志记录为 TRACE 事件，用于补齐完整链路。
+     *
+     * @param log Trace 日志实体
+     * @param input 原始入参
+     * @param output 原始出参
+     */
+    private void recordObservationEvent(AgentTraceLog log, Object input, Object output) {
+        agentObservationService.recordEvent(AgentObservationRecord.builder()
+                .traceId(log.getTraceId())
+                .userId(log.getUserId())
+                .conversationId(log.getConversationId())
+                .intentCode(log.getIntentCode())
+                .eventType(resolveEventType(log))
+                .eventName(resolveEventName(log))
+                .status(resolveStatus(log.getStatus()))
+                .errorMsg(log.getErrorMsg())
+                .toolName(log.getToolName())
+                .durationMs(log.getCostTime())
+                .requestSnapshot(input)
+                .responseSnapshot(output)
+                .build());
+    }
+
+    private AgentObservationEventType resolveEventType(AgentTraceLog log) {
+        if ("BLOCKED".equals(log.getStatus())) {
+            return AgentObservationEventType.GUARDRAIL;
+        }
+        return hasText(log.getToolName()) ? AgentObservationEventType.TOOL : AgentObservationEventType.TRACE;
+    }
+
+    private String resolveEventName(AgentTraceLog log) {
+        if (hasText(log.getToolName())) {
+            return log.getToolName();
+        }
+        if (hasText(log.getIntentCode())) {
+            return log.getIntentCode();
+        }
+        return "AgentTrace";
+    }
+
+    private AgentObservationStatus resolveStatus(String status) {
+        if ("FAILED".equals(status)) {
+            return AgentObservationStatus.FAILED;
+        }
+        if ("BLOCKED".equals(status)) {
+            return AgentObservationStatus.BLOCKED;
+        }
+        if ("SKIPPED".equals(status)) {
+            return AgentObservationStatus.SKIPPED;
+        }
+        return AgentObservationStatus.SUCCESS;
     }
 
     /**

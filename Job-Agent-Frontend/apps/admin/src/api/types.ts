@@ -187,6 +187,200 @@ export interface AgentTraceLogInfo {
 }
 
 /**
+ * Agent 观测看板查询参数。
+ */
+export interface AgentObservationDashboardQuery {
+  startTime?: string;
+  endTime?: string;
+  eventType?: string;
+  modelCode?: string;
+  toolName?: string;
+}
+
+/**
+ * Agent 观测统计项。
+ */
+export interface AgentObservationStatItem {
+  name: string;
+  count: number;
+  ratio?: number;
+  totalCost?: number;
+  totalTokens?: number;
+  avgDurationMs?: number;
+  maxDurationMs?: number;
+  lastTime?: string;
+}
+
+/**
+ * Agent 观测看板数据。
+ */
+export interface AgentObservationDashboard {
+  totalEvents: number;
+  successEvents: number;
+  failedEvents: number;
+  blockedEvents: number;
+  skippedEvents: number;
+  successRate: number;
+  avgDurationMs: number;
+  totalTokens: number;
+  totalCost: number;
+  eventTypeStats: AgentObservationStatItem[];
+  failureStats: AgentObservationStatItem[];
+  slowModelStats: AgentObservationStatItem[];
+  slowToolStats: AgentObservationStatItem[];
+  recentAlerts: AgentObservationAlertRecordInfo[];
+}
+
+/**
+ * Agent 统一观测事件查询参数。
+ */
+export interface AgentObservationEventQuery {
+  pageNum: number;
+  pageSize: number;
+  traceId?: string;
+  userId?: string | number;
+  conversationId?: string | number;
+  planId?: string | number;
+  stepId?: string | number;
+  sceneCode?: string;
+  intentCode?: string;
+  eventType?: string;
+  eventName?: string;
+  status?: string;
+  errorCategory?: string;
+  modelCode?: string;
+  toolName?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * Agent 统一观测事件展示数据。
+ */
+export interface AgentObservationEventInfo {
+  id: number;
+  traceId?: string;
+  spanId?: string;
+  parentSpanId?: string;
+  userId?: number;
+  conversationId?: number;
+  planId?: number;
+  stepId?: number;
+  sceneCode?: string;
+  intentCode?: string;
+  eventType?: string;
+  eventName?: string;
+  status?: string;
+  errorCategory?: string;
+  errorCode?: string;
+  errorMsg?: string;
+  modelCode?: string;
+  toolName?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  totalCost?: number;
+  durationMs?: number;
+  requestSnapshot?: string;
+  responseSnapshot?: string;
+  createTime?: string;
+}
+
+/**
+ * Agent 观测告警规则查询参数。
+ */
+export interface AgentObservationAlertRuleQuery {
+  pageNum: number;
+  pageSize: number;
+  ruleName?: string;
+  ruleType?: string;
+  status?: string;
+}
+
+/**
+ * Agent 观测告警规则展示数据。
+ */
+export interface AgentObservationAlertRuleInfo {
+  id?: number;
+  ruleName: string;
+  ruleType: string;
+  eventType?: string;
+  errorCategory?: string;
+  modelCode?: string;
+  toolName?: string;
+  thresholdValue: number;
+  windowMinutes?: number;
+  minSampleCount?: number;
+  cooldownMinutes?: number;
+  alertLevel?: string;
+  status?: string;
+  lastEvaluateTime?: string;
+  lastAlertTime?: string;
+  remark?: string;
+  createTime?: string;
+}
+
+/**
+ * Agent 观测告警记录查询参数。
+ */
+export interface AgentObservationAlertRecordQuery {
+  pageNum: number;
+  pageSize: number;
+  ruleId?: string | number;
+  ruleType?: string;
+  alertLevel?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * Agent 观测告警记录展示数据。
+ */
+export interface AgentObservationAlertRecordInfo {
+  id: number;
+  ruleId?: number;
+  ruleName?: string;
+  ruleType?: string;
+  alertLevel?: string;
+  metricValue?: number;
+  thresholdValue?: number;
+  windowStartTime?: string;
+  windowEndTime?: string;
+  alertMessage?: string;
+  status?: string;
+  createTime?: string;
+}
+
+/**
+ * Agent Trace 保留策略展示数据。
+ */
+export interface AgentTraceRetentionPolicyInfo {
+  id?: number;
+  policyName: string;
+  targetTable: string;
+  retentionDays: number;
+  batchSize?: number;
+  status?: string;
+  lastExecuteTime?: string;
+  lastDeletedCount?: number;
+  remark?: string;
+  createTime?: string;
+}
+
+/**
+ * Agent Trace 保留策略预览数据。
+ */
+export interface AgentTraceRetentionPreview {
+  policyId: number;
+  targetTable: string;
+  retentionDays: number;
+  cutoffTime?: string;
+  matchedCount: number;
+  batchSize: number;
+}
+
+/**
  * Agent 计划查询参数。
  */
 export interface AgentPlanQuery {

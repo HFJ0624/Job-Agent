@@ -2,12 +2,14 @@ package com.job.bootstrap;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 作者:hfj
  * 功能:Job-Agent 后端项目启动入口
  * 日期:2026/6/2 10:45
  */
+@EnableScheduling
 @SpringBootApplication(scanBasePackages = "com.job")
 public class JobAgentApplication {
 

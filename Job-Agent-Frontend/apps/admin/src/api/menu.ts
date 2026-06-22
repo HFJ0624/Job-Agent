@@ -97,6 +97,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/TraceLog"
   },
   {
+    id: 10,
+    path: "/agent/observability",
+    name: "AgentObservability",
+    title: "Agent 观测",
+    icon: "DataBoard",
+    component: "agent/ObservationDashboard"
+  },
+  {
     id: 9,
     path: "/agent/plans",
     name: "AgentPlans",

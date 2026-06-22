@@ -12,10 +12,14 @@ import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
+import com.job.bootstrap.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
+import com.job.bootstrap.service.AgentObservationService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
+import com.job.enums.AgentObservationEventType;
+import com.job.enums.AgentObservationStatus;
 import com.job.enums.AgentPlanStatus;
 import com.job.enums.AgentPlanStepStatus;
 import com.job.enums.AgentToolErrorCode;
@@ -52,6 +56,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     private final AgentMemoryExtractionService agentMemoryExtractionService;
     private final AgentToolSchemaRegistry agentToolSchemaRegistry;
     private final AgentGuardrailService agentGuardrailService;
+    private final AgentObservationService agentObservationService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -91,13 +96,13 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
 
         for (AgentPlanStep step : steps) {
             if (failed) {
-                stepResults.add(skipStep(step, "前置步骤失败，跳过执行。"));
+                stepResults.add(skipStep(plan, step, "前置步骤失败，跳过执行。"));
                 continue;
             }
 
             String toolName = chooseExecutableToolName(plan, step);
             if (!StringUtils.hasText(toolName)) {
-                stepResults.add(skipStep(step, "非工具步骤，已由 Planner/Executor 前置校验覆盖。"));
+                stepResults.add(skipStep(plan, step, "非工具步骤，已由 Planner/Executor 前置校验覆盖。"));
                 continue;
             }
 
@@ -154,12 +159,13 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         );
     }
 
-    private AgentPlanStepExecutionResult skipStep(AgentPlanStep step, String reason) {
+    private AgentPlanStepExecutionResult skipStep(AgentPlan plan, AgentPlanStep step, String reason) {
         step.setStatus(AgentPlanStepStatus.SKIPPED.name());
         step.setResultSummary(reason);
         step.setErrorMsg(null);
         step.setUpdateTime(new Date());
         agentPlanStepMapper.updateById(step);
+        recordExecutorEvent(plan, step, step.getToolName(), AgentObservationStatus.SKIPPED, null, reason, null, null);
 
         return AgentPlanStepExecutionResult.builder()
                 .stepId(step.getId())
@@ -209,9 +215,9 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             );
 
             if (Boolean.TRUE.equals(toolResult.getSuccess())) {
-                return markStepCompleted(step, toolName, toolResult);
+                return markStepCompleted(plan, step, toolName, toolResult);
             }
-            return markStepFailed(step, toolName, toolResult);
+            return markStepFailed(plan, step, toolName, toolResult);
         } catch (AgentToolException exception) {
             AgentToolExecutionResult toolResult = AgentToolExecutionResult.builder()
                     .success(false)
@@ -220,7 +226,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                     .message(exception.getMessage())
                     .costTime(0L)
                     .build();
-            return markStepFailed(step, toolName, toolResult);
+            return markStepFailed(plan, step, toolName, toolResult);
         } catch (Exception exception) {
             AgentToolExecutionResult toolResult = AgentToolExecutionResult.builder()
                     .success(false)
@@ -229,7 +235,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                     .message(exception.getMessage())
                     .costTime(0L)
                     .build();
-            return markStepFailed(step, toolName, toolResult);
+            return markStepFailed(plan, step, toolName, toolResult);
         } finally {
             AgentRuntimeContext.clearCurrentPlanStep();
         }
@@ -244,6 +250,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     }
 
     private AgentPlanStepExecutionResult markStepCompleted(
+            AgentPlan plan,
             AgentPlanStep step,
             String toolName,
             AgentToolExecutionResult toolResult
@@ -255,6 +262,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         step.setErrorMsg(null);
         step.setUpdateTime(new Date());
         agentPlanStepMapper.updateById(step);
+        recordExecutorEvent(plan, step, toolName, AgentObservationStatus.SUCCESS, null, summary, toolResult.getCostTime(), toolResult);
 
         return AgentPlanStepExecutionResult.builder()
                 .stepId(step.getId())
@@ -268,6 +276,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     }
 
     private AgentPlanStepExecutionResult markStepFailed(
+            AgentPlan plan,
             AgentPlanStep step,
             String toolName,
             AgentToolExecutionResult toolResult
@@ -279,6 +288,16 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         step.setErrorMsg(errorMsg);
         step.setUpdateTime(new Date());
         agentPlanStepMapper.updateById(step);
+        recordExecutorEvent(
+                plan,
+                step,
+                toolName,
+                AgentObservationStatus.FAILED,
+                toolResult.getErrorCode(),
+                errorMsg,
+                toolResult.getCostTime(),
+                toolResult
+        );
 
         return AgentPlanStepExecutionResult.builder()
                 .stepId(step.getId())
@@ -310,6 +329,74 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                     exception
             );
         }
+    }
+
+    /**
+     * 记录 Executor 步骤观测事件。
+     *
+     * 方法步骤:
+     * 1. requestSnapshot 保存计划和步骤的关键上下文，方便后台知道当时准备执行什么。
+     * 2. responseSnapshot 保存步骤结果或失败信息，方便和 TOOL 事件互相对照。
+     * 3. 这里记录的是“编排层步骤事件”，工具内部仍然会通过 AgentTraceService 写 TOOL 事件。
+     *
+     * @param plan 当前计划
+     * @param step 当前步骤
+     * @param toolName 实际执行工具
+     * @param status 观测状态
+     * @param errorCode 错误码
+     * @param message 结果或错误信息
+     * @param durationMs 耗时
+     * @param toolResult 工具执行结果
+     */
+    private void recordExecutorEvent(
+            AgentPlan plan,
+            AgentPlanStep step,
+            String toolName,
+            AgentObservationStatus status,
+            String errorCode,
+            String message,
+            Long durationMs,
+            AgentToolExecutionResult toolResult
+    ) {
+        Map<String, Object> requestSnapshot = new LinkedHashMap<>();
+        requestSnapshot.put("userGoal", plan.getUserGoal());
+        requestSnapshot.put("planTitle", plan.getPlanTitle());
+        requestSnapshot.put("stepNo", step.getStepNo());
+        requestSnapshot.put("stepName", step.getStepName());
+        requestSnapshot.put("stepGoal", step.getStepGoal());
+        requestSnapshot.put("completionCriteria", step.getCompletionCriteria());
+
+        Map<String, Object> responseSnapshot = new LinkedHashMap<>();
+        responseSnapshot.put("message", message);
+        responseSnapshot.put("toolResult", toolResult);
+
+        agentObservationService.recordEvent(AgentObservationRecord.builder()
+                .traceId(plan.getTraceId())
+                .userId(plan.getUserId())
+                .conversationId(plan.getConversationId())
+                .planId(plan.getId())
+                .stepId(step.getId())
+                .intentCode(plan.getIntentCode())
+                .eventType(AgentObservationEventType.EXECUTOR)
+                .eventName(resolveExecutorEventName(step, toolName))
+                .status(status)
+                .errorCode(errorCode)
+                .errorMsg(AgentObservationStatus.FAILED.equals(status) ? message : null)
+                .toolName(toolName)
+                .durationMs(durationMs)
+                .requestSnapshot(requestSnapshot)
+                .responseSnapshot(responseSnapshot)
+                .build());
+    }
+
+    private String resolveExecutorEventName(AgentPlanStep step, String toolName) {
+        if (StringUtils.hasText(toolName)) {
+            return toolName;
+        }
+        if (StringUtils.hasText(step.getStepName())) {
+            return step.getStepName();
+        }
+        return "AgentExecutorStep";
     }
 
     private AgentPlanExecutionResult buildExistingPlanResult(
