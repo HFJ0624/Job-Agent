@@ -77,4 +77,22 @@ public interface AgentMemoryService {
      * @return 记忆详情
      */
     AgentMemoryVO getDetail(Long id);
+
+    /**
+     * 后台人工更新长期记忆状态。
+     *
+     * @param id 记忆 ID
+     * @param status 目标状态，允许 ACTIVE、ARCHIVED、INVALID
+     * @return 更新后的记忆
+     */
+    AgentMemoryVO updateStatus(Long id, String status);
+
+    /**
+     * 按记忆 key 归档当前用户的有效记忆。
+     *
+     * @param userId 用户 ID
+     * @param memoryKeys 记忆 key 列表
+     * @return 实际归档数量
+     */
+    int archiveActiveMemoriesByKeys(Long userId, List<String> memoryKeys);
 }

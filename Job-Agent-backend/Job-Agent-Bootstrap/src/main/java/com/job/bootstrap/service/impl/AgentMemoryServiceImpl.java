@@ -23,6 +23,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -254,6 +255,86 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         return AgentMemoryVO.from(memory);
     }
 
+    /**
+     * 后台人工更新长期记忆状态。
+     *
+     * 方法步骤:
+     * 1. 先按 ID 查询记忆，并确认它没有被逻辑删除。
+     * 2. 将前端传入的状态字符串解析成 AgentMemoryStatus 枚举，拒绝未知状态。
+     * 3. 只更新 status 和 updateTime，不改 memoryValue，避免后台治理动作误伤事实内容。
+     * 4. 返回最新 VO，让 controller 可以拿到 userId 并触发用户画像重建。
+     *
+     * 状态语义:
+     * - ACTIVE: 继续参与长期记忆召回和画像构建。
+     * - ARCHIVED: 人工暂时禁用，不参与召回，但允许后续恢复。
+     * - INVALID: 判定错误或过期，不参与召回，后续一般不再恢复。
+     */
+    @Override
+    public AgentMemoryVO updateStatus(Long id, String status) {
+        if (id == null || id <= 0) {
+            throw new BizException("长期记忆ID不能为空");
+        }
+
+        AgentLongTermMemory memory = agentLongTermMemoryMapper.selectById(id);
+        if (memory == null || Integer.valueOf(DELETED).equals(memory.getIsDeleted())) {
+            throw new BizException("Agent 长期记忆不存在");
+        }
+
+        AgentMemoryStatus targetStatus = parseMemoryStatus(status);
+        memory.setStatus(targetStatus.name());
+        memory.setUpdateTime(new Date());
+        agentLongTermMemoryMapper.updateById(memory);
+        return AgentMemoryVO.from(memory);
+    }
+
+    /**
+     * 按 key 归档当前用户的 ACTIVE 记忆。
+     *
+     * 方法步骤:
+     * 1. 校验用户 ID 和 memoryKeys，缺少关键条件时直接返回 0，避免误归档。
+     * 2. 查询当前用户、指定 key、状态为 ACTIVE、未删除的记忆。
+     * 3. 将命中的记忆状态改为 ARCHIVED，并刷新 updateTime。
+     * 4. 返回归档数量，上层据此决定是否需要重建用户画像。
+     *
+     * 为什么不用物理删除:
+     * - 长期记忆是影响 Agent 行为的重要依据，需要保留后台追溯能力。
+     * - ARCHIVED 不参与召回和画像构建，但管理员仍可以在后台恢复。
+     */
+    @Override
+    public int archiveActiveMemoriesByKeys(Long userId, List<String> memoryKeys) {
+        if (userId == null || userId <= 0 || CollectionUtils.isEmpty(memoryKeys)) {
+            return 0;
+        }
+
+        List<String> normalizedKeys = memoryKeys.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (CollectionUtils.isEmpty(normalizedKeys)) {
+            return 0;
+        }
+
+        List<AgentLongTermMemory> memories = agentLongTermMemoryMapper.selectList(
+                new LambdaQueryWrapper<AgentLongTermMemory>()
+                        .eq(AgentLongTermMemory::getUserId, userId)
+                        .in(AgentLongTermMemory::getMemoryKey, normalizedKeys)
+                        .eq(AgentLongTermMemory::getStatus, AgentMemoryStatus.ACTIVE.name())
+                        .eq(AgentLongTermMemory::getIsDeleted, NOT_DELETED)
+        );
+        if (CollectionUtils.isEmpty(memories)) {
+            return 0;
+        }
+
+        Date now = new Date();
+        for (AgentLongTermMemory memory : memories) {
+            memory.setStatus(AgentMemoryStatus.ARCHIVED.name());
+            memory.setUpdateTime(now);
+            agentLongTermMemoryMapper.updateById(memory);
+        }
+        return memories.size();
+    }
+
     private AgentLongTermMemory findUpdatableMemory(Long userId, AgentMemoryType memoryType, String memoryKey) {
         if (!StringUtils.hasText(memoryKey)) {
             return null;
@@ -268,6 +349,18 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
                         .orderByDesc(AgentLongTermMemory::getUpdateTime)
                         .last("LIMIT 1")
         );
+    }
+
+    private AgentMemoryStatus parseMemoryStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            throw new BizException("记忆状态不能为空");
+        }
+
+        try {
+            return AgentMemoryStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException error) {
+            throw new BizException("不支持的记忆状态: " + status);
+        }
     }
 
     private String resolveSummary(String summary, String memoryValue) {

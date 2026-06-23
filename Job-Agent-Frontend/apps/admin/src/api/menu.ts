@@ -113,6 +113,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/PlanLog"
   },
   {
+    id: 11,
+    path: "/agent/memories",
+    name: "AgentMemories",
+    title: "Agent 记忆",
+    icon: "Collection",
+    component: "agent/MemoryManage"
+  },
+  {
     id: 8,
     path: "/agent/rag",
     name: "AgentRag",

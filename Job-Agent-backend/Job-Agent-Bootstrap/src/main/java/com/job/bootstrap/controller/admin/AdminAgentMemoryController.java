@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -72,6 +73,34 @@ public class AdminAgentMemoryController {
     @GetMapping("/{id}")
     public Result<AgentMemoryVO> detail(@PathVariable Long id) {
         return Result.build(agentMemoryService.getDetail(id), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 后台人工更新长期记忆状态。
+     *
+     * 方法步骤:
+     * 1. 先更新单条记忆状态，支持 ACTIVE、ARCHIVED、INVALID。
+     * 2. 再按这条记忆的 userId 重建用户画像。
+     * 3. 返回更新后的记忆，方便前端刷新当前行。
+     *
+     * 为什么状态更新后要重建画像:
+     * - Agent 实际注入 Prompt 时优先使用“压缩画像 + 少量相关记忆”。
+     * - 如果只禁用原始记忆，不刷新画像，错误事实仍可能残留在画像摘要里。
+     *
+     * @param id 记忆 ID
+     * @param status 目标状态
+     * @return 更新后的记忆
+     */
+    @PutMapping("/{id}/status")
+    public Result<AgentMemoryVO> updateStatus(
+            @PathVariable Long id,
+            @RequestParam String status
+    ) {
+        AgentMemoryVO memory = agentMemoryService.updateStatus(id, status);
+        if (memory != null && memory.getUserId() != null) {
+            agentMemoryContextService.rebuildProfile(memory.getUserId());
+        }
+        return Result.build(memory, ResultCodeEnum.SUCCESS);
     }
 
     /**

@@ -439,6 +439,57 @@ export interface AgentPlanInfo {
 }
 
 /**
+ * Agent 长期记忆查询参数。
+ */
+export interface AgentMemoryQuery {
+  pageNum: number;
+  pageSize: number;
+  userId?: string | number;
+  memoryType?: string;
+  memoryKey?: string;
+  sourceType?: string;
+  status?: string;
+  keyword?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * Agent 长期记忆展示数据。
+ */
+export interface AgentMemoryInfo {
+  id: number;
+  userId: number;
+  memoryType?: string;
+  memoryKey?: string;
+  memoryValue?: string;
+  summary?: string;
+  sourceType?: string;
+  sourceId?: number;
+  confidence?: number;
+  importance?: number;
+  status?: string;
+  lastUsedTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * Agent 用户长期记忆画像展示数据。
+ */
+export interface AgentUserMemoryProfileInfo {
+  id?: number;
+  userId?: number;
+  profileSummary?: string;
+  memoryCount?: number;
+  profileVersion?: number;
+  lastBuildTime?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
  * MyBatis-Plus 分页返回结构。
  */
 /**
