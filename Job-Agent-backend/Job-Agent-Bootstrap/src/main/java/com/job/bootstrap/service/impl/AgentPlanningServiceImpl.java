@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -56,7 +57,29 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
             AgentIntentCode intentCode,
             String userGoal
     ) {
-        Map<String, Object> extractedParams = parameterExtractor.extract(userGoal);
+        return createPlan(userId, conversationId, traceId, intentCode, userGoal, null);
+    }
+
+    /**
+     * 根据用户目标和长期记忆上下文生成计划。
+     *
+     * 方法步骤:
+     * 1. userGoal 仍然作为计划原始目标落库，保持后台看到的是用户真实输入。
+     * 2. 参数抽取时额外拼接 planningContext，让 preferred_city、target_role 等长期记忆可以补充本轮缺省条件。
+     * 3. 计划模板仍然根据用户原始目标选择，避免内部记忆把用户本轮意图带偏。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentPlanVO createPlan(
+            Long userId,
+            Long conversationId,
+            String traceId,
+            AgentIntentCode intentCode,
+            String userGoal,
+            String planningContext
+    ) {
+        String extractionText = buildExtractionText(userGoal, planningContext);
+        Map<String, Object> extractedParams = parameterExtractor.extract(extractionText);
         AgentPlanTemplate template = templateFactory.create(intentCode, userGoal);
         List<String> missingParams = findMissingParams(template.requiredParams(), extractedParams);
         String status = CollectionUtils.isEmpty(missingParams)
@@ -101,6 +124,13 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         }
 
         return buildPlanVO(plan);
+    }
+
+    private String buildExtractionText(String userGoal, String planningContext) {
+        if (!StringUtils.hasText(planningContext)) {
+            return userGoal;
+        }
+        return userGoal + "\n\n【可用于参数抽取的长期记忆上下文】\n" + planningContext;
     }
 
     /**

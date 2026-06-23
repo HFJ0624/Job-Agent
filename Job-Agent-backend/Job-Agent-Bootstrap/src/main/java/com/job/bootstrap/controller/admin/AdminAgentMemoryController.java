@@ -1,14 +1,17 @@
 package com.job.bootstrap.controller.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.job.bootstrap.service.AgentMemoryContextService;
 import com.job.bootstrap.service.AgentMemoryService;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.agent.AgentMemoryVO;
+import com.job.common.vo.agent.AgentUserMemoryProfileVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,6 +33,7 @@ import java.util.List;
 public class AdminAgentMemoryController {
 
     private final AgentMemoryService agentMemoryService;
+    private final AgentMemoryContextService agentMemoryContextService;
 
     /**
      * 分页查询长期记忆。
@@ -68,5 +72,31 @@ public class AdminAgentMemoryController {
     @GetMapping("/{id}")
     public Result<AgentMemoryVO> detail(@PathVariable Long id) {
         return Result.build(agentMemoryService.getDetail(id), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 查询用户长期记忆画像。
+     *
+     * @param userId 用户 ID
+     * @return 压缩后的用户画像
+     */
+    @GetMapping("/profiles/{userId}")
+    public Result<AgentUserMemoryProfileVO> profile(@PathVariable Long userId) {
+        return Result.build(agentMemoryContextService.getProfile(userId), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 手动重建用户长期记忆画像。
+     *
+     * 说明:
+     * 1. 当后台人工修正记忆、禁用错误记忆后，可以调用该接口重建画像。
+     * 2. 重建只读取 ACTIVE 的长期记忆，不会把已禁用或已删除记忆重新注入 Prompt。
+     *
+     * @param userId 用户 ID
+     * @return 重建后的画像
+     */
+    @PostMapping("/profiles/{userId}/rebuild")
+    public Result<AgentUserMemoryProfileVO> rebuildProfile(@PathVariable Long userId) {
+        return Result.build(agentMemoryContextService.rebuildProfile(userId), ResultCodeEnum.SUCCESS);
     }
 }

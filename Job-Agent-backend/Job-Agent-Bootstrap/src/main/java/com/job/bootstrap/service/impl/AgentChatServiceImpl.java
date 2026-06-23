@@ -13,7 +13,8 @@ import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentChatService;
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.bootstrap.service.AgentMemoryCaptureService;
+import com.job.bootstrap.service.AgentMemoryContextService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.bootstrap.service.AgentTraceService;
@@ -22,6 +23,7 @@ import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
 import com.job.common.vo.agent.AgentGuardrailResult;
+import com.job.common.vo.agent.AgentMemoryContextVO;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.common.vo.agent.AgentPlanStepVO;
 import com.job.common.vo.agent.AgentPlanVO;
@@ -113,7 +115,13 @@ public class AgentChatServiceImpl implements AgentChatService {
      * Agent 长期记忆服务。
      * 本服务负责在执行总结前召回历史偏好、简历画像、面试反馈和历史决策。
      */
-    private final AgentMemoryService agentMemoryService;
+    private final AgentMemoryCaptureService agentMemoryCaptureService;
+
+    /**
+     * Agent 长期记忆上下文服务。
+     * 用“用户画像摘要 + 少量相关记忆”控制每轮 Prompt 大小，避免长期记忆越记越多导致 token 膨胀。
+     */
+    private final AgentMemoryContextService agentMemoryContextService;
 
     /**
      * Agent 工具 Schema 注册中心。
@@ -210,6 +218,30 @@ public class AgentChatServiceImpl implements AgentChatService {
          */
         saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
 
+        /*
+         * 7.1 捕获用户自然语言里的长期记忆。
+         *
+         * 方法步骤:
+         * 1. 使用已脱敏 safeMessage 做记忆捕获，避免手机号、邮箱、token 等敏感信息进入长期库。
+         * 2. 捕获服务内部先走规则，再走可选 LLM 抽取，最后统一经过写入策略。
+         * 3. 捕获失败不影响主聊天流程，因为“能回答用户”比“本轮成功沉淀记忆”优先级更高。
+         */
+        captureLongTermMemories(
+                userId,
+                conversation.getId(),
+                traceId,
+                safeMessage
+        );
+
+        /*
+         * 7.2 在 Planner 前构造长期记忆上下文。
+         *
+         * 设计原因:
+         * - 第一版只在 Executor 总结前召回记忆，无法帮助 Planner 补齐城市、岗位、称呼等参数。
+         * - 第二版把压缩后的记忆上下文提供给 Planner 的参数抽取阶段，但不覆盖用户原始输入。
+         */
+        AgentMemoryContextVO planningMemoryContext = buildLongTermMemoryContext(userId, safeMessage);
+
         AgentPlanVO plan = null;
         try {
             /*
@@ -224,7 +256,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                             conversation.getId(),
                             traceId,
                             intentCode,
-                            safeMessage
+                            safeMessage,
+                            planningMemoryContext.getPromptContext()
                     );
             String activeIntentCode = plan.getIntentCode();
 
@@ -318,7 +351,11 @@ public class AgentChatServiceImpl implements AgentChatService {
              * 2. 召回结果只进入 Summary Assistant，不直接改写工具入参，避免破坏 Tool Schema 的第一版边界。
              * 3. 记忆库不可用时不影响主流程，retrieveLongTermMemories 内部会降级为空列表。
              */
-            List<AgentMemoryVO> retrievedMemories = retrieveLongTermMemories(userId, safeMessage, plan);
+            AgentMemoryContextVO executionMemoryContext = buildLongTermMemoryContext(
+                    userId,
+                    buildMemoryQuery(safeMessage, plan)
+            );
+            List<AgentMemoryVO> retrievedMemories = executionMemoryContext.getMemories();
 
             /*
              * 7. 总结执行结果。
@@ -334,7 +371,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     safeMessage,
                     plan,
                     executionResult,
-                    retrievedMemories
+                    retrievedMemories,
+                    executionMemoryContext.getPromptContext()
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
 
@@ -684,23 +722,47 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 第一版只把长期记忆注入 Summary Assistant。
      * 后续如果要让记忆影响工具入参，可以在 Executor 的参数合并阶段读取固定 memoryKey。
      */
-    private List<AgentMemoryVO> retrieveLongTermMemories(Long userId, String message, AgentPlanVO plan) {
+    private List<AgentMemoryVO> captureLongTermMemories(Long userId, Long conversationId, String traceId, String message) {
         try {
-            return agentMemoryService.searchMemories(
+            return agentMemoryCaptureService.captureFromUserMessage(
                     userId,
-                    buildMemoryQuery(message, plan),
-                    MEMORY_RETRIEVAL_LIMIT
+                    conversationId,
+                    traceId,
+                    message
             );
         } catch (Exception exception) {
             log.warn(
-                    "Agent 长期记忆召回失败，userId={}, planId={}, error={}",
+                    "Agent 长期记忆捕获失败，userId={}, conversationId={}, error={}",
                     userId,
-                    plan == null ? null : plan.getId(),
+                    conversationId,
                     exception.getMessage(),
                     exception
             );
             return List.of();
         }
+    }
+
+    private AgentMemoryContextVO buildLongTermMemoryContext(Long userId, String query) {
+        try {
+            return agentMemoryContextService.buildContext(userId, query);
+        } catch (Exception exception) {
+            log.warn(
+                    "Agent 长期记忆上下文构建失败，userId={}, error={}",
+                    userId,
+                    exception.getMessage(),
+                    exception
+            );
+            return emptyMemoryContext();
+        }
+    }
+
+    private AgentMemoryContextVO emptyMemoryContext() {
+        AgentMemoryContextVO context = new AgentMemoryContextVO();
+        context.setPromptContext("");
+        context.setEstimatedTokens(0);
+        context.setTruncated(false);
+        context.setMemories(List.of());
+        return context;
     }
 
     private String buildMemoryQuery(String message, AgentPlanVO plan) {
@@ -747,22 +809,24 @@ public class AgentChatServiceImpl implements AgentChatService {
             String safeMessage,
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
-            List<AgentMemoryVO> retrievedMemories
+            List<AgentMemoryVO> retrievedMemories,
+            String memoryPromptContext
     ) {
         String executorSummaryMessage = buildExecutorSummaryMessage(
                 safeMessage,
                 plan,
                 executionResult,
-                retrievedMemories
+                retrievedMemories,
+                memoryPromptContext
         );
 
         try {
             return aiModelGatewayService.chat(
-                    AI_SCENE_AGENT_SUMMARY,
-                    buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories),
-                    executorSummaryMessage,
-                    userId,
-                    traceId
+                AI_SCENE_AGENT_SUMMARY,
+                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext),
+                executorSummaryMessage,
+                userId,
+                traceId
             );
         } catch (Exception exception) {
             log.warn(
@@ -789,7 +853,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             String safeMessage,
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
-            List<AgentMemoryVO> retrievedMemories
+            List<AgentMemoryVO> retrievedMemories,
+            String memoryPromptContext
     ) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("currentUserInput", safeMessage);
@@ -800,6 +865,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         variables.put("execution_result_json", toJson(executionResult));
         variables.put("retrievedMemoriesJson", toJson(buildMemorySnapshots(retrievedMemories)));
         variables.put("retrieved_memories_json", toJson(buildMemorySnapshots(retrievedMemories)));
+        variables.put("memoryPromptContext", nullToDash(memoryPromptContext));
+        variables.put("memory_prompt_context", nullToDash(memoryPromptContext));
         variables.put("summaryRequirements", """
                 1. 只总结 Executor 已经完成的步骤和工具结果。
                 2. 不要再次调用工具，不要说“我将要调用”。
@@ -817,12 +884,20 @@ public class AgentChatServiceImpl implements AgentChatService {
             String originalMessage,
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
-            List<AgentMemoryVO> retrievedMemories
+            List<AgentMemoryVO> retrievedMemories,
+            String memoryPromptContext
     ) {
         StringBuilder builder = new StringBuilder();
         builder.append("【当前用户输入】\n")
                 .append(originalMessage)
                 .append("\n\n");
+
+        builder.append("【长期记忆上下文】\n");
+        if (StringUtils.hasText(memoryPromptContext)) {
+            builder.append(memoryPromptContext).append("\n\n");
+        } else {
+            builder.append("本轮没有可注入的长期记忆上下文。\n\n");
+        }
 
         builder.append("【已召回的长期记忆】\n");
         if (CollectionUtils.isEmpty(retrievedMemories)) {
