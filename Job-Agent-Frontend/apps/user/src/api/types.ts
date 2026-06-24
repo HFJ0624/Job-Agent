@@ -151,6 +151,45 @@ export interface PositionInfo {
   publishTime?: string;
   createTime?: string;
   updateTime?: string;
+  matchScore?: number;
+}
+
+/**
+ * 用户端首页热门公司，对应后端 HomeHotCompanyVO。
+ */
+export interface HomeHotCompanyInfo {
+  id: string;
+  companyName: string;
+  logoUrl?: string;
+  industry?: string;
+  companySize?: string;
+  financingStage?: string;
+  jobCount: number;
+}
+
+/**
+ * 用户端首页简历报告，对应后端 HomeResumeMatchReportVO。
+ */
+export interface HomeResumeMatchReportInfo {
+  hasResume: boolean;
+  resumeId?: string;
+  resumeName?: string;
+  resumeStatus?: string;
+  hasScore: boolean;
+  score?: number;
+  level?: string;
+  summary?: string;
+  suggestions: string[];
+}
+
+/**
+ * 用户端首页聚合数据，对应后端 HomeOverviewVO。
+ */
+export interface HomeOverviewInfo {
+  recommendedJobs: PositionInfo[];
+  hotCompanies: HomeHotCompanyInfo[];
+  resumeMatchReport: HomeResumeMatchReportInfo;
+  aiSuggestion: string;
 }
 
 /**

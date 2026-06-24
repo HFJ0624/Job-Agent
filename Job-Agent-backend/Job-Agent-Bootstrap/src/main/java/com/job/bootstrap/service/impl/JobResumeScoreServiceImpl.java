@@ -3,8 +3,8 @@ package com.job.bootstrap.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.agent.ResumeScoreAssistant;
 import com.job.bootstrap.mapper.JobResumeScoreRecordMapper;
+import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.JobResumeScoreService;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.bootstrap.service.resume.ResumeScoreRuleEngine;
@@ -13,7 +13,6 @@ import com.job.common.entity.resume.JobResumeScoreRecord;
 import com.job.common.vo.resume.ResumeScoreVO;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -32,7 +31,7 @@ import java.util.Map;
  *
  * V2 设计说明:
  * 1. 先用 ResumeScoreRuleEngine 计算稳定分数，保证评分可解释、可测试、可重复。
- * 2. 配置了大模型时，评分接口会优先等待 ResumeScoreAssistant 返回，让页面直接看到 AI 参与后的结果。
+ * 2. 配置了大模型路由时，评分接口会优先等待统一模型网关返回，让页面直接看到 AI 参与后的结果。
  * 3. 大模型作为第二评分员参与维度打分和建议生成，规则引擎只负责提供稳定初始分和兜底。
  * 4. 大模型结果回来后按“规则分 65% + 模型分 35%”合并，既体现模型参与，又避免模型分数大幅漂移。
  * 5. score_json 保存完整 V2 结构，老字段继续写入，兼容当前数据库和旧前端字段。
@@ -42,6 +41,12 @@ import java.util.Map;
 public class JobResumeScoreServiceImpl
         extends ServiceImpl<JobResumeScoreRecordMapper, JobResumeScoreRecord>
         implements JobResumeScoreService {
+
+    /**
+     * 简历评分模型场景。
+     * 说明: 该场景由 ai_model_route 绑定模型，由 ai_prompt_template / ai_prompt_version 管理 Prompt。
+     */
+    private static final String AI_SCENE_RESUME_SCORE = "RESUME_SCORE";
 
     /**
      * 简历评分完成后的状态。
@@ -77,7 +82,7 @@ public class JobResumeScoreServiceImpl
 
     private final JobResumeService jobResumeService;
     private final ResumeScoreRuleEngine resumeScoreRuleEngine;
-    private final ObjectProvider<ResumeScoreAssistant> resumeScoreAssistantProvider;
+    private final AiModelGatewayService aiModelGatewayService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -107,18 +112,16 @@ public class JobResumeScoreServiceImpl
         // 4. 先执行规则评分，得到稳定、可复现的初始分。
         //    注意：这一步不是最终结果；如果大模型可用，后面必须让 AI 基于简历原文重新参与评分。
         ResumeScoreRuleEngine.RuleScoreResult ruleScore = resumeScoreRuleEngine.calculate(resume.getRawText(), targetPosition);
-        ResumeScoreAssistant assistant = resumeScoreAssistantProvider.getIfAvailable();
-        ResumeScoreRuleEngine.RuleScoreResult scoreResult;
-        if (assistant == null) {
-            scoreResult = ruleScore;
-            scoreResult.setScoringMode("RULE_SCORE_AI_UNAVAILABLE");
-            scoreResult.setLlmStatus("SKIPPED");
-            scoreResult.setLlmError("未注册 ResumeScoreAssistant，无法调用大模型参与评分。请检查 Job-Agent-Infra-Ai 配置和 job.ai 配置。");
-        } else {
-            // 5. 配置了大模型时，优先等待 AI 评分完成后再保存。
-            //    这样前端第一次拿到的就是 AI 参与后的评分，而不是规则分被当成最终结果展示。
-            scoreResult = calculateLlmScoreNow(resume.getRawText(), targetPosition, ruleScore, assistant);
-        }
+
+        // 5. 统一走数据库模型网关。
+        //    模型、Prompt、超时、重试、熔断和调用日志都由后台配置，不再依赖 application-local.yml 的 job.ai。
+        ResumeScoreRuleEngine.RuleScoreResult scoreResult = calculateLlmScoreNow(
+                userId,
+                resumeId,
+                resume.getRawText(),
+                targetPosition,
+                ruleScore
+        );
 
         // 6. 保存评分记录。老字段继续写入，完整 V2 结构存 score_json。
         Date now = new Date();
@@ -178,14 +181,21 @@ public class JobResumeScoreServiceImpl
      * 3. 如果 AI 调用失败，会保留规则分，但明确标记 FAILED，并把错误原因写入 score_json 和前端。
      */
     private ResumeScoreRuleEngine.RuleScoreResult calculateLlmScoreNow(
+            Long userId,
+            Long resumeId,
             String rawText,
             String targetPosition,
-            ResumeScoreRuleEngine.RuleScoreResult ruleScore,
-            ResumeScoreAssistant assistant
+            ResumeScoreRuleEngine.RuleScoreResult ruleScore
     ) {
         try {
             String prompt = buildLlmPrompt(rawText, targetPosition, ruleScore);
-            String response = assistant.analyze(prompt);
+            String response = aiModelGatewayService.chat(
+                    AI_SCENE_RESUME_SCORE,
+                    buildResumeScoreVariables(rawText, targetPosition, ruleScore),
+                    prompt,
+                    userId,
+                    buildResumeScoreTraceId(userId, resumeId)
+            );
             ResumeScoreRuleEngine.RuleScoreResult llmResult = parseLlmResult(response);
             ResumeScoreRuleEngine.RuleScoreResult mergedResult = mergeLlmScore(ruleScore, llmResult);
             mergedResult.setLlmStatus("SUCCESS");
@@ -197,6 +207,41 @@ public class JobResumeScoreServiceImpl
             ruleScore.setLlmError(shortMessage(exception));
             return ruleScore;
         }
+    }
+
+    /**
+     * 构造简历评分 Prompt 变量。
+     *
+     * 方法步骤:
+     * 1. 把求职方向、规则评分摘要、简历原文拆成独立变量，方便后台 Prompt 模板引用。
+     * 2. 同时保留 fullPrompt，避免第一版模板只想直接使用完整用户消息。
+     * 3. 简历原文在进入变量前先截断，防止后台模板误引用未截断文本导致 token 过大。
+     */
+    private Map<String, Object> buildResumeScoreVariables(
+            String rawText,
+            String targetPosition,
+            ResumeScoreRuleEngine.RuleScoreResult ruleScore
+    ) {
+        String safeTargetPosition = StringUtils.hasText(targetPosition) ? targetPosition.trim() : "未填写";
+        String ruleScoreSummary = buildRuleScoreSummary(ruleScore);
+        String resumeText = truncate(rawText, LLM_RESUME_TEXT_LIMIT);
+
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("targetPosition", safeTargetPosition);
+        variables.put("target_position", safeTargetPosition);
+        variables.put("ruleScoreSummary", ruleScoreSummary);
+        variables.put("rule_score_summary", ruleScoreSummary);
+        variables.put("resumeText", resumeText);
+        variables.put("resume_text", resumeText);
+        variables.put("fullPrompt", buildLlmPrompt(rawText, targetPosition, ruleScore));
+        variables.put("full_prompt", variables.get("fullPrompt"));
+        variables.put("jsonFormat", "只输出 JSON 对象，不要 Markdown，不要解释文本。");
+        variables.put("json_format", variables.get("jsonFormat"));
+        return variables;
+    }
+
+    private String buildResumeScoreTraceId(Long userId, Long resumeId) {
+        return "resume_score_" + userId + "_" + resumeId + "_" + System.currentTimeMillis();
     }
 
     /**

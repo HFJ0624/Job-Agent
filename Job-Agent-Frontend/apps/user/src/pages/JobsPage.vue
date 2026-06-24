@@ -83,6 +83,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 import { pageFrontPositions } from "../api/job";
 import type { PositionInfo } from "../api/types";
 import JobCard from "../components/JobCard.vue";
@@ -105,6 +106,7 @@ const jobs = ref<PositionInfo[]>([]);
 const total = ref(0);
 const loading = ref(false);
 const errorMessage = ref("");
+const route = useRoute();
 
 const query = reactive<JobQuery>({
   pageNo: 1,
@@ -241,5 +243,11 @@ function handlePageChange(pageNo: number) {
   loadJobs();
 }
 
-onMounted(loadJobs);
+onMounted(() => {
+  // 1. 首页搜索会通过 /jobs?keyword=xxx 跳转到岗位列表，这里读取 query 后再加载真实筛选结果。
+  if (typeof route.query.keyword === "string") {
+    query.keyword = route.query.keyword;
+  }
+  loadJobs();
+});
 </script>

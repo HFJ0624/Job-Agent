@@ -3,6 +3,7 @@ package com.job.config;
 import com.job.agent.InterviewInviteExtractorAssistant;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -11,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
  * 功能: 面试邀约信息提取 Assistant 配置
  */
 @Configuration
+@ConditionalOnBean(ChatModel.class)
 public class InterviewInviteExtractorConfig {
 
     /**

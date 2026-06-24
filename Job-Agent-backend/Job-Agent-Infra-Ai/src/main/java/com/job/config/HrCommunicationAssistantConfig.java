@@ -3,6 +3,7 @@ package com.job.config;
 import com.job.agent.HrCommunicationAssistant;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,6 +16,7 @@ import org.springframework.context.annotation.Configuration;
  * 3. 避免把 HR 回复生成逻辑塞进 JobAgentAssistant。
  */
 @Configuration
+@ConditionalOnBean(ChatModel.class)
 public class HrCommunicationAssistantConfig {
 
     @Bean

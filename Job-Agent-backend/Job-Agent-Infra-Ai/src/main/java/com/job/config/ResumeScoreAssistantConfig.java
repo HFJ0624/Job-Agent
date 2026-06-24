@@ -4,6 +4,7 @@ import com.job.agent.ResumeScoreAssistant;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -18,6 +19,7 @@ import org.springframework.context.annotation.Configuration;
  * 3. 使用 resumeScoreChatModel 专用 Bean，给简历评分更长超时，避免 Request cancelled。
  */
 @Configuration
+@ConditionalOnBean(name = "resumeScoreChatModel")
 public class ResumeScoreAssistantConfig {
 
     /**

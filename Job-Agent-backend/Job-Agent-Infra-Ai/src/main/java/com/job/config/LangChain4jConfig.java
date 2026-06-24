@@ -4,6 +4,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -20,6 +21,7 @@ import java.time.Duration;
  * 日期: 2026/6/8 15:00
  */
 @Configuration
+@ConditionalOnProperty(prefix = "job.ai", name = "legacy-enabled", havingValue = "true")
 public class LangChain4jConfig {
 
     @Bean

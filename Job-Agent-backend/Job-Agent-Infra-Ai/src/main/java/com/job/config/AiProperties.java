@@ -34,6 +34,16 @@ public class AiProperties {
     private Double temperature = 0.3;
 
     /**
+     * 是否启用旧 LangChain4j Assistant。
+     *
+     * 说明:
+     * 1. false 时，系统不再从 application.yml 的 job.ai 创建旧 ChatModel。
+     * 2. 模型调用统一走数据库模型网关 ai_model_config / ai_model_route。
+     * 3. 如果后续确实要临时回退旧 Assistant，可以在本地配置 legacy-enabled: true。
+     */
+    private Boolean legacyEnabled = false;
+
+    /**
      * 简历评分模型超时时间。
      * 说明: 简历评分需要读取较长文本并返回结构化 JSON，比普通聊天更慢，所以单独配置超时。
      */

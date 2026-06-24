@@ -2,9 +2,9 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.agent.JobAgentSummaryAssistant;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
@@ -71,12 +71,6 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     private final AiConversationMapper aiConversationMapper;
     private final AiMessageMapper aiMessageMapper;
-
-    /**
-     * 不带工具能力的总结助手。
-     * Executor 执行完后，由它负责把工具结果整理成用户可读中文。
-     */
-    private final JobAgentSummaryAssistant jobAgentSummaryAssistant;
 
     /**
      * 模型与 Prompt 动态网关。
@@ -792,8 +786,8 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 方法步骤:
      * 1. 先构建原有 Summary Assistant 使用的完整上下文，保证旧提示词语义不丢失。
      * 2. 再构建数据库 Prompt 可以引用的结构化变量，方便管理员在后台调整模板。
-     * 3. 优先通过模型网关按 AGENT_SUMMARY 场景调用动态模型。
-     * 4. 如果数据库路由、Prompt 或模型调用失败，则降级到旧 Summary Assistant。
+     * 3. 通过模型网关按 AGENT_SUMMARY 场景调用动态模型。
+     * 4. 如果数据库路由、Prompt 或模型调用失败，则使用 Executor 结果生成确定性兜底摘要。
      *
      * @param userId 用户 ID
      * @param traceId 链路 ID
@@ -830,14 +824,79 @@ public class AgentChatServiceImpl implements AgentChatService {
             );
         } catch (Exception exception) {
             log.warn(
-                    "动态模型网关总结失败，降级到旧 Summary Assistant，traceId={}, planId={}, error={}",
+                    "动态模型网关总结失败，使用 Executor 结果兜底摘要，traceId={}, planId={}, error={}",
                     traceId,
                     plan == null ? null : plan.getId(),
                     exception.getMessage(),
                     exception
             );
-            return jobAgentSummaryAssistant.summarize(executorSummaryMessage);
+            return buildDeterministicExecutorAnswer(plan, executionResult);
         }
+    }
+
+    /**
+     * 构建无需模型参与的 Executor 兜底回答。
+     *
+     * 方法步骤:
+     * 1. 先给出整体执行状态，保证用户知道本轮是否成功。
+     * 2. 再逐步列出每个计划步骤的执行结果、工具和失败原因。
+     * 3. 只使用后端 Executor 已经产生的数据，不编造任何模型总结内容。
+     *
+     * 为什么要这样做:
+     * - 第一版统一模型网关后，不再允许降级到 application-local.yml 的旧模型配置。
+     * - 但模型网关不可用时，用户仍然需要看到后端已经完成的工具执行结果。
+     */
+    private String buildDeterministicExecutorAnswer(
+            AgentPlanVO plan,
+            AgentPlanExecutionResult executionResult
+    ) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("本轮任务已完成后端执行，但模型总结暂时不可用，以下是系统根据执行结果生成的摘要：\n\n");
+
+        if (plan != null) {
+            builder.append("计划：").append(nullToDash(plan.getPlanTitle())).append("\n");
+        }
+
+        if (executionResult == null) {
+            builder.append("当前没有可展示的执行结果，请稍后重试。");
+            return builder.toString();
+        }
+
+        builder.append("整体状态：")
+                .append(Boolean.TRUE.equals(executionResult.getSuccess()) ? "成功" : "未完全成功")
+                .append("\n");
+        builder.append("执行说明：")
+                .append(nullToDash(executionResult.getMessage()))
+                .append("\n\n");
+
+        if (CollectionUtils.isEmpty(executionResult.getSteps())) {
+            builder.append("暂无步骤结果。");
+            return builder.toString();
+        }
+
+        builder.append("步骤结果：\n");
+        for (AgentPlanStepExecutionResult step : executionResult.getSteps()) {
+            builder.append(step.getStepNo() == null ? "-" : step.getStepNo())
+                    .append(". ")
+                    .append(nullToDash(step.getStepName()))
+                    .append("，状态：")
+                    .append(nullToDash(step.getStatus()));
+
+            if (StringUtils.hasText(step.getToolName())) {
+                builder.append("，工具：").append(step.getToolName());
+            }
+            builder.append("\n");
+
+            if (StringUtils.hasText(step.getResultSummary())) {
+                builder.append("   结果：").append(step.getResultSummary()).append("\n");
+            }
+            if (StringUtils.hasText(step.getErrorMsg())) {
+                builder.append("   失败原因：").append(step.getErrorMsg()).append("\n");
+            }
+        }
+
+        builder.append("\n建议：如果需要更自然的总结，请检查后台模型路由、Prompt 版本和模型配置是否启用。");
+        return builder.toString();
     }
 
     /**

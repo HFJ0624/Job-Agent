@@ -19,7 +19,7 @@
         <b>{{ job.companyName || "未命名公司" }}</b>
         <span>{{ formatCompanyMeta(job) }}</span>
       </div>
-      <div class="match-score">{{ estimateMatchScore(job.id) }}% 匹配</div>
+      <div v-if="job.matchScore != null" class="match-score">{{ job.matchScore }}% 匹配</div>
     </footer>
   </RouterLink>
 </template>
@@ -79,8 +79,4 @@ function splitTags(value?: string) {
     .filter(Boolean);
 }
 
-function estimateMatchScore(id: number | string) {
-  // 1. 真实匹配分后续会由 AI 模块计算，这里先给列表一个稳定的展示值。
-  return 82 + (Number(id) % 13);
-}
 </script>

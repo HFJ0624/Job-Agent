@@ -3,10 +3,9 @@ package com.job.bootstrap.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.agent.HrCommunicationAssistant;
-import com.job.agent.InterviewInviteExtractorAssistant;
 import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
+import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.JobApplicationService;
 import com.job.bootstrap.service.JobCommunicationRecordService;
 import com.job.bootstrap.service.JobReminderService;
@@ -23,7 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 作者: hfj
@@ -41,13 +42,21 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
 
     private static final int NOT_DELETED = 0;
 
+    /**
+     * HR 回复生成模型场景。
+     */
+    private static final String AI_SCENE_HR_REPLY_GENERATE = "HR_REPLY_GENERATE";
+
+    /**
+     * 面试邀约抽取模型场景。
+     */
+    private static final String AI_SCENE_INTERVIEW_INVITE_EXTRACT = "INTERVIEW_INVITE_EXTRACT";
+
     private final JobCommunicationRecordMapper jobCommunicationRecordMapper;
 
     private final JobCommunicationMessageMapper jobCommunicationMessageMapper;
 
-    private final HrCommunicationAssistant hrCommunicationAssistant;
-
-    private final InterviewInviteExtractorAssistant interviewInviteExtractorAssistant;
+    private final AiModelGatewayService aiModelGatewayService;
 
     private final JobReminderService jobReminderService;
 
@@ -325,9 +334,16 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
             """.formatted(nowText, hrReplyText);
 
         /*
-         * 4. 调用 AI 进行结构化抽取。
+         * 4. 调用统一模型网关进行结构化抽取。
+         *    模型、Prompt、重试、熔断和日志都从数据库读取，不再依赖本地 job.ai 配置。
          */
-        String json = interviewInviteExtractorAssistant.extract(prompt);
+        String json = aiModelGatewayService.chat(
+                AI_SCENE_INTERVIEW_INVITE_EXTRACT,
+                buildInterviewExtractVariables(nowText, hrReplyText, prompt),
+                prompt,
+                userId,
+                buildCommunicationTraceId(AI_SCENE_INTERVIEW_INVITE_EXTRACT, userId, id)
+        );
 
         /*
          * 5. 解析 AI 返回的 JSON。
@@ -525,7 +541,82 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
                 userRequirement
         );
 
-        return hrCommunicationAssistant.generateReply(prompt);
+        return aiModelGatewayService.chat(
+                AI_SCENE_HR_REPLY_GENERATE,
+                buildHrReplyVariables(detail, record, dto, replyStyle, userRequirement, prompt),
+                prompt,
+                record.getUserId(),
+                buildCommunicationTraceId(AI_SCENE_HR_REPLY_GENERATE, record.getUserId(), record.getId())
+        );
+    }
+
+    /**
+     * 构造面试邀约抽取 Prompt 变量。
+     *
+     * 方法步骤:
+     * 1. 把系统时间、HR 回复拆成变量，方便后台模板灵活调整。
+     * 2. 保留 fullPrompt，保证第一版模板可以直接复用当前 Java 构造好的完整输入。
+     */
+    private Map<String, Object> buildInterviewExtractVariables(String nowText, String hrReplyText, String fullPrompt) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("nowText", nowText);
+        variables.put("now_text", nowText);
+        variables.put("hrReply", hrReplyText);
+        variables.put("hr_reply", hrReplyText);
+        variables.put("fullPrompt", fullPrompt);
+        variables.put("full_prompt", fullPrompt);
+        variables.put("jsonFormat", "只输出 JSON 对象，不要 Markdown，不要解释文本。");
+        variables.put("json_format", variables.get("jsonFormat"));
+        return variables;
+    }
+
+    /**
+     * 构造 HR 回复生成 Prompt 变量。
+     *
+     * 方法步骤:
+     * 1. 将岗位、公司、薪资、简历、HR 回复等上下文字段拆给后台 Prompt 使用。
+     * 2. 保留 fullPrompt 作为兼容入口，避免第一版数据库模板必须一次性改得很复杂。
+     */
+    private Map<String, Object> buildHrReplyVariables(
+            JobCommunicationRecordVO detail,
+            JobCommunicationRecord record,
+            HrReplyGenerateDTO dto,
+            String replyStyle,
+            String userRequirement,
+            String fullPrompt
+    ) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("companyName", nullToDefault(detail.getCompanyName(), "未知公司"));
+        variables.put("company_name", variables.get("companyName"));
+        variables.put("jobTitle", nullToDefault(detail.getJobTitle(), "未知岗位"));
+        variables.put("job_title", variables.get("jobTitle"));
+        variables.put("jobCity", nullToDefault(detail.getJobCity(), "未知城市"));
+        variables.put("job_city", variables.get("jobCity"));
+        variables.put("salaryText", nullToDefault(detail.getSalaryText(), "薪资面议"));
+        variables.put("salary_text", variables.get("salaryText"));
+        variables.put("resumeName", nullToDefault(detail.getResumeName(), "未关联简历"));
+        variables.put("resume_name", variables.get("resumeName"));
+        variables.put("greetingText", nullToDefault(record.getGreetingText(), "无"));
+        variables.put("greeting_text", variables.get("greetingText"));
+        variables.put("hrReply", dto.getHrReply());
+        variables.put("hr_reply", dto.getHrReply());
+        variables.put("replyStyle", replyStyle);
+        variables.put("reply_style", replyStyle);
+        variables.put("userRequirement", userRequirement);
+        variables.put("user_requirement", userRequirement);
+        variables.put("fullPrompt", fullPrompt);
+        variables.put("full_prompt", fullPrompt);
+        return variables;
+    }
+
+    private String buildCommunicationTraceId(String sceneCode, Long userId, Long communicationId) {
+        return sceneCode.toLowerCase()
+                + "_"
+                + userId
+                + "_"
+                + communicationId
+                + "_"
+                + System.currentTimeMillis();
     }
 
     /**
