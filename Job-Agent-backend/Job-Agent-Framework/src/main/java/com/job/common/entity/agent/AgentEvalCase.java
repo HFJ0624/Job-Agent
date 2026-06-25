@@ -19,6 +19,11 @@ import lombok.Data;
 public class AgentEvalCase extends BaseEntity {
 
     /**
+     * 所属数据集ID。
+     */
+    private Long datasetId;
+
+    /**
      * 测试用例名称。
      * 例如：岗位匹配-正常调用 JobMatchTool。
      */
@@ -37,6 +42,11 @@ public class AgentEvalCase extends BaseEntity {
     private String inputMessage;
 
     /**
+     * 评测类型：TOOL_CALL / RAG_RETRIEVAL / ANSWER_QUALITY / END_TO_END。
+     */
+    private String evalType;
+
+    /**
      * 期望意图。
      * 例如：JOB_MATCH、RESUME_ANALYZE、JOB_RECOMMEND。
      */
@@ -49,10 +59,41 @@ public class AgentEvalCase extends BaseEntity {
     private String expectedToolName;
 
     /**
+     * 期望工具参数 JSON。
+     * 说明: 第一版按“期望 JSON 是否被实际 JSON 包含”判断参数准确率。
+     */
+    private String expectedToolParamsJson;
+
+    /**
+     * 期望命中的 RAG 文档ID。
+     */
+    private Long expectedRagDocumentId;
+
+    /**
+     * 期望命中的 RAG 切片ID。
+     */
+    private Long expectedRagChunkId;
+
+    /**
+     * 期望 RAG 结果包含的关键词，多个关键词用英文逗号分隔。
+     */
+    private String expectedRagKeywords;
+
+    /**
      * 期望回答包含的关键词。
      * 多个关键词用英文逗号分隔。
      */
     private String expectedAnswerKeywords;
+
+    /**
+     * 最低回答质量分。
+     */
+    private java.math.BigDecimal minAnswerScore;
+
+    /**
+     * 用例标签，多个标签用英文逗号分隔。
+     */
+    private String tags;
 
     /**
      * 是否启用。

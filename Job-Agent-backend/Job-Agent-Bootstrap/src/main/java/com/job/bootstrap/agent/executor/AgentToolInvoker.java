@@ -61,15 +61,20 @@ public class AgentToolInvoker {
             String dataJson = switch (toolName) {
                 case "ResumeAnalyzeTool.analyzeResume" -> resumeAnalyzeTool.analyzeResume(
                         getLong(params, "resumeId"),
+                        getString(params, "resumeName"),
                         getString(params, "targetPosition")
                 );
                 case "JobMatchTool.matchJob" -> jobMatchTool.matchJob(
                         getLong(params, "resumeId"),
-                        getLong(params, "jobId")
+                        getString(params, "resumeName"),
+                        getLong(params, "jobId"),
+                        getString(params, "jobTitle")
                 );
                 case "GreetingGenerateTool.generateGreeting" -> greetingGenerateTool.generateGreeting(
                         getLong(params, "resumeId"),
+                        getString(params, "resumeName"),
                         getLong(params, "jobId"),
+                        getString(params, "jobTitle"),
                         getString(params, "style")
                 );
                 case "JobSearchTool.searchJobs" -> jobSearchTool.searchJobs(

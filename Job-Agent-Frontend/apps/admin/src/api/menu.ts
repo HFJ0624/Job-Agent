@@ -129,6 +129,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/RagKnowledge"
   },
   {
+    id: 12,
+    path: "/agent/eval",
+    name: "AgentEval",
+    title: "Eval 平台",
+    icon: "TrendCharts",
+    component: "agent/EvalPlatform"
+  },
+  {
     id: 7,
     path: "/system",
     name: "SystemRoot",

@@ -433,7 +433,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         }
 
         if (!toolName.contains("/")) {
-            return toolName.trim();
+            return normalizeToolName(toolName.trim());
         }
 
         /*
@@ -442,9 +442,18 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
          */
         String goal = plan.getUserGoal() == null ? "" : plan.getUserGoal();
         if (goal.contains("推荐") || goal.contains("适合") || goal.contains("偏好")) {
-            return "JobRecommendTool.recommendJobs";
+            return normalizeToolName("JobRecommendTool.recommendJobs");
         }
-        return "JobSearchTool.searchJobs";
+        return normalizeToolName("JobSearchTool.searchJobs");
+    }
+
+    private String normalizeToolName(String toolName) {
+        /*
+         * Planner、Eval 或后台配置里可能仍然保存 ResumeAnalyzeTool 这类历史短名。
+         * Executor 在真正执行前统一转成 ClassName.methodName，保证 Schema、Guardrails、Invoker 使用同一套工具名。
+         */
+        return agentToolSchemaRegistry.resolveToolName(toolName)
+                .orElse(toolName);
     }
 
     private Map<String, Object> buildExecutionParams(Map<String, Object> params, AgentPlan plan) {

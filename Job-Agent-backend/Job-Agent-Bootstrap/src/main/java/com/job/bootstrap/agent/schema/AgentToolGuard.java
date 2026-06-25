@@ -130,6 +130,15 @@ public class AgentToolGuard {
             }
 
             Object value = input == null ? null : input.get(param.getName());
+            /*
+             * 名称化工具入参兼容:
+             * 1. 用户对话里优先说简历名称和岗位名称，不要求记住数据库 ID。
+             * 2. Schema 里旧字段 resumeId/jobId 仍可能标记为必填，所以这里允许等价名称字段通过校验。
+             * 3. 具体名称是否能解析成唯一业务实体，交给 Tool 内部的 AgentEntityResolver 做最终校验。
+             */
+            if (isSatisfiedByNaturalName(param.getName(), input)) {
+                continue;
+            }
             if (isBlankValue(value)) {
                 throw new AgentToolException(
                         AgentToolErrorCode.TOOL_PARAM_MISSING,
@@ -138,6 +147,16 @@ public class AgentToolGuard {
                 );
             }
         }
+    }
+
+    private boolean isSatisfiedByNaturalName(String paramName, Map<String, Object> input) {
+        if (input == null) {
+            return false;
+        }
+        if ("resumeId".equals(paramName) && !isBlankValue(input.get("resumeName"))) {
+            return true;
+        }
+        return "jobId".equals(paramName) && !isBlankValue(input.get("jobTitle"));
     }
 
     private void validateParamTypes(AgentToolSchema schema, Map<String, Object> input) {

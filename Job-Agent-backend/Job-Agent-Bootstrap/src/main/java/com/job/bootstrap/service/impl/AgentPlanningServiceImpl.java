@@ -159,8 +159,25 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         }
 
         return requiredParams.stream()
-                .filter(param -> !extractedParams.containsKey(param))
+                .filter(param -> !hasRequiredParam(param, extractedParams))
                 .toList();
+    }
+
+    private boolean hasRequiredParam(String param, Map<String, Object> extractedParams) {
+        if (extractedParams.containsKey(param)) {
+            return true;
+        }
+        /*
+         * 用户端对话不应该强迫用户说数据库 ID。
+         * Planner 层把 resumeName/jobTitle 视为 resumeId/jobId 的自然语言替代项，真正解析留给 Tool。
+         */
+        if ("resumeId".equals(param)) {
+            return extractedParams.containsKey("resumeName");
+        }
+        if ("jobId".equals(param)) {
+            return extractedParams.containsKey("jobTitle");
+        }
+        return false;
     }
 
     private Map<String, Object> buildToolInputSchema(

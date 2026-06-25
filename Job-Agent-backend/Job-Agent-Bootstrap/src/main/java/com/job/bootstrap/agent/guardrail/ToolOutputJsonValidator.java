@@ -45,6 +45,14 @@ public class ToolOutputJsonValidator {
         if (schema == null || CollectionUtils.isEmpty(schema.getOutputFields()) || !root.isObject()) {
             return;
         }
+        /*
+         * 工具可能返回“需要用户确认”的中间结果。
+         * 这不是业务执行失败，而是为了避免岗位重名时擅自选择，因此只校验 JSON 合法性后放行。
+         */
+        JsonNode needClarification = root.get("needClarification");
+        if (needClarification != null && needClarification.asBoolean(false)) {
+            return;
+        }
 
         for (AgentToolOutputSchema field : schema.getOutputFields()) {
             if (field == null || !StringUtils.hasText(field.getName())) {

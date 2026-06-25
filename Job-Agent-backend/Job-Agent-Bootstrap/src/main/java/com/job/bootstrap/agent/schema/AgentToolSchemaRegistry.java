@@ -29,6 +29,7 @@ import java.util.Optional;
 public class AgentToolSchemaRegistry {
 
     private final Map<String, AgentToolSchema> schemaMap;
+    private final Map<String, String> aliasMap;
 
     /**
      * 初始化工具 Schema。
@@ -48,6 +49,7 @@ public class AgentToolSchemaRegistry {
         register(schemas, mockInterviewReviewSchema());
         register(schemas, ragSearchSchema());
         this.schemaMap = Collections.unmodifiableMap(schemas);
+        this.aliasMap = Collections.unmodifiableMap(buildAliasMap(schemas));
     }
 
     /**
@@ -64,7 +66,26 @@ public class AgentToolSchemaRegistry {
         if (!StringUtils.hasText(toolName)) {
             return Optional.empty();
         }
-        return Optional.ofNullable(schemaMap.get(toolName.trim()));
+        return resolveToolName(toolName)
+                .map(schemaMap::get);
+    }
+
+    /**
+     * 将外部传入的工具名统一解析成标准工具名。
+     *
+     * 解析规则:
+     * 1. 标准工具名固定使用 ClassName.methodName，例如 RagSearchTool.searchKnowledge。
+     * 2. 为兼容 Planner、Eval、后台配置里的历史短名，允许 ClassName 解析到唯一标准工具名。
+     * 3. 不支持只写 methodName，避免不同工具方法重名时误调用。
+     *
+     * @param toolName 外部传入的工具名或历史短名
+     * @return 标准工具名
+     */
+    public Optional<String> resolveToolName(String toolName) {
+        if (!StringUtils.hasText(toolName)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(aliasMap.get(toolName.trim()));
     }
 
     /**
@@ -93,8 +114,7 @@ public class AgentToolSchemaRegistry {
         List<AgentToolSchema> schemas = new ArrayList<>();
         String[] toolNames = toolExpression.split("/");
         for (String item : toolNames) {
-            String toolName = item.trim();
-            find(toolName).ifPresent(schemas::add);
+            find(item).ifPresent(schemas::add);
         }
         return schemas;
     }
@@ -122,6 +142,26 @@ public class AgentToolSchemaRegistry {
 
     private void register(Map<String, AgentToolSchema> schemas, AgentToolSchema schema) {
         schemas.put(schema.getToolName(), schema);
+    }
+
+    private Map<String, String> buildAliasMap(Map<String, AgentToolSchema> schemas) {
+        Map<String, String> aliases = new LinkedHashMap<>();
+        for (AgentToolSchema schema : schemas.values()) {
+            /*
+             * 这里统一把所有可接受的历史写法映射到 ClassName.methodName。
+             * 后续 Guardrails、Executor、Trace 都只使用标准工具名，避免同一个工具出现多种名字。
+             */
+            putAlias(aliases, schema.getToolName(), schema.getToolName());
+            putAlias(aliases, schema.getJavaClassName(), schema.getToolName());
+            putAlias(aliases, schema.getJavaClassName() + "." + schema.getJavaMethodName(), schema.getToolName());
+        }
+        return aliases;
+    }
+
+    private void putAlias(Map<String, String> aliases, String alias, String toolName) {
+        if (StringUtils.hasText(alias) && StringUtils.hasText(toolName)) {
+            aliases.put(alias.trim(), toolName.trim());
+        }
     }
 
     private AgentToolSchema resumeAnalyzeSchema() {

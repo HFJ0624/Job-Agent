@@ -43,7 +43,7 @@ public class AgentPlanTemplateFactory {
         return new AgentPlanTemplate(
                 "简历分析计划",
                 "校验用户选择的简历，调用简历分析工具，输出评分、优势、问题和优化建议。",
-                List.of("resumeId"),
+                List.of(),
                 List.of(
                         step("确认简历", "确认用户提供的 resumeId 已被 Planner 抽取，并交给工具做归属校验。", null,
                                 Map.of("resumeId", "必填，用户简历ID"),

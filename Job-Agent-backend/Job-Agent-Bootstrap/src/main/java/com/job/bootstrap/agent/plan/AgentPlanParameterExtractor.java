@@ -11,23 +11,19 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 作者:hfj
- * 功能:Agent 计划参数抽取器
- * 日期:2026/6/19
- *
- * 说明:
- * 1. 第一版只抽取高确定性的参数，不做模型猜测。
- * 2. 抽不到的必要参数交给 Planner 标记为 missing，由用户补充。
+ * 作者: hfj
+ * 功能: Agent 计划参数抽取器
+ * 日期: 2026/6/19
  */
 @Component
 public class AgentPlanParameterExtractor {
 
     private static final Pattern RESUME_ID_PATTERN = Pattern.compile(
-            "(?i)(?:resumeId|resume_id|简历ID|简历id|简历)\\s*[:=：#-]?\\s*(\\d+)"
+            "(?i)(?:resumeId|resume_id|简历ID|简历id)\\s*[:=：#-]?\\s*(\\d+)"
     );
 
     private static final Pattern JOB_ID_PATTERN = Pattern.compile(
-            "(?i)(?:jobId|job_id|岗位ID|岗位id|职位ID|职位id|岗位|职位)\\s*[:=：#-]?\\s*(\\d+)"
+            "(?i)(?:jobId|job_id|岗位ID|岗位id|职位ID|职位id)\\s*[:=：#-]?\\s*(\\d+)"
     );
 
     private static final Pattern APPLICATION_ID_PATTERN = Pattern.compile(
@@ -40,6 +36,18 @@ public class AgentPlanParameterExtractor {
 
     private static final Pattern MIN_SALARY_PATTERN = Pattern.compile(
             "(?i)(?:最低薪资|minSalary|薪资不低于|薪资至少|至少)\\s*[:=：]?\\s*(\\d{1,6})\\s*(k|K|千|元)?"
+    );
+
+    private static final Pattern QUOTED_RESUME_AND_JOB_PATTERN = Pattern.compile(
+            "[「『“\"]([^」』”\"]*简历)[」』”\"].*?[「『“\"]([^」』”\"]+)[」』”\"]"
+    );
+
+    private static final Pattern RESUME_NAME_PATTERN = Pattern.compile(
+            "(?:简历名称|简历名|简历)\\s*[:=：#-]?\\s*[「『“\"]?([^」』”\"，,。]+?简历)[」』”\"]?"
+    );
+
+    private static final Pattern JOB_TITLE_PATTERN = Pattern.compile(
+            "(?:岗位名称|职位名称|岗位|职位)\\s*[:=：#-]?\\s*[「『“\"]?([^」』”\"，,。]+)[」』”\"]?"
     );
 
     private static final List<String> CITY_WORDS = List.of(
@@ -55,8 +63,10 @@ public class AgentPlanParameterExtractor {
     /**
      * 从用户消息中抽取计划参数。
      *
-     * @param message 用户原始消息
-     * @return 参数 Map
+     * 方法步骤:
+     * 1. 先抽取兼容旧入口的数字 ID。
+     * 2. 再抽取面向用户的新参数 resumeName/jobTitle。
+     * 3. 最后抽取搜索类条件，例如城市、关键词和最低薪资。
      */
     public Map<String, Object> extract(String message) {
         Map<String, Object> params = new LinkedHashMap<>();
@@ -68,16 +78,40 @@ public class AgentPlanParameterExtractor {
         putLongIfPresent(params, "jobId", JOB_ID_PATTERN, message);
         putLongIfPresent(params, "applicationId", APPLICATION_ID_PATTERN, message);
         putLongIfPresent(params, "mockSessionId", MOCK_SESSION_ID_PATTERN, message);
+        putNameParamsIfPresent(params, message);
         putSalaryIfPresent(params, message);
         putCityIfPresent(params, message);
         putKeywordIfPresent(params, message);
         return params;
     }
 
+    private void putNameParamsIfPresent(Map<String, Object> params, String message) {
+        /*
+         * 优先解析成对引号表达。
+         * 例如: 帮我分析「黄锋杰(后端)简历」和「Java 后端开发」是否匹配。
+         */
+        Matcher pairMatcher = QUOTED_RESUME_AND_JOB_PATTERN.matcher(message);
+        if (pairMatcher.find()) {
+            params.putIfAbsent("resumeName", pairMatcher.group(1).trim());
+            params.putIfAbsent("jobTitle", pairMatcher.group(2).trim());
+            return;
+        }
+
+        putStringIfPresent(params, "resumeName", RESUME_NAME_PATTERN, message);
+        putStringIfPresent(params, "jobTitle", JOB_TITLE_PATTERN, message);
+    }
+
     private void putLongIfPresent(Map<String, Object> params, String key, Pattern pattern, String message) {
         Matcher matcher = pattern.matcher(message);
         if (matcher.find()) {
             params.put(key, Long.valueOf(matcher.group(1)));
+        }
+    }
+
+    private void putStringIfPresent(Map<String, Object> params, String key, Pattern pattern, String message) {
+        Matcher matcher = pattern.matcher(message);
+        if (matcher.find()) {
+            params.put(key, matcher.group(1).trim());
         }
     }
 

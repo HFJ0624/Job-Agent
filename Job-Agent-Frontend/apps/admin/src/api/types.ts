@@ -187,6 +187,154 @@ export interface AgentTraceLogInfo {
 }
 
 /**
+ * Agent Eval 数据集。
+ */
+export interface AgentEvalDatasetInfo {
+  id?: number;
+  datasetName: string;
+  datasetCode: string;
+  description?: string;
+  evalType?: string;
+  enableStatus?: number;
+  remark?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface AgentEvalDatasetQuery {
+  pageNum: number;
+  pageSize: number;
+  datasetName?: string;
+  datasetCode?: string;
+  evalType?: string;
+  enableStatus?: number | string;
+}
+
+/**
+ * Agent Eval 用例。
+ */
+export interface AgentEvalCaseInfo {
+  id?: number;
+  datasetId?: number;
+  caseName: string;
+  userId: number;
+  inputMessage: string;
+  evalType?: string;
+  expectedIntent?: string;
+  expectedToolName?: string;
+  expectedToolParamsJson?: string;
+  expectedRagDocumentId?: number;
+  expectedRagChunkId?: number;
+  expectedRagKeywords?: string;
+  expectedAnswerKeywords?: string;
+  minAnswerScore?: number;
+  tags?: string;
+  enableStatus?: number;
+  remark?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface AgentEvalCaseQuery {
+  pageNum: number;
+  pageSize: number;
+  datasetId?: number | string;
+  caseName?: string;
+  userId?: number | string;
+  evalType?: string;
+  expectedToolName?: string;
+  enableStatus?: number | string;
+}
+
+/**
+ * Agent Eval 批量运行记录。
+ */
+export interface AgentEvalRunInfo {
+  id: number;
+  datasetId?: number;
+  runName?: string;
+  runType?: string;
+  totalCount: number;
+  passCount: number;
+  failCount: number;
+  toolAccuracy?: number;
+  paramAccuracy?: number;
+  ragHitRate?: number;
+  answerQualityAvg?: number;
+  avgCostTime?: number;
+  baselineFlag?: number;
+  compareRunId?: number;
+  passRateDelta?: number;
+  toolAccuracyDelta?: number;
+  paramAccuracyDelta?: number;
+  ragHitRateDelta?: number;
+  answerQualityDelta?: number;
+  failureStatsJson?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+  failReason?: string;
+  createTime?: string;
+}
+
+export interface AgentEvalRunQuery {
+  pageNum: number;
+  pageSize: number;
+  datasetId?: number | string;
+  runType?: string;
+  status?: string;
+}
+
+/**
+ * Agent Eval 单条结果。
+ */
+export interface AgentEvalResultInfo {
+  id: number;
+  runId?: number;
+  datasetId?: number;
+  caseId?: number;
+  userId?: number;
+  conversationId?: number;
+  inputMessage?: string;
+  evalType?: string;
+  actualAnswer?: string;
+  actualTools?: string;
+  expectedToolName?: string;
+  toolSelectPass?: number;
+  expectedToolParamsJson?: string;
+  actualToolParamsJson?: string;
+  toolParamPass?: number;
+  ragHitPass?: number;
+  ragHitRank?: number;
+  ragResultsJson?: string;
+  answerKeywordPass?: number;
+  answerQualityScore?: number;
+  judgeScore?: number;
+  judgePass?: number;
+  judgeReason?: string;
+  judgeDetailJson?: string;
+  baselineResultId?: number;
+  answerScoreDelta?: number;
+  passStatus?: number;
+  failReason?: string;
+  failureType?: string;
+  traceId?: string;
+  costTime?: number;
+  createTime?: string;
+}
+
+export interface AgentEvalResultQuery {
+  pageNum: number;
+  pageSize: number;
+  runId?: number | string;
+  datasetId?: number | string;
+  caseId?: number | string;
+  evalType?: string;
+  passStatus?: number | string;
+  failureType?: string;
+}
+
+/**
  * Agent 观测看板查询参数。
  */
 export interface AgentObservationDashboardQuery {
