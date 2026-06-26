@@ -6,6 +6,7 @@ import com.job.bootstrap.service.AgentMemoryService;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
+import com.job.common.vo.agent.AgentMemoryHistoryVO;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.common.vo.agent.AgentUserMemoryProfileVO;
 import lombok.RequiredArgsConstructor;
@@ -73,6 +74,17 @@ public class AdminAgentMemoryController {
     @GetMapping("/{id}")
     public Result<AgentMemoryVO> detail(@PathVariable Long id) {
         return Result.build(agentMemoryService.getDetail(id), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 查询长期记忆版本历史。
+     *
+     * @param id 记忆 ID
+     * @return 历史版本列表
+     */
+    @GetMapping("/{id}/history")
+    public Result<List<AgentMemoryHistoryVO>> history(@PathVariable Long id) {
+        return Result.build(agentMemoryService.listHistory(id), ResultCodeEnum.SUCCESS);
     }
 
     /**

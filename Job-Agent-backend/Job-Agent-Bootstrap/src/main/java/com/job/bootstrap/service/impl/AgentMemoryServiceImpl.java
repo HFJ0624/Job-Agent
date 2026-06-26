@@ -4,14 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.job.bootstrap.mapper.AgentLongTermMemoryMapper;
+import com.job.bootstrap.mapper.AgentMemoryHistoryMapper;
 import com.job.bootstrap.service.AgentMemoryService;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.agent.AgentLongTermMemory;
+import com.job.common.entity.agent.AgentMemoryHistory;
+import com.job.common.vo.agent.AgentMemoryHistoryVO;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.enums.AgentMemoryStatus;
 import com.job.enums.AgentMemoryType;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -27,16 +31,26 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 作者:hfj
- * 功能:Agent 长期记忆服务实现
- * 日期:2026/6/20
+ * 作者: hfj
+ * 功能: Agent 长期记忆服务实现
+ * 日期: 2026/6/20
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AgentMemoryServiceImpl implements AgentMemoryService {
 
     private static final int NOT_DELETED = 0;
     private static final int DELETED = 1;
+    private static final int CONFLICT_NO = 0;
+    private static final int CONFLICT_YES = 1;
+
+    private static final String CHANGE_CREATE = "CREATE";
+    private static final String CHANGE_UPDATE = "UPDATE";
+    private static final String CHANGE_STATUS = "STATUS_CHANGE";
+    private static final String OPERATOR_SYSTEM = "SYSTEM";
+    private static final String OPERATOR_ADMIN = "ADMIN";
+
     private static final int DEFAULT_SEARCH_LIMIT = 5;
     private static final int MAX_SEARCH_LIMIT = 20;
     private static final int MEMORY_SCAN_LIMIT = 100;
@@ -45,19 +59,17 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
     private static final BigDecimal DEFAULT_IMPORTANCE = new BigDecimal("0.50");
 
     private final AgentLongTermMemoryMapper agentLongTermMemoryMapper;
+    private final AgentMemoryHistoryMapper agentMemoryHistoryMapper;
 
     /**
      * 保存或更新长期记忆。
      *
      * 方法步骤:
-     * 1. 校验 userId、memoryType、memoryValue，避免写入无归属或无内容的记忆。
-     * 2. 如果 memoryKey 有值，先查同一用户、同一类型、同一 key 的最新 ACTIVE 记忆。
-     * 3. 查到旧记忆时更新它，没查到时插入新记忆。
-     * 4. 统一补齐置信度、重要性、状态和时间字段。
-     *
-     * 这样设计的原因:
-     * - preferred_city、target_role 这类事实应该被“覆盖更新”，否则用户改偏好后旧偏好会反复干扰。
-     * - 没有 memoryKey 的事实可以保留多条，适合后续记录多次面试反馈或多次岗位判断。
+     * 1. 校验用户、记忆类型、记忆正文，避免写入无效事实。
+     * 2. 如果 memoryKey 存在，查找同用户、同类型、同 key 的当前记忆。
+     * 3. 当前记忆不存在则新增，存在则覆盖当前值。
+     * 4. 主表写入成功后记录版本历史。
+     * 5. 如果同 key 覆盖时新旧值不同，历史记录会标记 conflictDetected=1。
      */
     @Override
     public AgentLongTermMemory saveOrUpdateMemory(
@@ -83,7 +95,9 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
 
         Date now = new Date();
         AgentLongTermMemory memory = findUpdatableMemory(userId, memoryType, memoryKey);
+        AgentLongTermMemory oldSnapshot = copyMemory(memory);
         boolean insert = memory == null;
+
         if (insert) {
             memory = new AgentLongTermMemory();
             memory.setUserId(userId);
@@ -107,6 +121,15 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         } else {
             agentLongTermMemoryMapper.updateById(memory);
         }
+
+        recordMemoryHistory(
+                oldSnapshot,
+                memory,
+                insert ? CHANGE_CREATE : CHANGE_UPDATE,
+                sourceType,
+                sourceId,
+                OPERATOR_SYSTEM
+        );
         return memory;
     }
 
@@ -114,14 +137,10 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
      * 检索用户长期记忆。
      *
      * 方法步骤:
-     * 1. 先取当前用户最近且重要的 ACTIVE 记忆，限定最多扫描 100 条，避免一次检索扫全表。
-     * 2. 在 Java 内存中计算第一版相关性分数: 关键词命中 + 重要性 + 置信度。
+     * 1. 读取当前用户最近且重要的 ACTIVE 记忆，限制扫描数量。
+     * 2. 在 Java 内存里按关键词、重要性、置信度计算第一版相关性分数。
      * 3. 按分数排序后截取 limit 条。
-     * 4. 更新 lastUsedTime，方便后台知道哪些记忆真的被 Agent 使用过。
-     *
-     * 注意:
-     * 第一版是结构化关键词检索，不是语义向量检索。
-     * 后续接 pgvector 时，可以保留这个接口不变，只替换内部召回算法。
+     * 4. 更新 lastUsedTime，方便后台知道哪些记忆被召回过。
      */
     @Override
     public List<AgentMemoryVO> searchMemories(Long userId, String query, Integer limit) {
@@ -160,13 +179,6 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         return selected.stream().map(AgentMemoryVO::from).toList();
     }
 
-    /**
-     * 查询某个稳定记忆键的最新值。
-     *
-     * 典型用法:
-     * - Executor 后续可用 preferred_city 补齐搜索城市。
-     * - 话术生成可用 preferred_greeting_style 补齐用户沟通风格。
-     */
     @Override
     public String findLatestMemoryValue(Long userId, AgentMemoryType memoryType, String memoryKey) {
         if (userId == null || userId <= 0 || memoryType == null || !StringUtils.hasText(memoryKey)) {
@@ -193,9 +205,6 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         return memory.getMemoryValue();
     }
 
-    /**
-     * 后台分页查询长期记忆。
-     */
     @Override
     public IPage<AgentMemoryVO> pageMemories(AgentMemoryQueryDTO query) {
         long pageNum = query.getPageNum() == null || query.getPageNum() <= 0 ? 1L : query.getPageNum();
@@ -243,9 +252,6 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         return agentLongTermMemoryMapper.selectPage(page, wrapper).convert(AgentMemoryVO::from);
     }
 
-    /**
-     * 查询长期记忆详情。
-     */
     @Override
     public AgentMemoryVO getDetail(Long id) {
         AgentLongTermMemory memory = agentLongTermMemoryMapper.selectById(id);
@@ -255,19 +261,29 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         return AgentMemoryVO.from(memory);
     }
 
+    @Override
+    public List<AgentMemoryHistoryVO> listHistory(Long memoryId) {
+        if (memoryId == null || memoryId <= 0) {
+            throw new BizException("长期记忆ID不能为空");
+        }
+
+        List<AgentMemoryHistory> histories = agentMemoryHistoryMapper.selectList(
+                new LambdaQueryWrapper<AgentMemoryHistory>()
+                        .eq(AgentMemoryHistory::getMemoryId, memoryId)
+                        .eq(AgentMemoryHistory::getIsDeleted, NOT_DELETED)
+                        .orderByDesc(AgentMemoryHistory::getCreateTime)
+                        .orderByDesc(AgentMemoryHistory::getId)
+        );
+        return histories.stream().map(AgentMemoryHistoryVO::from).toList();
+    }
+
     /**
      * 后台人工更新长期记忆状态。
      *
      * 方法步骤:
-     * 1. 先按 ID 查询记忆，并确认它没有被逻辑删除。
-     * 2. 将前端传入的状态字符串解析成 AgentMemoryStatus 枚举，拒绝未知状态。
-     * 3. 只更新 status 和 updateTime，不改 memoryValue，避免后台治理动作误伤事实内容。
-     * 4. 返回最新 VO，让 controller 可以拿到 userId 并触发用户画像重建。
-     *
-     * 状态语义:
-     * - ACTIVE: 继续参与长期记忆召回和画像构建。
-     * - ARCHIVED: 人工暂时禁用，不参与召回，但允许后续恢复。
-     * - INVALID: 判定错误或过期，不参与召回，后续一般不再恢复。
+     * 1. 查询旧记忆并复制快照。
+     * 2. 更新主表状态。
+     * 3. 写入 STATUS_CHANGE 历史记录，方便后台审计谁把记忆禁用或恢复。
      */
     @Override
     public AgentMemoryVO updateStatus(Long id, String status) {
@@ -280,25 +296,18 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             throw new BizException("Agent 长期记忆不存在");
         }
 
+        AgentLongTermMemory oldSnapshot = copyMemory(memory);
         AgentMemoryStatus targetStatus = parseMemoryStatus(status);
         memory.setStatus(targetStatus.name());
         memory.setUpdateTime(new Date());
         agentLongTermMemoryMapper.updateById(memory);
+
+        recordMemoryHistory(oldSnapshot, memory, CHANGE_STATUS, memory.getSourceType(), memory.getSourceId(), OPERATOR_ADMIN);
         return AgentMemoryVO.from(memory);
     }
 
     /**
      * 按 key 归档当前用户的 ACTIVE 记忆。
-     *
-     * 方法步骤:
-     * 1. 校验用户 ID 和 memoryKeys，缺少关键条件时直接返回 0，避免误归档。
-     * 2. 查询当前用户、指定 key、状态为 ACTIVE、未删除的记忆。
-     * 3. 将命中的记忆状态改为 ARCHIVED，并刷新 updateTime。
-     * 4. 返回归档数量，上层据此决定是否需要重建用户画像。
-     *
-     * 为什么不用物理删除:
-     * - 长期记忆是影响 Agent 行为的重要依据，需要保留后台追溯能力。
-     * - ARCHIVED 不参与召回和画像构建，但管理员仍可以在后台恢复。
      */
     @Override
     public int archiveActiveMemoriesByKeys(Long userId, List<String> memoryKeys) {
@@ -328,11 +337,87 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
 
         Date now = new Date();
         for (AgentLongTermMemory memory : memories) {
+            AgentLongTermMemory oldSnapshot = copyMemory(memory);
             memory.setStatus(AgentMemoryStatus.ARCHIVED.name());
             memory.setUpdateTime(now);
             agentLongTermMemoryMapper.updateById(memory);
+            recordMemoryHistory(oldSnapshot, memory, CHANGE_STATUS, memory.getSourceType(), memory.getSourceId(), OPERATOR_SYSTEM);
         }
         return memories.size();
+    }
+
+    private void recordMemoryHistory(
+            AgentLongTermMemory oldMemory,
+            AgentLongTermMemory newMemory,
+            String changeType,
+            String sourceType,
+            Long sourceId,
+            String operatorType
+    ) {
+        if (newMemory == null || newMemory.getId() == null) {
+            return;
+        }
+
+        try {
+            /*
+             * 历史记录是审计能力，不应该影响主记忆写入。
+             * 如果你还没建 agent_memory_history 表，这里只记录日志，Agent 主流程继续运行。
+             */
+            Date now = new Date();
+            AgentMemoryHistory history = new AgentMemoryHistory();
+            history.setMemoryId(newMemory.getId());
+            history.setUserId(newMemory.getUserId());
+            history.setMemoryType(newMemory.getMemoryType());
+            history.setMemoryKey(newMemory.getMemoryKey());
+            history.setChangeType(changeType);
+            history.setOldMemoryValue(oldMemory == null ? null : oldMemory.getMemoryValue());
+            history.setNewMemoryValue(newMemory.getMemoryValue());
+            history.setOldSummary(oldMemory == null ? null : oldMemory.getSummary());
+            history.setNewSummary(newMemory.getSummary());
+            history.setOldStatus(oldMemory == null ? null : oldMemory.getStatus());
+            history.setNewStatus(newMemory.getStatus());
+            history.setConflictDetected(detectConflict(oldMemory, newMemory, changeType));
+            history.setConflictReason(resolveConflictReason(history));
+            history.setSourceType(trimToNull(sourceType));
+            history.setSourceId(sourceId);
+            history.setOperatorType(operatorType);
+            history.setIsDeleted(NOT_DELETED);
+            history.setCreateTime(now);
+            history.setUpdateTime(now);
+            agentMemoryHistoryMapper.insert(history);
+        } catch (Exception exception) {
+            log.warn(
+                    "Agent 记忆历史写入失败，memoryId={}, changeType={}, error={}",
+                    newMemory.getId(),
+                    changeType,
+                    exception.getMessage(),
+                    exception
+            );
+        }
+    }
+
+    private Integer detectConflict(AgentLongTermMemory oldMemory, AgentLongTermMemory newMemory, String changeType) {
+        /*
+         * 第二版先做确定性冲突:
+         * 同一条稳定 key 记忆被覆盖，并且新旧正文不同，就标记冲突。
+         * 例如 preferred_city 从“北京”变成“上海”。
+         */
+        if (oldMemory == null || newMemory == null || !CHANGE_UPDATE.equals(changeType)) {
+            return CONFLICT_NO;
+        }
+        if (!StringUtils.hasText(newMemory.getMemoryKey())) {
+            return CONFLICT_NO;
+        }
+        String oldValue = normalizeForCompare(oldMemory.getMemoryValue());
+        String newValue = normalizeForCompare(newMemory.getMemoryValue());
+        return oldValue.equals(newValue) ? CONFLICT_NO : CONFLICT_YES;
+    }
+
+    private String resolveConflictReason(AgentMemoryHistory history) {
+        if (history == null || !Integer.valueOf(CONFLICT_YES).equals(history.getConflictDetected())) {
+            return null;
+        }
+        return "同一 memoryKey 的长期记忆被新值覆盖，请确认这是用户偏好变化还是错误提取。";
     }
 
     private AgentLongTermMemory findUpdatableMemory(Long userId, AgentMemoryType memoryType, String memoryKey) {
@@ -392,12 +477,12 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         }
 
         Set<String> tokens = new LinkedHashSet<>();
-        String normalized = query.trim().toLowerCase();
+        String normalized = query.trim().toLowerCase(Locale.ROOT);
         if (normalized.length() <= 40) {
             tokens.add(normalized);
         }
 
-        String[] parts = normalized.split("[\\s,，。.!！?？、;；:：/\\\\|]+");
+        String[] parts = normalized.split("[\\s,，。!！?？;；:：、|\\\\]+");
         for (String part : parts) {
             if (part.length() >= 2) {
                 tokens.add(part);
@@ -421,7 +506,7 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             if (!StringUtils.hasText(token)) {
                 continue;
             }
-            String normalizedToken = token.toLowerCase();
+            String normalizedToken = token.toLowerCase(Locale.ROOT);
             if (key.contains(normalizedToken)) {
                 score += 4;
             }
@@ -454,12 +539,39 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         }
     }
 
+    private AgentLongTermMemory copyMemory(AgentLongTermMemory source) {
+        if (source == null) {
+            return null;
+        }
+        AgentLongTermMemory copy = new AgentLongTermMemory();
+        copy.setId(source.getId());
+        copy.setUserId(source.getUserId());
+        copy.setMemoryType(source.getMemoryType());
+        copy.setMemoryKey(source.getMemoryKey());
+        copy.setMemoryValue(source.getMemoryValue());
+        copy.setSummary(source.getSummary());
+        copy.setSourceType(source.getSourceType());
+        copy.setSourceId(source.getSourceId());
+        copy.setConfidence(source.getConfidence());
+        copy.setImportance(source.getImportance());
+        copy.setStatus(source.getStatus());
+        copy.setLastUsedTime(source.getLastUsedTime());
+        copy.setCreateTime(source.getCreateTime());
+        copy.setUpdateTime(source.getUpdateTime());
+        copy.setIsDeleted(source.getIsDeleted());
+        return copy;
+    }
+
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private String lower(String value) {
-        return value == null ? "" : value.toLowerCase();
+        return value == null ? "" : value.toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeForCompare(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private double decimalScore(BigDecimal value) {

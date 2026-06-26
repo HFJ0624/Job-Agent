@@ -3,6 +3,7 @@ package com.job.bootstrap.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.agent.AgentLongTermMemory;
+import com.job.common.vo.agent.AgentMemoryHistoryVO;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.enums.AgentMemoryType;
 
@@ -77,6 +78,14 @@ public interface AgentMemoryService {
      * @return 记忆详情
      */
     AgentMemoryVO getDetail(Long id);
+
+    /**
+     * 查询某条长期记忆的版本历史。
+     *
+     * @param memoryId 记忆 ID
+     * @return 版本历史列表
+     */
+    List<AgentMemoryHistoryVO> listHistory(Long memoryId);
 
     /**
      * 后台人工更新长期记忆状态。
