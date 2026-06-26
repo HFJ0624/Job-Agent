@@ -19,6 +19,17 @@ export function startMockInterview(data: {
     });
 }
 
+export function startAiInterview(data: {
+    resumeId: number | string;
+    jobId: number | string;
+    questionCount?: number;
+}) {
+    return request<MockInterviewSessionInfo>("/front/mock-interviews/ai/start", {
+        method: "POST",
+        body: JSON.stringify(data)
+    });
+}
+
 /**
  * 查询模拟面试详情。
  */
@@ -48,6 +59,25 @@ export function submitMockAnswer(
     return request<MockInterviewAnswerInfo>(`/front/mock-interviews/${sessionId}/answer`, {
         method: "POST",
         body: JSON.stringify(data)
+    });
+}
+
+export function submitMockAudioAnswer(
+    sessionId: number | string,
+    questionId: number | string,
+    audio: Blob,
+    durationSeconds?: number
+) {
+    const formData = new FormData();
+    formData.append("questionId", String(questionId));
+    formData.append("audio", audio, `answer-${questionId}.webm`);
+    if (durationSeconds !== undefined) {
+        formData.append("durationSeconds", String(durationSeconds));
+    }
+
+    return request<MockInterviewAnswerInfo>(`/front/mock-interviews/${sessionId}/answer/audio`, {
+        method: "POST",
+        body: formData
     });
 }
 

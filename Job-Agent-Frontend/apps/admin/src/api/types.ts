@@ -960,3 +960,73 @@ export interface AiModelCostStats {
   totalCost: number;
   avgCostTime: number;
 }
+
+export interface MockInterviewSessionQuery {
+  pageNum: number;
+  pageSize: number;
+  userId?: string | number;
+  jobId?: string | number;
+  resumeId?: string | number;
+  status?: string;
+  keyword?: string;
+}
+
+export interface MockInterviewQuestionInfo {
+  id: number;
+  sessionId: number;
+  questionType: string;
+  questionContent: string;
+  sortNo: number;
+  answered: number;
+}
+
+export interface MockInterviewAnswerInfo {
+  id: number;
+  sessionId: number;
+  questionId: number;
+  answerContent: string;
+  score: number;
+  level: string;
+  strengths: string[];
+  problems: string[];
+  suggestions: string[];
+}
+
+export interface MockInterviewMediaRecordInfo {
+  id: number;
+  sessionId: number;
+  questionId?: number;
+  answerId?: number;
+  userId: number;
+  mediaType: string;
+  fileUrl: string;
+  objectName?: string;
+  fileName?: string;
+  fileSize?: number;
+  durationSeconds?: number;
+  asrText?: string;
+  asrProvider?: string;
+  asrStatus?: string;
+  asrError?: string;
+  createTime?: string;
+}
+
+export interface MockInterviewSessionInfo {
+  id: number;
+  userId?: number;
+  applicationId?: number;
+  interviewPrepareId?: number;
+  jobId?: number;
+  resumeId?: number;
+  jobTitle?: string;
+  companyName?: string;
+  status: string;
+  currentIndex: number;
+  totalQuestionCount: number;
+  totalScore?: number;
+  summary?: string;
+  questions?: MockInterviewQuestionInfo[];
+  answers?: MockInterviewAnswerInfo[];
+  mediaRecords?: MockInterviewMediaRecordInfo[];
+  createTime?: string;
+}

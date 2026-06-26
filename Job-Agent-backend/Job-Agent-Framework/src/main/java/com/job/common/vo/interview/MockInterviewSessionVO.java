@@ -32,6 +32,7 @@ public class MockInterviewSessionVO {
 
     private List<MockInterviewQuestionVO> questions;
     private List<MockInterviewAnswerVO> answers;
+    private List<MockInterviewMediaRecordVO> mediaRecords;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date createTime;

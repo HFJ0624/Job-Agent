@@ -137,6 +137,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/EvalPlatform"
   },
   {
+    id: 13,
+    path: "/interview/mock",
+    name: "MockInterviewManage",
+    title: "模拟面试记录",
+    icon: "VideoCamera",
+    component: "interview/MockInterviewManage"
+  },
+  {
     id: 7,
     path: "/system",
     name: "SystemRoot",

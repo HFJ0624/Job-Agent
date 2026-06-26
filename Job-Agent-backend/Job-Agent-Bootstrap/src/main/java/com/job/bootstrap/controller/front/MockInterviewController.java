@@ -2,6 +2,7 @@ package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.job.bootstrap.service.MockInterviewService;
+import com.job.common.dto.interview.AiInterviewStartDTO;
 import com.job.common.dto.interview.MockInterviewAnswerDTO;
 import com.job.common.dto.interview.MockInterviewStartDTO;
 import com.job.common.entity.base.Result;
@@ -12,6 +13,7 @@ import com.job.common.vo.interview.MockInterviewSessionVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 作者:hfj
@@ -34,6 +36,20 @@ public class MockInterviewController {
         Long userId = StpUtil.getLoginIdAsLong();
 
         MockInterviewSessionVO vo = mockInterviewService.startSession(userId, dto);
+
+        return Result.build(vo, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 按简历和岗位直接开始 AI 语音面试。
+     */
+    @PostMapping("/ai/start")
+    public Result<MockInterviewSessionVO> startAiInterview(
+            @Valid @RequestBody AiInterviewStartDTO dto
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        MockInterviewSessionVO vo = mockInterviewService.startAiInterview(userId, dto);
 
         return Result.build(vo, ResultCodeEnum.SUCCESS);
     }
@@ -73,6 +89,29 @@ public class MockInterviewController {
         Long userId = StpUtil.getLoginIdAsLong();
 
         MockInterviewAnswerVO vo = mockInterviewService.submitAnswer(userId, sessionId, dto);
+
+        return Result.build(vo, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 上传语音回答，后端调用 ASR 转写后自动评分。
+     */
+    @PostMapping("/{sessionId}/answer/audio")
+    public Result<MockInterviewAnswerVO> submitAudioAnswer(
+            @PathVariable Long sessionId,
+            @RequestParam Long questionId,
+            @RequestParam("audio") MultipartFile audio,
+            @RequestParam(required = false) Integer durationSeconds
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        MockInterviewAnswerVO vo = mockInterviewService.submitAudioAnswer(
+                userId,
+                sessionId,
+                questionId,
+                audio,
+                durationSeconds
+        );
 
         return Result.build(vo, ResultCodeEnum.SUCCESS);
     }

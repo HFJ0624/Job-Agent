@@ -15,6 +15,7 @@ import ProfilePage from "./pages/ProfilePage.vue";
 import JobRecommendPage from "./pages/JobRecommendPage.vue";
 import ApplicationPage from "./pages/ApplicationPage.vue";
 import CommunicationPage from "./pages/CommunicationPage.vue";
+import AiInterviewPage from "./pages/AiInterviewPage.vue";
 import "./styles.css";
 
 // 用户端先用前端静态路由，后续接后端时只需要把页面里的 mock 数据替换成接口。
@@ -33,6 +34,7 @@ const router = createRouter({
     { path: "/job-recommend", name: "job-recommend", component: JobRecommendPage },
     { path: "/application", name: "application", component: ApplicationPage },
     { path: "/communication", name: "communication", component: CommunicationPage },
+    { path: "/ai-interview", name: "ai-interview", component: AiInterviewPage },
   ],
   scrollBehavior() {
     return { top: 0 };

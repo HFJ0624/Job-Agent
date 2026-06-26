@@ -546,6 +546,25 @@ export interface MockInterviewAnswerInfo {
   suggestions: string[];
 }
 
+export interface MockInterviewMediaRecordInfo {
+  id: number;
+  sessionId: number;
+  questionId?: number;
+  answerId?: number;
+  userId: number;
+  mediaType: string;
+  fileUrl: string;
+  objectName?: string;
+  fileName?: string;
+  fileSize?: number;
+  durationSeconds?: number;
+  asrText?: string;
+  asrProvider?: string;
+  asrStatus?: string;
+  asrError?: string;
+  createTime?: string;
+}
+
 /**
  * 模拟面试会话。
  */
@@ -564,6 +583,7 @@ export interface MockInterviewSessionInfo {
   summary?: string;
   questions?: MockInterviewQuestionInfo[];
   answers?: MockInterviewAnswerInfo[];
+  mediaRecords?: MockInterviewMediaRecordInfo[];
   createTime?: string;
 }
 
