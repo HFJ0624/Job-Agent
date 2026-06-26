@@ -30,6 +30,41 @@ export interface LoginResponse {
 }
 
 /**
+ * 后台首页核心指标卡片。
+ */
+export interface AdminDashboardMetric {
+  label: string;
+  value: number;
+  subText: string;
+}
+
+/**
+ * 后台首页待处理事项。
+ */
+export interface AdminDashboardPendingItem {
+  title: string;
+  content: string;
+  level: "success" | "warning" | "danger" | string;
+}
+
+/**
+ * 后台首页系统能力状态。
+ */
+export interface AdminDashboardSystemItem {
+  label: string;
+  value: string;
+}
+
+/**
+ * 后台首页聚合数据。
+ */
+export interface AdminDashboardOverview {
+  metrics: AdminDashboardMetric[];
+  pendingItems: AdminDashboardPendingItem[];
+  systemItems: AdminDashboardSystemItem[];
+}
+
+/**
  * 公司信息，和后端 CompanyVO 字段保持一致。
  */
 export interface CompanyInfo {
