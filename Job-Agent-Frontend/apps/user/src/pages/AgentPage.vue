@@ -72,18 +72,6 @@
           </div>
         </div>
 
-        <div class="quick-prompts">
-          <button
-            v-for="prompt in quickPrompts"
-            :key="prompt"
-            type="button"
-            class="secondary-button"
-            @click="fillPrompt(prompt)"
-          >
-            {{ prompt }}
-          </button>
-        </div>
-
         <div v-if="pendingConfirmation.planId" class="confirmation-panel">
           <div>
             <strong>需要确认后继续执行</strong>
@@ -183,19 +171,6 @@ const pendingConfirmation = ref<{
   toolNames: [],
   message: ""
 });
-
-/**
- * 快捷提示词。
- * 说明:
- * 1. 当前 ID 已经改成自增 ID，所以可以用 resumeId=1、jobId=1 方便测试。
- * 2. 后续可以再改成“默认简历”或“简历名称”。
- */
-const quickPrompts = [
-  "帮我分析 resumeId=1 的简历，求职方向是 Java 后端开发",
-  "帮我分析 resumeId=1 和 jobId=1 的岗位匹配度",
-  "帮我根据 resumeId=1 和 jobId=1 生成一段自然风格的 HR 打招呼语",
-  "帮我找上海 Java 后端岗位，最低薪资 15000"
-];
 
 onMounted(async () => {
   await loadConversations();
@@ -309,15 +284,6 @@ function convertHistoryMessages(historyMessages: AgentMessageInfo[]) {
       role: item.role as "USER" | "ASSISTANT",
       content: item.content
     }));
-}
-
-/**
- * 填充快捷提示词。
- *
- * @param prompt 快捷提示词
- */
-function fillPrompt(prompt: string) {
-  inputMessage.value = prompt;
 }
 
 /**
