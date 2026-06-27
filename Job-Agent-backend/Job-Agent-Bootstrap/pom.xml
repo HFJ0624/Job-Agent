@@ -145,6 +145,12 @@
             <groupId>com.job</groupId>
             <artifactId>Job-Agent-Infra-Ai</artifactId>
         </dependency>
+
+        <!-- 外部连接器工具模块：招聘平台、邮箱、日历、通知、简历导出、岗位来源同步等 Agent 工具 -->
+        <dependency>
+            <groupId>com.job</groupId>
+            <artifactId>Job-Agent-Mcp-Tools</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

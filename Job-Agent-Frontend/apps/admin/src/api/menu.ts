@@ -145,6 +145,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/WorkflowTaskManage"
   },
   {
+    id: 15,
+    path: "/agent/connectors",
+    name: "ExternalConnectors",
+    title: "外部连接器",
+    icon: "Link",
+    component: "agent/ExternalConnectorManage"
+  },
+  {
     id: 13,
     path: "/interview/mock",
     name: "MockInterviewManage",

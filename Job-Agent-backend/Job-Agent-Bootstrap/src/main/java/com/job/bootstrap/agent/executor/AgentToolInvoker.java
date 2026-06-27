@@ -10,6 +10,7 @@ import com.job.bootstrap.agent.tools.RagSearchTool;
 import com.job.bootstrap.agent.tools.ResumeAnalyzeTool;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.service.AdminExternalConnectorService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolErrorCode;
 import com.job.exception.AgentToolException;
@@ -37,6 +38,7 @@ public class AgentToolInvoker {
     private final RagSearchTool ragSearchTool;
     private final AgentToolSchemaRegistry agentToolSchemaRegistry;
     private final AgentGuardrailService agentGuardrailService;
+    private final AdminExternalConnectorService adminExternalConnectorService;
 
     /**
      * 执行指定工具。
@@ -99,6 +101,13 @@ public class AgentToolInvoker {
                         firstString(params, "query", "message", "keyword", originalMessage),
                         getInteger(params, "limit")
                 );
+                case "RecruitmentPlatformConnectorTool.searchExternalJobs",
+                     "EmailConnectorTool.readEmails",
+                     "EmailConnectorTool.sendEmail",
+                     "CalendarConnectorTool.createInterviewEvent",
+                     "NotificationConnectorTool.sendNotification",
+                     "ResumeExportConnectorTool.exportResume",
+                     "JobSourceSyncConnectorTool.syncJobs" -> adminExternalConnectorService.preview(toolName, params);
                 default -> throw new AgentToolException(
                         AgentToolErrorCode.TOOL_NOT_REGISTERED,
                         toolName,

@@ -3,6 +3,9 @@ package com.job.bootstrap.agent.config;
 import com.job.agent.JobAgentAssistant;
 import com.job.agent.JobAgentSummaryAssistant;
 import com.job.bootstrap.agent.tools.*;
+import com.job.mcp.connector.tool.EmailConnectorTool;
+import com.job.mcp.connector.tool.RecruitmentPlatformConnectorTool;
+import com.job.mcp.connector.tool.ResumeExportConnectorTool;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
@@ -34,6 +37,9 @@ public class JobAgentConfig {
     private final InterviewPrepareTool interviewPrepareTool;
     private final MockInterviewReviewTool mockInterviewReviewTool;
     private final RagSearchTool ragSearchTool;
+    private final RecruitmentPlatformConnectorTool recruitmentPlatformConnectorTool;
+    private final EmailConnectorTool emailConnectorTool;
+    private final ResumeExportConnectorTool resumeExportConnectorTool;
 
     /**
      * 构建 JobAgentAssistant。
@@ -71,7 +77,14 @@ public class JobAgentConfig {
                         resumeAnalyzeTool,
                         jobRecommendTool,
                         mockInterviewReviewTool,
-                        ragSearchTool
+                        ragSearchTool,
+                        /*
+                         * 外部连接器第一阶段只给模型暴露低风险/预览型工具。
+                         * 真正会触达外部系统的发送、同步、建日历等操作，优先通过 Planner/Executor 和确认链路执行。
+                         */
+                        recruitmentPlatformConnectorTool,
+                        emailConnectorTool,
+                        resumeExportConnectorTool
                 )
                 .build();
     }

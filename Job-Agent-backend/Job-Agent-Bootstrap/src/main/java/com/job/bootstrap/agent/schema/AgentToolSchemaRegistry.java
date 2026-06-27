@@ -48,6 +48,13 @@ public class AgentToolSchemaRegistry {
         register(schemas, interviewPrepareSchema());
         register(schemas, mockInterviewReviewSchema());
         register(schemas, ragSearchSchema());
+        register(schemas, recruitmentPlatformSearchSchema());
+        register(schemas, emailReadSchema());
+        register(schemas, emailSendSchema());
+        register(schemas, calendarCreateSchema());
+        register(schemas, notificationSendSchema());
+        register(schemas, resumeExportSchema());
+        register(schemas, jobSourceSyncSchema());
         this.schemaMap = Collections.unmodifiableMap(schemas);
         this.aliasMap = Collections.unmodifiableMap(buildAliasMap(schemas));
     }
@@ -351,6 +358,173 @@ public class AgentToolSchemaRegistry {
                 List.of(
                         output("total", AgentToolValueType.INTEGER, "召回条数", false, "3"),
                         output("results", AgentToolValueType.ARRAY, "召回知识片段", false, "[{\"documentType\":\"RESUME\",\"content\":\"...\"}]")
+                )
+        );
+    }
+
+    private AgentToolSchema recruitmentPlatformSearchSchema() {
+        return externalConnectorTool(
+                "RecruitmentPlatformConnectorTool.searchExternalJobs",
+                "外部招聘平台岗位搜索",
+                "从 Boss、猎聘、拉勾等外部招聘平台搜索岗位。第二版只返回预览结果，不真实请求平台。",
+                "RecruitmentPlatformConnectorTool",
+                "searchExternalJobs",
+                AgentToolSideEffectType.READ_ONLY,
+                AgentToolConfirmationType.NONE,
+                null,
+                List.of(
+                        param("providerCode", AgentToolValueType.STRING, true, "招聘平台编码，例如 boss、liepin、lagou", "USER_INPUT", "boss", null),
+                        param("keyword", AgentToolValueType.STRING, false, "岗位关键词", "USER_INPUT", "Java", null),
+                        param("city", AgentToolValueType.STRING, false, "城市", "USER_INPUT", "上海", null),
+                        param("limit", AgentToolValueType.INTEGER, false, "返回数量上限", "USER_INPUT", "10", "10")
+                )
+        );
+    }
+
+    private AgentToolSchema emailReadSchema() {
+        return externalConnectorTool(
+                "EmailConnectorTool.readEmails",
+                "邮箱读取",
+                "读取邮箱中的求职相关邮件。第二版只返回预览结果，不真实连接邮箱。",
+                "EmailConnectorTool",
+                "readEmails",
+                AgentToolSideEffectType.READ_ONLY,
+                AgentToolConfirmationType.NONE,
+                null,
+                List.of(
+                        param("providerCode", AgentToolValueType.STRING, true, "邮箱渠道编码，例如 qq-mail、gmail、outlook", "USER_INPUT", "qq-mail", null),
+                        param("keyword", AgentToolValueType.STRING, false, "搜索关键词", "USER_INPUT", "面试", null),
+                        param("limit", AgentToolValueType.INTEGER, false, "读取数量上限", "USER_INPUT", "5", "10")
+                )
+        );
+    }
+
+    private AgentToolSchema emailSendSchema() {
+        return externalConnectorTool(
+                "EmailConnectorTool.sendEmail",
+                "邮箱发送",
+                "发送求职沟通邮件。该操作会触达外部收件人，必须用户确认；第二版只返回预览结果。",
+                "EmailConnectorTool",
+                "sendEmail",
+                AgentToolSideEffectType.EXTERNAL_ACTION,
+                AgentToolConfirmationType.REQUIRED_BEFORE_EXECUTION,
+                "发送邮件会触达外部收件人，请确认收件人、标题和正文无误后再执行。",
+                List.of(
+                        param("providerCode", AgentToolValueType.STRING, true, "邮箱渠道编码", "USER_INPUT", "qq-mail", null),
+                        param("to", AgentToolValueType.STRING, true, "收件人邮箱", "USER_INPUT", "hr@example.com", null),
+                        param("subject", AgentToolValueType.STRING, true, "邮件标题", "USER_INPUT", "确认面试时间", null),
+                        param("content", AgentToolValueType.STRING, true, "邮件正文", "USER_INPUT", "您好，我可以参加面试。", null)
+                )
+        );
+    }
+
+    private AgentToolSchema calendarCreateSchema() {
+        return externalConnectorTool(
+                "CalendarConnectorTool.createInterviewEvent",
+                "创建面试日历",
+                "创建外部日历事件。该操作会写入外部日历，必须用户确认；第二版只返回预览结果。",
+                "CalendarConnectorTool",
+                "createInterviewEvent",
+                AgentToolSideEffectType.EXTERNAL_ACTION,
+                AgentToolConfirmationType.REQUIRED_BEFORE_EXECUTION,
+                "创建日历事件会写入外部日历，请确认标题、时间和地点无误后再执行。",
+                List.of(
+                        param("providerCode", AgentToolValueType.STRING, true, "日历渠道编码", "USER_INPUT", "google-calendar", null),
+                        param("title", AgentToolValueType.STRING, true, "事件标题", "USER_INPUT", "后端一面", null),
+                        param("startTime", AgentToolValueType.STRING, true, "开始时间", "USER_INPUT", "2026-07-01 10:00", null),
+                        param("location", AgentToolValueType.STRING, false, "地点或会议链接", "USER_INPUT", "线上会议", null)
+                )
+        );
+    }
+
+    private AgentToolSchema notificationSendSchema() {
+        return externalConnectorTool(
+                "NotificationConnectorTool.sendNotification",
+                "发送通知",
+                "通过站内信、邮件、短信、企业微信或钉钉发送通知。该操作会触达用户，必须用户确认。",
+                "NotificationConnectorTool",
+                "sendNotification",
+                AgentToolSideEffectType.EXTERNAL_ACTION,
+                AgentToolConfirmationType.REQUIRED_BEFORE_EXECUTION,
+                "发送通知会触达用户或外部渠道，请确认接收人和内容无误后再执行。",
+                List.of(
+                        param("channel", AgentToolValueType.STRING, true, "通知渠道", "USER_INPUT", "email", null),
+                        param("receiver", AgentToolValueType.STRING, true, "接收人标识", "USER_INPUT", "user-1", null),
+                        param("title", AgentToolValueType.STRING, true, "通知标题", "USER_INPUT", "面试提醒", null),
+                        param("content", AgentToolValueType.STRING, true, "通知内容", "USER_INPUT", "明天 10 点面试", null)
+                )
+        );
+    }
+
+    private AgentToolSchema resumeExportSchema() {
+        return externalConnectorTool(
+                "ResumeExportConnectorTool.exportResume",
+                "简历导出",
+                "把用户简历导出为 PDF、Word 或 Markdown。第二版只返回预览结果，不生成真实文件。",
+                "ResumeExportConnectorTool",
+                "exportResume",
+                AgentToolSideEffectType.WRITE_BUSINESS_RECORD,
+                AgentToolConfirmationType.NONE,
+                null,
+                List.of(
+                        param("resumeId", AgentToolValueType.LONG, true, "简历ID", "USER_INPUT_OR_FRONTEND_CONTEXT", "1001", null),
+                        param("format", AgentToolValueType.STRING, true, "导出格式，例如 PDF、DOCX、MARKDOWN", "USER_INPUT", "PDF", null)
+                )
+        );
+    }
+
+    private AgentToolSchema jobSourceSyncSchema() {
+        return externalConnectorTool(
+                "JobSourceSyncConnectorTool.syncJobs",
+                "岗位来源同步",
+                "从外部招聘平台同步岗位到本地岗位库。该操作会写入本地数据，必须用户确认；第二版只返回预览结果。",
+                "JobSourceSyncConnectorTool",
+                "syncJobs",
+                AgentToolSideEffectType.EXTERNAL_ACTION,
+                AgentToolConfirmationType.REQUIRED_BEFORE_EXECUTION,
+                "岗位同步会写入本地岗位库并可能触发索引，请确认来源和条件后再执行。",
+                List.of(
+                        param("providerCode", AgentToolValueType.STRING, true, "岗位来源编码", "USER_INPUT", "boss", null),
+                        param("keyword", AgentToolValueType.STRING, false, "同步关键词", "USER_INPUT", "Java", null),
+                        param("city", AgentToolValueType.STRING, false, "同步城市", "USER_INPUT", "上海", null),
+                        param("limit", AgentToolValueType.INTEGER, false, "同步数量上限", "USER_INPUT", "20", "20")
+                )
+        );
+    }
+
+    private AgentToolSchema externalConnectorTool(
+            String toolName,
+            String displayName,
+            String description,
+            String javaClassName,
+            String javaMethodName,
+            AgentToolSideEffectType sideEffectType,
+            AgentToolConfirmationType confirmationType,
+            String confirmationMessage,
+            List<AgentToolParamSchema> inputParams
+    ) {
+        return tool(
+                toolName,
+                displayName,
+                "external_connector",
+                description,
+                javaClassName,
+                javaMethodName,
+                sideEffectType,
+                confirmationType,
+                confirmationMessage,
+                inputParams,
+                List.of(
+                        output("toolName", AgentToolValueType.STRING, "工具唯一名称", false, toolName),
+                        output("connectorType", AgentToolValueType.STRING, "连接器类型", false, "email"),
+                        output("providerCode", AgentToolValueType.STRING, "平台或渠道编码", false, "boss"),
+                        output("status", AgentToolValueType.STRING, "执行状态，第二版固定为 PREVIEW", false, "PREVIEW"),
+                        output("sideEffectType", AgentToolValueType.STRING, "连接器副作用类型", false, "READ"),
+                        output("requiresUserConfirmation", AgentToolValueType.BOOLEAN, "是否需要用户确认", false, "true"),
+                        output("requiresRealAdapter", AgentToolValueType.BOOLEAN, "是否还需要真实第三方适配器", false, "true"),
+                        output("message", AgentToolValueType.STRING, "执行说明", false, "已生成预览"),
+                        output("request", AgentToolValueType.OBJECT, "结构化请求参数", false, "{\"providerCode\":\"boss\"}"),
+                        output("data", AgentToolValueType.OBJECT, "预览数据", false, "{}")
                 )
         );
     }

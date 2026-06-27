@@ -222,6 +222,63 @@ export interface AgentTraceLogInfo {
 }
 
 /**
+ * Agent 工具参数 Schema。
+ */
+export interface AgentToolParamSchemaInfo {
+  name: string;
+  type: string;
+  required?: boolean;
+  description?: string;
+  source?: string;
+  example?: string;
+  defaultValue?: string;
+  sensitive?: boolean;
+}
+
+/**
+ * Agent 工具出参 Schema。
+ */
+export interface AgentToolOutputSchemaInfo {
+  name: string;
+  type: string;
+  description?: string;
+  nullable?: boolean;
+  example?: string;
+}
+
+/**
+ * Agent 工具错误码 Schema。
+ */
+export interface AgentToolErrorSchemaInfo {
+  code: string;
+  message?: string;
+  userMessage?: string;
+  retryable?: boolean;
+}
+
+/**
+ * Agent 工具统一 Schema，用于后台展示外部连接器能力。
+ */
+export interface AgentToolSchemaInfo {
+  toolName: string;
+  displayName: string;
+  category: string;
+  version?: string;
+  description?: string;
+  javaClassName?: string;
+  javaMethodName?: string;
+  permissionType?: string;
+  sideEffectType?: string;
+  hasSideEffect?: boolean;
+  confirmationType?: string;
+  requiresUserConfirmation?: boolean;
+  confirmationMessage?: string;
+  inputParams?: AgentToolParamSchemaInfo[];
+  outputFields?: AgentToolOutputSchemaInfo[];
+  errorCodes?: AgentToolErrorSchemaInfo[];
+}
+
+/**
  * Agent Eval 数据集。
  */
 export interface AgentEvalDatasetInfo {
