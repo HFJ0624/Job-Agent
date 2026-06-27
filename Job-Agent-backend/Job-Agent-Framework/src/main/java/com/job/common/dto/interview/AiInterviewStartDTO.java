@@ -29,4 +29,14 @@ public class AiInterviewStartDTO {
      * 题目数量，默认 6 道，后端会限制范围。
      */
     private Integer questionCount = 6;
+
+    /**
+     * 最近抽题去重窗口，单位小时。
+     *
+     * 说明:
+     * 1. 不传时后端默认使用 72 小时。
+     * 2. 传 0 表示关闭最近题过滤，适合用户想重复练同一批题的场景。
+     * 3. 后端会限制最大值，避免用户传超大窗口导致历史查询范围过大。
+     */
+    private Integer excludeRecentHours;
 }

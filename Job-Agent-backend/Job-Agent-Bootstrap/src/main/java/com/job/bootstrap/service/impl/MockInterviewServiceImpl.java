@@ -2,7 +2,6 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.mapper.InterviewQuestionBankMapper;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewAnswerMapper;
 import com.job.bootstrap.mapper.MockInterviewMediaRecordMapper;
@@ -11,6 +10,7 @@ import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.service.FileStorageService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.InterviewPrepareService;
+import com.job.bootstrap.service.InterviewQuestionSelectorService;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.bootstrap.service.MockInterviewService;
@@ -44,7 +44,6 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -79,16 +78,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private static final String ASR_PENDING = "PENDING";
     private static final String ASR_SUCCESS = "SUCCESS";
     private static final String ASR_FAILED = "FAILED";
-    private static final String QUESTION_BANK_ACTIVE = "ACTIVE";
     private static final String AI_SCENE_MOCK_INTERVIEW_ANSWER_EVALUATE = "MOCK_INTERVIEW_ANSWER_EVALUATE";
 
     private final MockInterviewSessionMapper sessionMapper;
     private final MockInterviewQuestionMapper questionMapper;
     private final MockInterviewAnswerMapper answerMapper;
     private final MockInterviewMediaRecordMapper mediaRecordMapper;
-    private final InterviewQuestionBankMapper questionBankMapper;
     private final JobApplicationRecordMapper applicationMapper;
     private final InterviewPrepareService interviewPrepareService;
+    private final InterviewQuestionSelectorService interviewQuestionSelectorService;
     private final JobResumeService jobResumeService;
     private final JobPositionService jobPositionService;
     private final FileStorageService fileStorageService;
@@ -142,7 +140,19 @@ public class MockInterviewServiceImpl implements MockInterviewService {
 
         // 3. 根据岗位 JD、技能关键词和简历文本生成第一版问题，不依赖用户先创建求职记录。
         int questionCount = normalizeQuestionCount(dto.getQuestionCount());
-        List<QuestionSeed> seeds = buildQuestionBankSeeds(job, resume, questionCount);
+        List<QuestionSeed> seeds = buildQuestionSeedsFromBank(
+                interviewQuestionSelectorService.selectQuestions(
+                        userId,
+                        job,
+                        resume,
+                        questionCount,
+                        dto.getExcludeRecentHours()
+                )
+        );
+        if (seeds.size() < questionCount) {
+            seeds.addAll(buildAiQuestionSeeds(job, resume, questionCount));
+        }
+        seeds = limitDistinctSeeds(seeds, questionCount);
 
         MockInterviewSession session = new MockInterviewSession();
         session.setUserId(userId);
@@ -355,32 +365,13 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return limitDistinctSeeds(seeds, questionCount);
     }
 
-    private List<QuestionSeed> buildQuestionBankSeeds(JobPosition job, JobResume resume, int questionCount) {
-        /*
-         * 1. 从岗位和简历中提取少量关键词，用于匹配题库分类、标签、题目和标准答案。
-         * 2. 第一版不做复杂向量召回，原因是题库主表已经保存了结构化字段，直接打分更稳定也更容易排查。
-         * 3. 如果题库命中不足，再用旧的规则题补齐，保证没有题库数据时用户仍然可以开始面试。
-         */
-        List<String> keywords = buildQuestionKeywords(job, resume);
-        List<InterviewQuestionBank> bankQuestions = questionBankMapper.selectList(new LambdaQueryWrapper<InterviewQuestionBank>()
-                .eq(InterviewQuestionBank::getStatus, QUESTION_BANK_ACTIVE)
-                .eq(InterviewQuestionBank::getIsDeleted, NOT_DELETED));
-
-        List<QuestionSeed> seeds = bankQuestions.stream()
-                .map(question -> new QuestionBankCandidate(question, scoreQuestion(question, keywords)))
-                .filter(candidate -> candidate.score() > 0)
-                .sorted(Comparator
-                        .comparingInt(QuestionBankCandidate::score)
-                        .reversed()
-                        .thenComparing(candidate -> candidate.question().getId(), Comparator.nullsLast(Long::compareTo)))
-                .map(candidate -> toQuestionSeed(candidate.question()))
-                .toList();
-
-        List<QuestionSeed> mergedSeeds = new ArrayList<>(seeds);
-        if (mergedSeeds.size() < questionCount) {
-            mergedSeeds.addAll(buildAiQuestionSeeds(job, resume, questionCount));
+    private List<QuestionSeed> buildQuestionSeedsFromBank(List<InterviewQuestionBank> questions) {
+        if (questions == null || questions.isEmpty()) {
+            return new ArrayList<>();
         }
-        return limitDistinctSeeds(mergedSeeds, questionCount);
+        return questions.stream()
+                .map(this::toQuestionSeed)
+                .toList();
     }
 
     private QuestionSeed toQuestionSeed(InterviewQuestionBank question) {
@@ -391,66 +382,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 question.getStandardAnswer(),
                 question.getRagChunkId()
         );
-    }
-
-    private List<String> buildQuestionKeywords(JobPosition job, JobResume resume) {
-        Set<String> keywords = new LinkedHashSet<>();
-        addKeyword(keywords, job.getJobTitle());
-        addKeyword(keywords, job.getJobCategory());
-        addKeyword(keywords, job.getSkillKeywords());
-        addKeyword(keywords, job.getJobDescription());
-        addKeyword(keywords, job.getJobRequirement());
-        addKeyword(keywords, resume.getRawText());
-        return keywords.stream().limit(20).toList();
-    }
-
-    private void addKeyword(Set<String> keywords, String text) {
-        if (!StringUtils.hasText(text)) {
-            return;
-        }
-        for (String item : text.split("[,，、\\s/|;；:：()（）\\[\\]【】]+")) {
-            String keyword = item.trim();
-            if (keyword.length() >= 2 && keyword.length() <= 30) {
-                keywords.add(keyword);
-            }
-            if (keywords.size() >= 20) {
-                return;
-            }
-        }
-    }
-
-    private int scoreQuestion(InterviewQuestionBank question, List<String> keywords) {
-        String title = safe(question.getQuestionTitle());
-        String category = safe(question.getCategory());
-        String tags = safe(question.getTags());
-        String answer = safe(question.getStandardAnswer());
-
-        int score = 0;
-        for (String keyword : keywords) {
-            if (!StringUtils.hasText(keyword)) {
-                continue;
-            }
-            if (containsIgnoreCase(title, keyword)) {
-                score += 8;
-            }
-            if (containsIgnoreCase(category, keyword)) {
-                score += 6;
-            }
-            if (containsIgnoreCase(tags, keyword)) {
-                score += 6;
-            }
-            if (containsIgnoreCase(answer, keyword)) {
-                score += 2;
-            }
-        }
-        return score;
-    }
-
-    private boolean containsIgnoreCase(String text, String keyword) {
-        if (!StringUtils.hasText(text) || !StringUtils.hasText(keyword)) {
-            return false;
-        }
-        return text.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
     }
 
     private List<QuestionSeed> buildAiQuestionSeeds(JobPosition job, JobResume resume, int questionCount) {
@@ -798,9 +729,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             String standardAnswer,
             Long ragChunkId
     ) {
-    }
-
-    private record QuestionBankCandidate(InterviewQuestionBank question, int score) {
     }
 
     private record AnswerEvaluateModelResult(

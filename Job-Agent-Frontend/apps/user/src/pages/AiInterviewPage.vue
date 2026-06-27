@@ -47,6 +47,13 @@
             <el-input-number v-model="form.questionCount" :min="3" :max="12" />
           </el-form-item>
 
+          <el-form-item label="最近抽题去重窗口">
+            <div class="dedupe-setting">
+              <el-input-number v-model="form.excludeRecentHours" :min="0" :max="720" :step="24" />
+              <span class="muted">小时，填 0 表示允许重复抽题</span>
+            </div>
+          </el-form-item>
+
           <el-button class="start-button" type="primary" size="large" :loading="starting" @click="startInterview">
             开始面试
           </el-button>
@@ -168,7 +175,7 @@ const starting = ref(false);
 const submitting = ref(false);
 const loadingDetail = ref(false);
 
-const form = reactive({ resumeId: "", jobId: "", questionCount: 6 });
+const form = reactive({ resumeId: "", jobId: "", questionCount: 6, excludeRecentHours: 72 });
 
 const answersWithQuestion = computed(() => {
   const questionMap = new Map<number, MockInterviewQuestionInfo>();
@@ -390,6 +397,13 @@ onUnmounted(closeCamera);
 
 .job-search-row {
   width: 100%;
+}
+
+.dedupe-setting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .start-button {

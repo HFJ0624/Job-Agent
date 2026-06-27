@@ -23,6 +23,7 @@ export function startAiInterview(data: {
     resumeId: number | string;
     jobId: number | string;
     questionCount?: number;
+    excludeRecentHours?: number;
 }) {
     return request<MockInterviewSessionInfo>("/front/mock-interviews/ai/start", {
         method: "POST",
