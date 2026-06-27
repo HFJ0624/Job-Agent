@@ -2,6 +2,7 @@ package com.job.bootstrap.workflow.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.rag.service.RagIndexService;
+import com.job.bootstrap.service.WorkflowTaskProgressService;
 import com.job.bootstrap.workflow.WorkflowTaskHandler;
 import com.job.common.entity.workflow.WorkflowTask;
 import com.job.enums.WorkflowTaskType;
@@ -17,6 +18,7 @@ public class RagRebuildAllWorkflowTaskHandler implements WorkflowTaskHandler {
 
     private final RagIndexService ragIndexService;
     private final ObjectMapper objectMapper;
+    private final WorkflowTaskProgressService workflowTaskProgressService;
 
     @Override
     public String taskType() {
@@ -29,6 +31,7 @@ public class RagRebuildAllWorkflowTaskHandler implements WorkflowTaskHandler {
     @Override
     public String handle(WorkflowTask task) {
         try {
+            workflowTaskProgressService.recordProgress(task.getId(), "RAG 全量重建", 20, "开始重建全部用户知识库", "INFO", null);
             return objectMapper.writeValueAsString(ragIndexService.rebuildAllUserKnowledge());
         } catch (Exception exception) {
             throw new IllegalStateException("RAG 全量重建失败：" + exception.getMessage(), exception);

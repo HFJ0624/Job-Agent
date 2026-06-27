@@ -2,11 +2,13 @@ package com.job.bootstrap.controller.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.bootstrap.service.WorkflowTaskService;
+import com.job.bootstrap.service.WorkflowTaskProgressService;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.dto.workflow.WorkflowTaskQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.workflow.WorkflowTaskVO;
+import com.job.common.vo.workflow.WorkflowTaskLogVO;
 import com.job.enums.WorkflowTaskType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,6 +17,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 后台工作流任务队列接口。
@@ -25,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminWorkflowTaskController {
 
     private final WorkflowTaskService workflowTaskService;
+    private final WorkflowTaskProgressService workflowTaskProgressService;
 
     /**
      * 创建通用工作流任务。
@@ -81,6 +86,14 @@ public class AdminWorkflowTaskController {
     @GetMapping("/{id}")
     public Result<WorkflowTaskVO> detail(@PathVariable Long id) {
         return Result.build(workflowTaskService.getDetail(id), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 查询任务阶段日志。
+     */
+    @GetMapping("/{id}/logs")
+    public Result<List<WorkflowTaskLogVO>> logs(@PathVariable Long id) {
+        return Result.build(workflowTaskProgressService.listLogs(id), ResultCodeEnum.SUCCESS);
     }
 
     /**

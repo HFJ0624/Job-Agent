@@ -29,6 +29,10 @@ public class WorkflowTaskVO {
 
     private String status;
 
+    private Integer progressPercent;
+
+    private String currentStep;
+
     private Integer retryCount;
 
     private Integer maxRetryCount;
@@ -66,6 +70,8 @@ public class WorkflowTaskVO {
                 .requestJson(task.getRequestJson())
                 .resultJson(task.getResultJson())
                 .status(task.getStatus())
+                .progressPercent(task.getProgressPercent())
+                .currentStep(task.getCurrentStep())
                 .retryCount(task.getRetryCount())
                 .maxRetryCount(task.getMaxRetryCount())
                 .retryIntervalSeconds(task.getRetryIntervalSeconds())

@@ -137,6 +137,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/EvalPlatform"
   },
   {
+    id: 14,
+    path: "/agent/workflow-tasks",
+    name: "WorkflowTasks",
+    title: "工作流任务",
+    icon: "Operation",
+    component: "agent/WorkflowTaskManage"
+  },
+  {
     id: 13,
     path: "/interview/mock",
     name: "MockInterviewManage",

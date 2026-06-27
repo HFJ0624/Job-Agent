@@ -30,6 +30,10 @@ public class WorkflowTask extends BaseEntity {
 
     private String status;
 
+    private Integer progressPercent;
+
+    private String currentStep;
+
     private Integer retryCount;
 
     private Integer maxRetryCount;

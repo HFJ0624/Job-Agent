@@ -63,6 +63,8 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         task.setUserId(request.getUserId());
         task.setRequestJson(request.getRequestJson());
         task.setStatus(WorkflowTaskStatus.PENDING.name());
+        task.setProgressPercent(0);
+        task.setCurrentStep("等待执行");
         task.setRetryCount(0);
         task.setMaxRetryCount(safePositive(request.getMaxRetryCount(), DEFAULT_MAX_RETRY_COUNT));
         task.setRetryIntervalSeconds(safePositive(request.getRetryIntervalSeconds(), DEFAULT_RETRY_INTERVAL_SECONDS));
@@ -140,6 +142,8 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         Date now = new Date();
         WorkflowTask task = loadTask(taskId);
         task.setStatus(WorkflowTaskStatus.SUCCESS.name());
+        task.setProgressPercent(100);
+        task.setCurrentStep("执行完成");
         task.setResultJson(resultJson);
         task.setErrorMsg(null);
         task.setFinishTime(now);
@@ -163,6 +167,7 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
 
         task.setRetryCount(retryCount);
         task.setStatus(nextStatus.name());
+        task.setCurrentStep(WorkflowTaskStatus.FAILED_RETRYABLE.equals(nextStatus) ? "等待重试" : "最终失败");
         task.setErrorMsg(shortError(exception));
         task.setFinishTime(now);
         task.setLockedBy(null);
@@ -198,6 +203,7 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
             );
             task.setRetryCount(retryCount);
             task.setStatus(nextStatus.name());
+            task.setCurrentStep(WorkflowTaskStatus.FAILED_RETRYABLE.equals(nextStatus) ? "超时恢复，等待重试" : "超时恢复，最终失败");
             task.setErrorMsg("任务执行超时，已由调度器恢复");
             task.setLockedBy(null);
             task.setLockTime(null);
@@ -219,6 +225,8 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         }
         Date now = new Date();
         task.setStatus(WorkflowTaskStatus.PENDING.name());
+        task.setProgressPercent(0);
+        task.setCurrentStep("手动重试，等待执行");
         task.setNextRunTime(now);
         task.setLockedBy(null);
         task.setLockTime(null);
@@ -236,6 +244,7 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         }
         Date now = new Date();
         task.setStatus(WorkflowTaskStatus.CANCELLED.name());
+        task.setCurrentStep("已取消");
         task.setLockedBy(null);
         task.setLockTime(null);
         task.setUpdateTime(now);
@@ -246,6 +255,7 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
     private boolean tryLockTask(WorkflowTask task, String workerId, Date now) {
         int updated = workflowTaskMapper.update(null, new LambdaUpdateWrapper<WorkflowTask>()
                 .set(WorkflowTask::getStatus, WorkflowTaskStatus.RUNNING.name())
+                .set(WorkflowTask::getCurrentStep, "任务启动")
                 .set(WorkflowTask::getLockedBy, workerId)
                 .set(WorkflowTask::getLockTime, now)
                 .set(WorkflowTask::getStartTime, now)

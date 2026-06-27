@@ -370,6 +370,65 @@ export interface AgentEvalResultQuery {
 }
 
 /**
+ * 工作流任务查询参数。
+ */
+export interface WorkflowTaskQuery {
+  pageNum: number;
+  pageSize: number;
+  taskNo?: string;
+  taskType?: string;
+  status?: string;
+  bizId?: string | number;
+  userId?: string | number;
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * 工作流任务展示数据。
+ */
+export interface WorkflowTaskInfo {
+  id: number;
+  taskNo: string;
+  taskType: string;
+  bizId?: number;
+  userId?: number;
+  requestJson?: string;
+  resultJson?: string;
+  status: string;
+  progressPercent?: number;
+  currentStep?: string;
+  retryCount?: number;
+  maxRetryCount?: number;
+  retryIntervalSeconds?: number;
+  nextRunTime?: string;
+  lockedBy?: string;
+  lockTime?: string;
+  startTime?: string;
+  finishTime?: string;
+  costTime?: number;
+  errorMsg?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * 工作流任务阶段日志。
+ */
+export interface WorkflowTaskLogInfo {
+  id: number;
+  taskId: number;
+  taskNo: string;
+  taskType: string;
+  stepName?: string;
+  progressPercent?: number;
+  logMessage?: string;
+  logLevel?: string;
+  errorMsg?: string;
+  createTime?: string;
+}
+
+/**
  * Agent 观测看板查询参数。
  */
 export interface AgentObservationDashboardQuery {

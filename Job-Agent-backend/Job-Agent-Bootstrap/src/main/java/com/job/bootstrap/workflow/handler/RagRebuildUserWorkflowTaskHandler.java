@@ -2,6 +2,7 @@ package com.job.bootstrap.workflow.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.rag.service.RagIndexService;
+import com.job.bootstrap.service.WorkflowTaskProgressService;
 import com.job.bootstrap.workflow.WorkflowTaskHandler;
 import com.job.common.entity.workflow.WorkflowTask;
 import com.job.enums.WorkflowTaskType;
@@ -17,6 +18,7 @@ public class RagRebuildUserWorkflowTaskHandler implements WorkflowTaskHandler {
 
     private final RagIndexService ragIndexService;
     private final ObjectMapper objectMapper;
+    private final WorkflowTaskProgressService workflowTaskProgressService;
 
     @Override
     public String taskType() {
@@ -32,6 +34,7 @@ public class RagRebuildUserWorkflowTaskHandler implements WorkflowTaskHandler {
             throw new IllegalArgumentException("RAG 用户重建任务缺少 userId");
         }
         try {
+            workflowTaskProgressService.recordProgress(task.getId(), "RAG 用户重建", 20, "开始重建用户 " + task.getUserId() + " 的知识库", "INFO", null);
             return objectMapper.writeValueAsString(ragIndexService.rebuildUserKnowledge(task.getUserId()));
         } catch (Exception exception) {
             throw new IllegalStateException("RAG 用户重建失败：" + exception.getMessage(), exception);
