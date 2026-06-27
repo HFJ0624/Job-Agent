@@ -365,6 +365,7 @@ public class RagIndexServiceImpl implements RagIndexService {
                 yield toCommunicationDocument(record, position, company);
             }
             case COMMUNICATION_MESSAGE -> toCommunicationMessageDocument(loadUserCommunicationMessage(actualUserId, businessId));
+            case INTERVIEW_QUESTION -> throw new IllegalArgumentException("面试题库请使用 /admin/interview/question-bank/{id}/index 重建索引");
         };
     }
 
@@ -683,6 +684,9 @@ public class RagIndexServiceImpl implements RagIndexService {
             case COMPANY -> result.setCompanyCount(result.getCompanyCount() + 1);
             case COMMUNICATION -> result.setCommunicationCount(result.getCommunicationCount() + 1);
             case COMMUNICATION_MESSAGE -> result.setMessageCount(result.getMessageCount() + 1);
+            case INTERVIEW_QUESTION -> {
+                // 第一版 RagIndexResultVO 暂无题库计数字段，题库导入接口会返回独立统计。
+            }
         }
     }
 

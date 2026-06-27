@@ -1181,3 +1181,46 @@ export interface MockInterviewSessionInfo {
   mediaRecords?: MockInterviewMediaRecordInfo[];
   createTime?: string;
 }
+
+export interface InterviewQuestionBankQuery {
+  pageNum: number;
+  pageSize: number;
+  keyword?: string;
+  questionType?: string;
+  category?: string;
+  difficulty?: string;
+  status?: string;
+  sourceFile?: string;
+}
+
+export interface InterviewQuestionBankInfo {
+  id: number;
+  questionTitle: string;
+  standardAnswer: string;
+  questionType?: string;
+  category?: string;
+  difficulty?: string;
+  tags?: string;
+  sourceFile?: string;
+  sourceHash?: string;
+  ragDocumentId?: number;
+  ragChunkId?: number;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface InterviewQuestionImportPayload {
+  directoryPath?: string;
+  indexAfterImport?: boolean;
+}
+
+export interface InterviewQuestionImportResult {
+  scannedFileCount: number;
+  parsedQuestionCount: number;
+  insertedCount: number;
+  updatedCount: number;
+  indexedCount: number;
+  failedCount: number;
+  warnings: string[];
+}

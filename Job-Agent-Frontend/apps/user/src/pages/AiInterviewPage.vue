@@ -11,43 +11,89 @@
       </el-tag>
     </section>
 
-    <section class="table-card ai-start-panel" v-if="!session">
-      <el-form label-width="90px">
-        <el-form-item label="选择简历">
-          <el-select v-model="form.resumeId" placeholder="请选择简历">
-            <el-option v-for="item in resumes" :key="item.id" :label="item.resumeName" :value="item.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="搜索岗位">
-          <div class="job-search-row">
-            <el-input v-model.trim="jobKeyword" placeholder="输入岗位名、城市、技能关键词" @keyup.enter="loadJobs" />
-            <el-button :loading="loadingJobs" @click="loadJobs">搜索</el-button>
+    <section class="start-layout" v-if="!session">
+      <div class="table-card ai-start-panel">
+        <div class="card-title">
+          <h2>开始一场模拟面试</h2>
+          <p>选择一份简历和目标岗位，系统会按岗位要求生成面试流程。</p>
+        </div>
+
+        <el-form label-position="top" class="start-form">
+          <el-form-item label="选择简历">
+            <el-select v-model="form.resumeId" placeholder="请选择简历">
+              <el-option v-for="item in resumes" :key="item.id" :label="item.resumeName" :value="item.id" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="搜索岗位">
+            <div class="job-search-row">
+              <el-input v-model.trim="jobKeyword" placeholder="输入岗位名、城市、技能关键词" @keyup.enter="loadJobs" />
+              <el-button :loading="loadingJobs" @click="loadJobs">搜索</el-button>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="选择岗位">
+            <el-select v-model="form.jobId" filterable placeholder="请选择岗位">
+              <el-option
+                v-for="item in jobs"
+                :key="item.id"
+                :label="`${item.jobTitle} | ${item.companyName || '未知公司'} | ${item.city || '-'}`"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="题目数量">
+            <el-input-number v-model="form.questionCount" :min="3" :max="12" />
+          </el-form-item>
+
+          <el-button class="start-button" type="primary" size="large" :loading="starting" @click="startInterview">
+            开始面试
+          </el-button>
+        </el-form>
+      </div>
+
+      <aside class="interview-guide">
+        <div class="guide-card primary-guide">
+          <p class="eyebrow">Before Start</p>
+          <h2>开始前检查</h2>
+          <ul>
+            <li>确认浏览器允许摄像头和麦克风权限。</li>
+            <li>建议在安静环境中回答，语音识别会更稳定。</li>
+            <li>每道题录音提交后，会生成 ASR 文本和得分建议。</li>
+          </ul>
+        </div>
+
+        <div class="guide-grid">
+          <div class="guide-card">
+            <strong>1</strong>
+            <span>选择简历</span>
+            <p>用你的简历内容作为面试背景。</p>
           </div>
-        </el-form-item>
-        <el-form-item label="选择岗位">
-          <el-select v-model="form.jobId" filterable placeholder="请选择岗位">
-            <el-option
-              v-for="item in jobs"
-              :key="item.id"
-              :label="`${item.jobTitle} | ${item.companyName || '未知公司'} | ${item.city || '-'}`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="题目数量">
-          <el-input-number v-model="form.questionCount" :min="3" :max="12" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="starting" @click="startInterview">开始面试</el-button>
-        </el-form-item>
-      </el-form>
+          <div class="guide-card">
+            <strong>2</strong>
+            <span>匹配岗位</span>
+            <p>题目会围绕岗位技能和职责展开。</p>
+          </div>
+          <div class="guide-card">
+            <strong>3</strong>
+            <span>语音回答</span>
+            <p>系统识别你的回答并保存记录。</p>
+          </div>
+          <div class="guide-card">
+            <strong>4</strong>
+            <span>查看建议</span>
+            <p>面试结束后查看分数和优化方向。</p>
+          </div>
+        </div>
+      </aside>
     </section>
 
     <section class="interview-layout" v-else>
       <div class="camera-panel">
         <video ref="videoRef" autoplay playsinline muted></video>
         <div class="camera-actions">
-          <el-button @click="openCamera">打开摄像头/麦克风</el-button>
+          <el-button @click="openCamera">打开摄像头和麦克风</el-button>
           <el-button @click="closeCamera">关闭设备</el-button>
         </div>
         <p class="muted">第一版只做摄像头预览，不保存整段视频；每道题只上传回答音频。</p>
@@ -75,7 +121,7 @@
       </div>
     </section>
 
-    <section class="table-card" v-if="session">
+    <section class="table-card answer-panel" v-if="session">
       <div class="section-title-row">
         <h2>回答记录</h2>
         <el-button :loading="loadingDetail" @click="reloadSession">刷新</el-button>
@@ -252,7 +298,9 @@ onUnmounted(closeCamera);
 
 <style scoped>
 .ai-interview-page {
-  padding-bottom: 32px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 20px 40px;
 }
 
 .ai-interview-header,
@@ -265,32 +313,147 @@ onUnmounted(closeCamera);
   gap: 12px;
 }
 
-.ai-interview-header,
-.section-title-row {
+.ai-interview-header {
+  align-items: flex-start;
   justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.ai-interview-header h1 {
+  margin: 6px 0 10px;
+  font-size: 30px;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.ai-interview-header p {
+  margin: 0;
+  max-width: 760px;
+  color: #64748b;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #0ea5a4;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.start-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.95fr) minmax(360px, 1.05fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.table-card,
+.guide-card,
+.camera-panel,
+.question-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
 .ai-start-panel {
-  max-width: 760px;
+  padding: 22px;
+}
+
+.card-title {
+  margin-bottom: 18px;
+}
+
+.card-title h2,
+.section-title-row h2,
+.primary-guide h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  color: #0f172a;
+}
+
+.card-title p,
+.guide-card p,
+.primary-guide li {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.7;
+}
+
+.start-form :deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+
+.start-form :deep(.el-select) {
+  width: 100%;
 }
 
 .job-search-row {
   width: 100%;
 }
 
+.start-button {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.interview-guide {
+  display: grid;
+  gap: 16px;
+}
+
+.guide-card {
+  padding: 18px;
+}
+
+.primary-guide {
+  background: linear-gradient(135deg, #ecfeff 0%, #f8fafc 100%);
+}
+
+.primary-guide ul {
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.guide-grid .guide-card {
+  min-height: 132px;
+}
+
+.guide-card strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: #0ea5a4;
+  color: #fff;
+}
+
+.guide-card span {
+  display: block;
+  margin-bottom: 6px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
 .interview-layout {
   display: grid;
   grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 18px;
+  margin-bottom: 18px;
 }
 
 .camera-panel,
 .question-panel {
-  padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
+  padding: 18px;
 }
 
 .camera-panel video {
@@ -303,20 +466,48 @@ onUnmounted(closeCamera);
 
 .camera-actions,
 .record-actions {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .question-panel h2 {
-  margin: 8px 0 12px;
-  line-height: 1.5;
+  margin: 10px 0 14px;
+  line-height: 1.6;
+  color: #0f172a;
+}
+
+.answer-panel {
+  padding: 18px;
+}
+
+.section-title-row {
+  justify-content: space-between;
+  margin-bottom: 14px;
 }
 
 .muted {
-  color: #6b7280;
+  color: #64748b;
+  line-height: 1.7;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
+  .start-layout,
   .interview-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .ai-interview-page {
+    padding: 24px 14px 32px;
+  }
+
+  .ai-interview-header,
+  .section-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .guide-grid {
     grid-template-columns: 1fr;
   }
 }

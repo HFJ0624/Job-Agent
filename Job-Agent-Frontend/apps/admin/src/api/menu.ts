@@ -161,6 +161,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "interview/MockInterviewManage"
   },
   {
+    id: 16,
+    path: "/interview/question-bank",
+    name: "InterviewQuestionBank",
+    title: "面试题库",
+    icon: "Collection",
+    component: "interview/QuestionBankManage"
+  },
+  {
     id: 7,
     path: "/system",
     name: "SystemRoot",
