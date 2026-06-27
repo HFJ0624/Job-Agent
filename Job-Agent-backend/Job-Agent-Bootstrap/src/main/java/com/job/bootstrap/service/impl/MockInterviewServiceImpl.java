@@ -1,12 +1,15 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.mapper.InterviewQuestionBankMapper;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewAnswerMapper;
 import com.job.bootstrap.mapper.MockInterviewMediaRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.service.FileStorageService;
+import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.InterviewPrepareService;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.bootstrap.service.JobResumeService;
@@ -17,6 +20,7 @@ import com.job.common.dto.interview.MockInterviewAnswerDTO;
 import com.job.common.dto.interview.MockInterviewStartDTO;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.entity.application.JobApplicationRecord;
+import com.job.common.entity.interview.InterviewQuestionBank;
 import com.job.common.entity.interview.MockInterviewAnswer;
 import com.job.common.entity.interview.MockInterviewMediaRecord;
 import com.job.common.entity.interview.MockInterviewQuestion;
@@ -40,10 +44,14 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 功能: 模拟面试服务实现。
@@ -71,17 +79,22 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private static final String ASR_PENDING = "PENDING";
     private static final String ASR_SUCCESS = "SUCCESS";
     private static final String ASR_FAILED = "FAILED";
+    private static final String QUESTION_BANK_ACTIVE = "ACTIVE";
+    private static final String AI_SCENE_MOCK_INTERVIEW_ANSWER_EVALUATE = "MOCK_INTERVIEW_ANSWER_EVALUATE";
 
     private final MockInterviewSessionMapper sessionMapper;
     private final MockInterviewQuestionMapper questionMapper;
     private final MockInterviewAnswerMapper answerMapper;
     private final MockInterviewMediaRecordMapper mediaRecordMapper;
+    private final InterviewQuestionBankMapper questionBankMapper;
     private final JobApplicationRecordMapper applicationMapper;
     private final InterviewPrepareService interviewPrepareService;
     private final JobResumeService jobResumeService;
     private final JobPositionService jobPositionService;
     private final FileStorageService fileStorageService;
     private final SpeechRecognitionService speechRecognitionService;
+    private final AiModelGatewayService aiModelGatewayService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -129,7 +142,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
 
         // 3. 根据岗位 JD、技能关键词和简历文本生成第一版问题，不依赖用户先创建求职记录。
         int questionCount = normalizeQuestionCount(dto.getQuestionCount());
-        List<QuestionSeed> seeds = buildAiQuestionSeeds(job, resume, questionCount);
+        List<QuestionSeed> seeds = buildQuestionBankSeeds(job, resume, questionCount);
 
         MockInterviewSession session = new MockInterviewSession();
         session.setUserId(userId);
@@ -278,7 +291,10 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             question.setSessionId(session.getId());
             question.setUserId(session.getUserId());
             question.setQuestionType(seed.type());
+            question.setQuestionBankId(seed.questionBankId());
+            question.setRagChunkId(seed.ragChunkId());
             question.setQuestionContent(seed.content());
+            question.setStandardAnswer(seed.standardAnswer());
             question.setSortNo(sortNo++);
             question.setAnswered(0);
             question.setIsDeleted(NOT_DELETED);
@@ -339,31 +355,129 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return limitDistinctSeeds(seeds, questionCount);
     }
 
+    private List<QuestionSeed> buildQuestionBankSeeds(JobPosition job, JobResume resume, int questionCount) {
+        /*
+         * 1. 从岗位和简历中提取少量关键词，用于匹配题库分类、标签、题目和标准答案。
+         * 2. 第一版不做复杂向量召回，原因是题库主表已经保存了结构化字段，直接打分更稳定也更容易排查。
+         * 3. 如果题库命中不足，再用旧的规则题补齐，保证没有题库数据时用户仍然可以开始面试。
+         */
+        List<String> keywords = buildQuestionKeywords(job, resume);
+        List<InterviewQuestionBank> bankQuestions = questionBankMapper.selectList(new LambdaQueryWrapper<InterviewQuestionBank>()
+                .eq(InterviewQuestionBank::getStatus, QUESTION_BANK_ACTIVE)
+                .eq(InterviewQuestionBank::getIsDeleted, NOT_DELETED));
+
+        List<QuestionSeed> seeds = bankQuestions.stream()
+                .map(question -> new QuestionBankCandidate(question, scoreQuestion(question, keywords)))
+                .filter(candidate -> candidate.score() > 0)
+                .sorted(Comparator
+                        .comparingInt(QuestionBankCandidate::score)
+                        .reversed()
+                        .thenComparing(candidate -> candidate.question().getId(), Comparator.nullsLast(Long::compareTo)))
+                .map(candidate -> toQuestionSeed(candidate.question()))
+                .toList();
+
+        List<QuestionSeed> mergedSeeds = new ArrayList<>(seeds);
+        if (mergedSeeds.size() < questionCount) {
+            mergedSeeds.addAll(buildAiQuestionSeeds(job, resume, questionCount));
+        }
+        return limitDistinctSeeds(mergedSeeds, questionCount);
+    }
+
+    private QuestionSeed toQuestionSeed(InterviewQuestionBank question) {
+        return new QuestionSeed(
+                defaultIfBlank(question.getQuestionType(), TYPE_TECHNICAL),
+                question.getQuestionTitle(),
+                question.getId(),
+                question.getStandardAnswer(),
+                question.getRagChunkId()
+        );
+    }
+
+    private List<String> buildQuestionKeywords(JobPosition job, JobResume resume) {
+        Set<String> keywords = new LinkedHashSet<>();
+        addKeyword(keywords, job.getJobTitle());
+        addKeyword(keywords, job.getJobCategory());
+        addKeyword(keywords, job.getSkillKeywords());
+        addKeyword(keywords, job.getJobDescription());
+        addKeyword(keywords, job.getJobRequirement());
+        addKeyword(keywords, resume.getRawText());
+        return keywords.stream().limit(20).toList();
+    }
+
+    private void addKeyword(Set<String> keywords, String text) {
+        if (!StringUtils.hasText(text)) {
+            return;
+        }
+        for (String item : text.split("[,，、\\s/|;；:：()（）\\[\\]【】]+")) {
+            String keyword = item.trim();
+            if (keyword.length() >= 2 && keyword.length() <= 30) {
+                keywords.add(keyword);
+            }
+            if (keywords.size() >= 20) {
+                return;
+            }
+        }
+    }
+
+    private int scoreQuestion(InterviewQuestionBank question, List<String> keywords) {
+        String title = safe(question.getQuestionTitle());
+        String category = safe(question.getCategory());
+        String tags = safe(question.getTags());
+        String answer = safe(question.getStandardAnswer());
+
+        int score = 0;
+        for (String keyword : keywords) {
+            if (!StringUtils.hasText(keyword)) {
+                continue;
+            }
+            if (containsIgnoreCase(title, keyword)) {
+                score += 8;
+            }
+            if (containsIgnoreCase(category, keyword)) {
+                score += 6;
+            }
+            if (containsIgnoreCase(tags, keyword)) {
+                score += 6;
+            }
+            if (containsIgnoreCase(answer, keyword)) {
+                score += 2;
+            }
+        }
+        return score;
+    }
+
+    private boolean containsIgnoreCase(String text, String keyword) {
+        if (!StringUtils.hasText(text) || !StringUtils.hasText(keyword)) {
+            return false;
+        }
+        return text.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
+    }
+
     private List<QuestionSeed> buildAiQuestionSeeds(JobPosition job, JobResume resume, int questionCount) {
         List<QuestionSeed> seeds = new ArrayList<>();
         for (String skill : splitKeywords(job.getSkillKeywords())) {
-            seeds.add(new QuestionSeed(TYPE_TECHNICAL, "请结合你的项目经历，说明你如何使用 " + skill + " 解决实际问题？"));
+            seeds.add(ruleSeed(TYPE_TECHNICAL, "请结合你的项目经历，说明你如何使用 " + skill + " 解决实际问题？"));
         }
 
         String jobText = safe(job.getJobDescription()) + "\n" + safe(job.getJobRequirement()) + "\n" + safe(job.getSkillKeywords());
         if (containsAny(jobText, List.of("Java", "Spring", "后端", "接口"))) {
-            seeds.add(new QuestionSeed(TYPE_TECHNICAL, "请介绍一个你负责过的后端接口，从设计、实现、性能和异常处理几个方面展开。"));
+            seeds.add(ruleSeed(TYPE_TECHNICAL, "请介绍一个你负责过的后端接口，从设计、实现、性能和异常处理几个方面展开。"));
         }
         if (containsAny(jobText, List.of("MySQL", "SQL", "数据库"))) {
-            seeds.add(new QuestionSeed(TYPE_TECHNICAL, "如果线上 SQL 变慢，你会如何定位并优化？"));
+            seeds.add(ruleSeed(TYPE_TECHNICAL, "如果线上 SQL 变慢，你会如何定位并优化？"));
         }
         if (containsAny(jobText, List.of("Redis", "缓存"))) {
-            seeds.add(new QuestionSeed(TYPE_TECHNICAL, "请说明你在项目里如何使用缓存，以及如何处理缓存穿透、击穿或一致性问题。"));
+            seeds.add(ruleSeed(TYPE_TECHNICAL, "请说明你在项目里如何使用缓存，以及如何处理缓存穿透、击穿或一致性问题。"));
         }
 
         if (StringUtils.hasText(resume.getRawText())) {
-            seeds.add(new QuestionSeed(TYPE_PROJECT, "请选择简历里最能代表你能力的一个项目，说明背景、职责、难点和结果。"));
-            seeds.add(new QuestionSeed(TYPE_PROJECT, "请讲一个你在项目中排查问题或优化性能的经历，重点说明过程和结果。"));
+            seeds.add(ruleSeed(TYPE_PROJECT, "请选择简历里最能代表你能力的一个项目，说明背景、职责、难点和结果。"));
+            seeds.add(ruleSeed(TYPE_PROJECT, "请讲一个你在项目中排查问题或优化性能的经历，重点说明过程和结果。"));
         }
 
-        seeds.add(new QuestionSeed(TYPE_HR, "请做一个 1 分钟左右的自我介绍，并突出你和该岗位匹配的经历。"));
-        seeds.add(new QuestionSeed(TYPE_HR, "你为什么想面试这个岗位？你认为自己最匹配的优势是什么？"));
-        seeds.add(new QuestionSeed(TYPE_HR, "如果入职后发现业务复杂度高于预期，你会如何适应？"));
+        seeds.add(ruleSeed(TYPE_HR, "请做一个 1 分钟左右的自我介绍，并突出你和该岗位匹配的经历。"));
+        seeds.add(ruleSeed(TYPE_HR, "你为什么想面试这个岗位？你认为自己最匹配的优势是什么？"));
+        seeds.add(ruleSeed(TYPE_HR, "如果入职后发现业务复杂度高于预期，你会如何适应？"));
 
         return limitDistinctSeeds(seeds, questionCount);
     }
@@ -373,8 +487,12 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             return;
         }
         for (String content : contents) {
-            seeds.add(new QuestionSeed(type, content));
+            seeds.add(ruleSeed(type, content));
         }
+    }
+
+    private QuestionSeed ruleSeed(String type, String content) {
+        return new QuestionSeed(type, content, null, null, null);
     }
 
     private List<QuestionSeed> limitDistinctSeeds(List<QuestionSeed> seeds, int questionCount) {
@@ -392,6 +510,13 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     private AnswerEvaluation evaluateAnswer(MockInterviewQuestion question, String answerContent) {
+        if (StringUtils.hasText(question.getStandardAnswer())) {
+            AnswerEvaluation llmEvaluation = evaluateAnswerWithStandardAnswer(question, answerContent);
+            if (llmEvaluation != null) {
+                return llmEvaluation;
+            }
+        }
+
         String answer = answerContent == null ? "" : answerContent.trim();
         double score = 40;
         List<String> strengths = new ArrayList<>();
@@ -445,6 +570,137 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             suggestions.add("继续保持结构化表达，并结合项目细节进行说明。");
         }
         return new AnswerEvaluation(finalScore, level, strengths, problems, suggestions);
+    }
+
+    private AnswerEvaluation evaluateAnswerWithStandardAnswer(MockInterviewQuestion question, String answerContent) {
+        try {
+            /*
+             * 1. 题库题有标准答案时，优先让模型做语义匹配，而不是只靠关键词长度规则。
+             * 2. 调用统一模型网关，模型、Prompt、重试、熔断、调用日志都继续由后台配置管理。
+             * 3. 如果模型配置缺失、超时或 JSON 解析失败，返回 null，让上层自动走规则兜底评分。
+             */
+            String userMessage = buildAnswerEvaluatePrompt(question, answerContent);
+            String response = aiModelGatewayService.chat(
+                    AI_SCENE_MOCK_INTERVIEW_ANSWER_EVALUATE,
+                    buildAnswerEvaluateVariables(question, answerContent, userMessage),
+                    userMessage,
+                    question.getUserId(),
+                    buildAnswerEvaluateTraceId(question)
+            );
+            AnswerEvaluateModelResult modelResult = objectMapper.readValue(extractJson(response), AnswerEvaluateModelResult.class);
+            return normalizeModelEvaluation(modelResult);
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private Map<String, Object> buildAnswerEvaluateVariables(
+            MockInterviewQuestion question,
+            String answerContent,
+            String fullPrompt
+    ) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("question", question.getQuestionContent());
+        variables.put("question_content", question.getQuestionContent());
+        variables.put("questionType", question.getQuestionType());
+        variables.put("question_type", question.getQuestionType());
+        variables.put("standardAnswer", question.getStandardAnswer());
+        variables.put("standard_answer", question.getStandardAnswer());
+        variables.put("userAnswer", answerContent);
+        variables.put("user_answer", answerContent);
+        variables.put("fullPrompt", fullPrompt);
+        variables.put("full_prompt", fullPrompt);
+        variables.put("jsonFormat", "只输出 JSON 对象，不要 Markdown，不要解释文本。");
+        variables.put("json_format", variables.get("jsonFormat"));
+        return variables;
+    }
+
+    private String buildAnswerEvaluatePrompt(MockInterviewQuestion question, String answerContent) {
+        return """
+                请你作为面试评分官，对比用户回答和标准答案，判断语义是否相近，并输出 JSON。
+                
+                评分规则:
+                1. 只要用户回答覆盖标准答案的核心含义，即使表述不同，也算正确或部分正确。
+                2. 不要求逐字一致，重点看关键知识点、因果关系、解决步骤是否覆盖。
+                3. score 范围 0-100，isCorrect 表示是否基本正确。
+                4. matchedPoints、missingPoints、suggestions 每个数组最多 4 条，每条不超过 40 字。
+                5. level 只能是 优秀、良好、一般、待提升。
+                6. 只输出 JSON，不要 Markdown。
+                
+                JSON 字段:
+                {
+                  "score": 85,
+                  "isCorrect": true,
+                  "level": "良好",
+                  "matchedPoints": ["覆盖了核心概念"],
+                  "missingPoints": ["缺少具体例子"],
+                  "suggestions": ["补充项目中的实际使用场景"]
+                }
+                
+                题目:
+                %s
+                
+                标准答案:
+                %s
+                
+                用户回答:
+                %s
+                """.formatted(
+                safe(question.getQuestionContent()),
+                safe(question.getStandardAnswer()),
+                safe(answerContent)
+        );
+    }
+
+    private AnswerEvaluation normalizeModelEvaluation(AnswerEvaluateModelResult result) {
+        if (result == null || result.score() == null) {
+            return null;
+        }
+
+        BigDecimal score = BigDecimal.valueOf(Math.max(0, Math.min(100, result.score())))
+                .setScale(2, RoundingMode.HALF_UP);
+        String level = StringUtils.hasText(result.level()) ? result.level().trim() : resolveLevel(score);
+
+        List<String> strengths = limitTextList(result.matchedPoints(), "回答覆盖了部分标准答案要点。");
+        List<String> problems = limitTextList(result.missingPoints(), "仍有部分关键点没有展开。");
+        List<String> suggestions = limitTextList(result.suggestions(), "建议围绕标准答案补充关键知识点和项目例子。");
+        return new AnswerEvaluation(score, level, strengths, problems, suggestions);
+    }
+
+    private List<String> limitTextList(List<String> values, String defaultValue) {
+        if (values == null || values.isEmpty()) {
+            return List.of(defaultValue);
+        }
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .limit(4)
+                .toList();
+    }
+
+    private String extractJson(String response) {
+        if (!StringUtils.hasText(response)) {
+            throw new IllegalArgumentException("模型未返回内容");
+        }
+
+        String cleaned = response.trim();
+        int start = cleaned.indexOf('{');
+        int end = cleaned.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new IllegalArgumentException("模型未返回合法 JSON: " + cleaned);
+        }
+        return cleaned.substring(start, end + 1);
+    }
+
+    private String buildAnswerEvaluateTraceId(MockInterviewQuestion question) {
+        return "mock_answer_eval_"
+                + question.getUserId()
+                + "_"
+                + question.getSessionId()
+                + "_"
+                + question.getId()
+                + "_"
+                + UUID.randomUUID();
     }
 
     private void finishAndScoreSession(MockInterviewSession session) {
@@ -527,11 +783,34 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return "待提升";
     }
 
+    private String defaultIfBlank(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value.trim() : defaultValue;
+    }
+
     private String safe(String value) {
         return value == null ? "" : value;
     }
 
-    private record QuestionSeed(String type, String content) {
+    private record QuestionSeed(
+            String type,
+            String content,
+            Long questionBankId,
+            String standardAnswer,
+            Long ragChunkId
+    ) {
+    }
+
+    private record QuestionBankCandidate(InterviewQuestionBank question, int score) {
+    }
+
+    private record AnswerEvaluateModelResult(
+            Double score,
+            Boolean isCorrect,
+            String level,
+            List<String> matchedPoints,
+            List<String> missingPoints,
+            List<String> suggestions
+    ) {
     }
 
     private record AnswerEvaluation(

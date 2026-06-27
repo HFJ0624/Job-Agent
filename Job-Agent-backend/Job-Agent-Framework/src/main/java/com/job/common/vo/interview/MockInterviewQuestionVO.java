@@ -13,7 +13,10 @@ public class MockInterviewQuestionVO {
     private Long id;
     private Long sessionId;
     private String questionType;
+    private Long questionBankId;
+    private Long ragChunkId;
     private String questionContent;
+    private String standardAnswer;
     private Integer sortNo;
     private Integer answered;
 
@@ -29,7 +32,10 @@ public class MockInterviewQuestionVO {
         vo.setId(entity.getId());
         vo.setSessionId(entity.getSessionId());
         vo.setQuestionType(entity.getQuestionType());
+        vo.setQuestionBankId(entity.getQuestionBankId());
+        vo.setRagChunkId(entity.getRagChunkId());
         vo.setQuestionContent(entity.getQuestionContent());
+        vo.setStandardAnswer(entity.getStandardAnswer());
         vo.setSortNo(entity.getSortNo());
         vo.setAnswered(entity.getAnswered());
         return vo;

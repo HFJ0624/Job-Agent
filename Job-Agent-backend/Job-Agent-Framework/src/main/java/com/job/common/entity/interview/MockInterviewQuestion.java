@@ -30,9 +30,24 @@ public class MockInterviewQuestion extends BaseEntity {
     private String questionType;
 
     /**
+     * 来源题库 ID，空值表示历史兼容题或规则生成题。
+     */
+    private Long questionBankId;
+
+    /**
+     * 来源题库对应的 RAG chunk ID。
+     */
+    private Long ragChunkId;
+
+    /**
      * 题目内容。
      */
     private String questionContent;
+
+    /**
+     * 标准答案快照，避免后续题库答案变更影响历史面试记录。
+     */
+    private String standardAnswer;
 
     /**
      * 题目顺序。
