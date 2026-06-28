@@ -10,7 +10,7 @@ const navAvatarUrl = computed(() => normalizeAvatarUrl(authStore.user?.avatarUrl
 const navAvatarText = computed(() => avatarInitial(authStore.displayName));
 
 onMounted(() => {
-  // 页面刷新后尝试用本地 token 拉取当前用户。
+  // 页面刷新后尝试用本地 token 拉取当前用户，保证导航右侧用户信息是最新的。
   authStore.loadMe();
 });
 
@@ -37,6 +37,7 @@ async function handleLogout() {
         <RouterLink to="/application">求职进度</RouterLink>
         <RouterLink to="/communication">沟通记录</RouterLink>
         <RouterLink to="/ai-interview">AI 面试</RouterLink>
+        <RouterLink to="/wrong-questions">错题本</RouterLink>
       </nav>
 
       <div class="top-actions">

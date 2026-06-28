@@ -520,6 +520,28 @@ export interface InterviewPrepareInfo {
 }
 
 /**
+ * AI 投递决策。
+ */
+export interface JobApplyDecisionInfo {
+  id: number;
+  resumeId: number;
+  jobId: number;
+  jobTitle?: string;
+  companyName?: string;
+  decision: "APPLY" | "CAUTIOUS" | "SKIP" | string;
+  decisionLabel: string;
+  decisionScore: number;
+  reason?: string;
+  risks: string[];
+  resumeSuggestions: string[];
+  interviewSuggestions: string[];
+  nextActions: string[];
+  matchRecordId?: number;
+  source?: string;
+  createTime?: string;
+}
+
+/**
  * 模拟面试题目。
  */
 export interface MockInterviewQuestionInfo {
@@ -544,6 +566,13 @@ export interface MockInterviewAnswerInfo {
   strengths: string[];
   problems: string[];
   suggestions: string[];
+  correct?: boolean;
+  similarityScore?: number;
+  matchedPoints?: string[];
+  missingPoints?: string[];
+  knowledgePoints?: string[];
+  reviewConclusion?: string;
+  wrongBook?: boolean;
 }
 
 export interface MockInterviewMediaRecordInfo {
@@ -636,6 +665,29 @@ export interface MockInterviewStudyMaterialInfo {
   content?: string;
   source?: string;
   score?: number;
+}
+
+export interface MockInterviewWrongQuestionInfo {
+  id: number;
+  sessionId: number;
+  questionId: number;
+  answerId: number;
+  jobId?: number;
+  resumeId?: number;
+  questionType?: string;
+  questionContent: string;
+  standardAnswer?: string;
+  lastAnswerContent?: string;
+  lastScore?: number;
+  similarityScore?: number;
+  knowledgePoints: string[];
+  missingPoints: string[];
+  suggestions: string[];
+  wrongReason?: string;
+  wrongCount: number;
+  masteryStatus: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
 /**

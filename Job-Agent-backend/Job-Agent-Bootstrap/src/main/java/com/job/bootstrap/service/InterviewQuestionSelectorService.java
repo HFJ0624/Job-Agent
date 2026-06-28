@@ -37,4 +37,18 @@ public interface InterviewQuestionSelectorService {
             int questionCount,
             Integer excludeRecentHours
     );
+
+    /**
+     * 根据用户薄弱知识点优先选择题目。
+     *
+     * @param weakKeywords 从错题本提取的未掌握/复习中知识点，排在检索关键词前面，提高相关题优先级
+     */
+    List<InterviewQuestionBank> selectQuestions(
+            Long userId,
+            JobPosition job,
+            JobResume resume,
+            int questionCount,
+            Integer excludeRecentHours,
+            List<String> weakKeywords
+    );
 }

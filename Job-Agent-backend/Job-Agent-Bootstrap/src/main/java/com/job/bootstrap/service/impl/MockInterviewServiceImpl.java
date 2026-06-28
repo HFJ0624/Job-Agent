@@ -7,6 +7,7 @@ import com.job.bootstrap.mapper.MockInterviewAnswerMapper;
 import com.job.bootstrap.mapper.MockInterviewMediaRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
+import com.job.bootstrap.mapper.MockInterviewWrongQuestionMapper;
 import com.job.bootstrap.service.FileStorageService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.InterviewPrepareService;
@@ -14,6 +15,7 @@ import com.job.bootstrap.service.InterviewQuestionSelectorService;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.bootstrap.service.MockInterviewService;
+import com.job.bootstrap.service.MockInterviewWrongQuestionService;
 import com.job.bootstrap.service.SpeechRecognitionService;
 import com.job.common.dto.interview.AiInterviewStartDTO;
 import com.job.common.dto.interview.MockInterviewAnswerDTO;
@@ -25,6 +27,7 @@ import com.job.common.entity.interview.MockInterviewAnswer;
 import com.job.common.entity.interview.MockInterviewMediaRecord;
 import com.job.common.entity.interview.MockInterviewQuestion;
 import com.job.common.entity.interview.MockInterviewSession;
+import com.job.common.entity.interview.MockInterviewWrongQuestion;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.interview.InterviewPrepareVO;
@@ -84,6 +87,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final MockInterviewQuestionMapper questionMapper;
     private final MockInterviewAnswerMapper answerMapper;
     private final MockInterviewMediaRecordMapper mediaRecordMapper;
+    private final MockInterviewWrongQuestionMapper wrongQuestionMapper;
     private final JobApplicationRecordMapper applicationMapper;
     private final InterviewPrepareService interviewPrepareService;
     private final InterviewQuestionSelectorService interviewQuestionSelectorService;
@@ -91,6 +95,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final JobPositionService jobPositionService;
     private final FileStorageService fileStorageService;
     private final SpeechRecognitionService speechRecognitionService;
+    private final MockInterviewWrongQuestionService wrongQuestionService;
     private final AiModelGatewayService aiModelGatewayService;
     private final ObjectMapper objectMapper;
 
@@ -140,13 +145,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
 
         // 3. 根据岗位 JD、技能关键词和简历文本生成第一版问题，不依赖用户先创建求职记录。
         int questionCount = normalizeQuestionCount(dto.getQuestionCount());
+        List<String> weakKeywords = wrongQuestionService.listActiveWeakKnowledgePoints(userId, 8);
         List<QuestionSeed> seeds = buildQuestionSeedsFromBank(
                 interviewQuestionSelectorService.selectQuestions(
                         userId,
                         job,
                         resume,
                         questionCount,
-                        dto.getExcludeRecentHours()
+                        dto.getExcludeRecentHours(),
+                        weakKeywords
                 )
         );
         if (seeds.size() < questionCount) {
@@ -340,8 +347,17 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         answer.setStrengths(String.join("\n", evaluation.strengths()));
         answer.setProblems(String.join("\n", evaluation.problems()));
         answer.setSuggestions(String.join("\n", evaluation.suggestions()));
+        answer.setCorrectFlag(evaluation.correct() ? 1 : 0);
+        answer.setSimilarityScore(evaluation.similarityScore());
+        answer.setMatchedPoints(String.join("\n", evaluation.matchedPoints()));
+        answer.setMissingPoints(String.join("\n", evaluation.missingPoints()));
+        answer.setKnowledgePoints(String.join("\n", evaluation.knowledgePoints()));
+        answer.setReviewConclusion(evaluation.reviewConclusion());
+        answer.setWrongBookFlag(shouldSaveWrongQuestion(evaluation) ? 1 : 0);
         answer.setIsDeleted(NOT_DELETED);
         answerMapper.insert(answer);
+
+        saveWrongQuestionIfNeeded(session, question, answer, evaluation);
 
         // 1. 标记题目已答，确保同一道题不会重复评分。
         question.setAnswered(1);
@@ -355,6 +371,79 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             sessionMapper.updateById(session);
         }
         return answer;
+    }
+
+    private boolean shouldSaveWrongQuestion(AnswerEvaluation evaluation) {
+        /*
+         * 1. 明确判错的题进入错题本。
+         * 2. 低于 70 分的题即使模型没有判错，也说明表达或要点覆盖不足，需要后续复练。
+         * 3. 有缺失要点时进入错题本，便于补题计划围绕缺失点召回知识。
+         */
+        return !evaluation.correct()
+                || evaluation.score().compareTo(BigDecimal.valueOf(70)) < 0
+                || !evaluation.missingPoints().isEmpty();
+    }
+
+    private void saveWrongQuestionIfNeeded(
+            MockInterviewSession session,
+            MockInterviewQuestion question,
+            MockInterviewAnswer answer,
+            AnswerEvaluation evaluation
+    ) {
+        if (!shouldSaveWrongQuestion(evaluation)) {
+            return;
+        }
+
+        MockInterviewWrongQuestion wrongQuestion = wrongQuestionMapper.selectOne(
+                new LambdaQueryWrapper<MockInterviewWrongQuestion>()
+                        .eq(MockInterviewWrongQuestion::getUserId, session.getUserId())
+                        .eq(MockInterviewWrongQuestion::getQuestionId, question.getId())
+                        .eq(MockInterviewWrongQuestion::getIsDeleted, NOT_DELETED)
+                        .last("limit 1")
+        );
+
+        boolean isNew = wrongQuestion == null;
+        if (isNew) {
+            wrongQuestion = new MockInterviewWrongQuestion();
+            wrongQuestion.setUserId(session.getUserId());
+            wrongQuestion.setQuestionId(question.getId());
+            wrongQuestion.setWrongCount(0);
+            wrongQuestion.setIsDeleted(NOT_DELETED);
+        }
+
+        // 每次答错都覆盖最新表现，同时累加错误次数，后续可以按 wrongCount 做复练优先级。
+        wrongQuestion.setSessionId(session.getId());
+        wrongQuestion.setAnswerId(answer.getId());
+        wrongQuestion.setJobId(session.getJobId());
+        wrongQuestion.setResumeId(session.getResumeId());
+        wrongQuestion.setQuestionType(question.getQuestionType());
+        wrongQuestion.setQuestionContent(question.getQuestionContent());
+        wrongQuestion.setStandardAnswer(question.getStandardAnswer());
+        wrongQuestion.setLastAnswerContent(answer.getAnswerContent());
+        wrongQuestion.setLastScore(answer.getScore());
+        wrongQuestion.setSimilarityScore(answer.getSimilarityScore());
+        wrongQuestion.setKnowledgePoints(answer.getKnowledgePoints());
+        wrongQuestion.setMissingPoints(answer.getMissingPoints());
+        wrongQuestion.setSuggestions(answer.getSuggestions());
+        wrongQuestion.setWrongReason(buildWrongReason(evaluation));
+        wrongQuestion.setWrongCount((wrongQuestion.getWrongCount() == null ? 0 : wrongQuestion.getWrongCount()) + 1);
+        wrongQuestion.setMasteryStatus("UNMASTERED");
+
+        if (isNew) {
+            wrongQuestionMapper.insert(wrongQuestion);
+        } else {
+            wrongQuestionMapper.updateById(wrongQuestion);
+        }
+    }
+
+    private String buildWrongReason(AnswerEvaluation evaluation) {
+        if (!evaluation.correct()) {
+            return "回答未覆盖标准答案核心要点";
+        }
+        if (evaluation.score().compareTo(BigDecimal.valueOf(70)) < 0) {
+            return "单题得分低于 70 分";
+        }
+        return "存在标准答案缺失要点";
     }
 
     private List<QuestionSeed> buildQuestionSeeds(InterviewPrepareVO prepare, int questionCount) {
@@ -500,7 +589,26 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         if (suggestions.isEmpty()) {
             suggestions.add("继续保持结构化表达，并结合项目细节进行说明。");
         }
-        return new AnswerEvaluation(finalScore, level, strengths, problems, suggestions);
+        boolean correct = finalScore.compareTo(BigDecimal.valueOf(70)) >= 0;
+        List<String> matchedPoints = strengths.stream().limit(4).toList();
+        List<String> missingPoints = problems.stream().limit(4).toList();
+        List<String> knowledgePoints = inferKnowledgePoints(question, answer);
+        String reviewConclusion = correct
+                ? "回答基本覆盖题目方向，但仍可补充关键细节。"
+                : "回答未充分覆盖题目关键点，需要围绕缺失要点复练。";
+        return new AnswerEvaluation(
+                finalScore,
+                level,
+                strengths,
+                problems,
+                suggestions,
+                correct,
+                finalScore,
+                matchedPoints,
+                missingPoints,
+                knowledgePoints,
+                reviewConclusion
+        );
     }
 
     private AnswerEvaluation evaluateAnswerWithStandardAnswer(MockInterviewQuestion question, String answerContent) {
@@ -595,7 +703,27 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         List<String> strengths = limitTextList(result.matchedPoints(), "回答覆盖了部分标准答案要点。");
         List<String> problems = limitTextList(result.missingPoints(), "仍有部分关键点没有展开。");
         List<String> suggestions = limitTextList(result.suggestions(), "建议围绕标准答案补充关键知识点和项目例子。");
-        return new AnswerEvaluation(score, level, strengths, problems, suggestions);
+        List<String> knowledgePoints = limitTextList(result.knowledgePoints(), "题目相关基础知识");
+        boolean correct = result.isCorrect() != null ? result.isCorrect() : score.compareTo(BigDecimal.valueOf(70)) >= 0;
+        BigDecimal similarityScore = result.similarityScore() == null
+                ? score
+                : BigDecimal.valueOf(Math.max(0, Math.min(100, result.similarityScore()))).setScale(2, RoundingMode.HALF_UP);
+        String reviewConclusion = StringUtils.hasText(result.reviewConclusion())
+                ? result.reviewConclusion().trim()
+                : buildModelReviewConclusion(correct, score, problems);
+        return new AnswerEvaluation(
+                score,
+                level,
+                strengths,
+                problems,
+                suggestions,
+                correct,
+                similarityScore,
+                strengths,
+                problems,
+                knowledgePoints,
+                reviewConclusion
+        );
     }
 
     private List<String> limitTextList(List<String> values, String defaultValue) {
@@ -607,6 +735,40 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 .map(String::trim)
                 .limit(4)
                 .toList();
+    }
+
+    private List<String> inferKnowledgePoints(MockInterviewQuestion question, String answer) {
+        LinkedHashSet<String> points = new LinkedHashSet<>();
+        String text = safe(question.getQuestionContent()) + " " + safe(question.getStandardAnswer()) + " " + safe(answer);
+
+        // 第一版用轻量规则兜底，避免模型不可用时单题复盘缺少知识点。
+        if (containsAny(text, List.of("MySQL", "SQL", "索引", "数据库"))) {
+            points.add("MySQL / SQL");
+        }
+        if (containsAny(text, List.of("Redis", "缓存"))) {
+            points.add("Redis / 缓存");
+        }
+        if (containsAny(text, List.of("Spring", "SpringBoot", "接口"))) {
+            points.add("Spring / 后端接口");
+        }
+        if (containsAny(text, List.of("项目", "职责", "结果", "背景"))) {
+            points.add("项目表达");
+        }
+        if (points.isEmpty()) {
+            points.add(defaultIfBlank(question.getQuestionType(), "面试表达"));
+        }
+        return points.stream().limit(4).toList();
+    }
+
+    private String buildModelReviewConclusion(boolean correct, BigDecimal score, List<String> missingPoints) {
+        if (correct && score.compareTo(BigDecimal.valueOf(85)) >= 0) {
+            return "回答与标准答案相近，关键要点覆盖较完整。";
+        }
+        if (correct) {
+            return "回答基本正确，但仍有部分要点可以展开。";
+        }
+        String missingSummary = missingPoints == null || missingPoints.isEmpty() ? "核心要点" : String.join("、", missingPoints);
+        return "回答与标准答案差距较大，需要补充：" + truncate(missingSummary, 80);
     }
 
     private String extractJson(String response) {
@@ -722,6 +884,13 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return value == null ? "" : value;
     }
 
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+
     private record QuestionSeed(
             String type,
             String content,
@@ -735,8 +904,11 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             Double score,
             Boolean isCorrect,
             String level,
+            Double similarityScore,
             List<String> matchedPoints,
             List<String> missingPoints,
+            List<String> knowledgePoints,
+            String reviewConclusion,
             List<String> suggestions
     ) {
     }
@@ -746,7 +918,13 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             String level,
             List<String> strengths,
             List<String> problems,
-            List<String> suggestions
+            List<String> suggestions,
+            boolean correct,
+            BigDecimal similarityScore,
+            List<String> matchedPoints,
+            List<String> missingPoints,
+            List<String> knowledgePoints,
+            String reviewConclusion
     ) {
     }
 }

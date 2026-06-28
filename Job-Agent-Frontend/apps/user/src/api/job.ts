@@ -7,6 +7,7 @@ import type {
   PositionDetailInfo,
   PositionInfo,
   JobMatchInfo,
+  JobApplyDecisionInfo,
   GreetingInfo
 } from "./types";
 
@@ -93,6 +94,27 @@ export function matchJob(jobId: string, resumeId: string) {
 export function getLatestJobMatch(jobId: string, resumeId: string) {
   return request<JobMatchInfo | null>(
     `/front/job/${jobId}/match-record?resumeId=${resumeId}`
+  );
+}
+
+/**
+ * 生成 AI 投递决策。
+ */
+export function generateApplyDecision(jobId: string, resumeId: string) {
+  return request<JobApplyDecisionInfo>(`/front/job/${jobId}/apply-decision`, {
+    method: "POST",
+    body: JSON.stringify({
+      resumeId
+    })
+  });
+}
+
+/**
+ * 查询最近一次 AI 投递决策。
+ */
+export function getLatestApplyDecision(jobId: string, resumeId: string) {
+  return request<JobApplyDecisionInfo | null>(
+    `/front/job/${jobId}/apply-decision?resumeId=${resumeId}`
   );
 }
 

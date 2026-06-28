@@ -66,8 +66,20 @@ public class InterviewQuestionSelectorServiceImpl implements InterviewQuestionSe
             int questionCount,
             Integer excludeRecentHours
     ) {
+        return selectQuestions(userId, job, resume, questionCount, excludeRecentHours, List.of());
+    }
+
+    @Override
+    public List<InterviewQuestionBank> selectQuestions(
+            Long userId,
+            JobPosition job,
+            JobResume resume,
+            int questionCount,
+            Integer excludeRecentHours,
+            List<String> weakKeywords
+    ) {
         int targetCount = Math.max(1, questionCount);
-        List<String> keywords = buildQuestionKeywords(job, resume);
+        List<String> keywords = buildQuestionKeywords(job, resume, weakKeywords);
         String query = buildRagQuery(job, resume, keywords);
 
         List<InterviewQuestionBank> ragQuestions = loadRagQuestions(query, targetCount);
@@ -318,8 +330,11 @@ public class InterviewQuestionSelectorServiceImpl implements InterviewQuestionSe
         return true;
     }
 
-    private List<String> buildQuestionKeywords(JobPosition job, JobResume resume) {
+    private List<String> buildQuestionKeywords(JobPosition job, JobResume resume, List<String> weakKeywords) {
         Set<String> keywords = new LinkedHashSet<>();
+        if (weakKeywords != null) {
+            weakKeywords.forEach(item -> addKeyword(keywords, item));
+        }
         addKeyword(keywords, job.getJobTitle());
         addKeyword(keywords, job.getJobCategory());
         addKeyword(keywords, job.getSkillKeywords());

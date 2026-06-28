@@ -228,19 +228,43 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="answer-review-list">
+        <article v-for="row in answersWithQuestion" :key="`review-${row.id}`" class="answer-review-card">
+          <div class="answer-review-head">
+            <strong>{{ row.questionContent }}</strong>
+            <div>
+              <el-tag :type="row.correct ? 'success' : 'danger'" size="small">
+                {{ row.correct ? "基本正确" : "需要复练" }}
+              </el-tag>
+              <el-tag v-if="row.wrongBook" type="warning" size="small">错题本</el-tag>
+            </div>
+          </div>
+          <p>{{ row.reviewConclusion || "暂无单题复盘结论" }}</p>
+          <div class="answer-tags">
+            <el-tag v-for="item in row.knowledgePoints" :key="item" size="small">
+              {{ item }}
+            </el-tag>
+          </div>
+          <div v-if="row.missingPoints?.length" class="missing-list">
+            <span v-for="item in row.missingPoints" :key="item">缺失：{{ item }}</span>
+          </div>
+        </article>
+      </div>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
+import { useRoute } from "vue-router";
 import { pageFrontPositions } from "../api/job";
 import { listResumes } from "../api/resume";
 import { getCurrentMockQuestion, getMockInterviewDetail, startAiInterview, submitMockAudioAnswer } from "../api/mockInterview";
 import { generateMockInterviewReview, getLatestMockInterviewReview, getMockInterviewStudyPlan } from "../api/mockInterviewReview";
 import type { MockInterviewAnswerInfo, MockInterviewQuestionInfo, MockInterviewReviewInfo, MockInterviewSessionInfo, MockInterviewStudyPlanInfo, PositionInfo, ResumeInfo } from "../api/types";
 
+const route = useRoute();
 const resumes = ref<ResumeInfo[]>([]);
 const jobs = ref<PositionInfo[]>([]);
 const session = ref<MockInterviewSessionInfo | null>(null);
@@ -278,6 +302,7 @@ const answersWithQuestion = computed(() => {
 async function loadInitialData() {
   resumes.value = await listResumes();
   await loadJobs();
+  await loadSessionFromRoute();
 }
 
 async function loadJobs() {
@@ -389,6 +414,40 @@ async function reloadSession() {
   }
 }
 
+async function loadSessionFromRoute() {
+  const sessionId = normalizeSessionId(route.query.sessionId);
+
+  if (!sessionId) {
+    return;
+  }
+
+  loadingDetail.value = true;
+  try {
+    // 深链进入时复用后端已有详情接口，保证问题、答案、状态都来自同一个会话快照。
+    session.value = await getMockInterviewDetail(sessionId);
+    currentQuestion.value = await getCurrentMockQuestion(sessionId);
+    form.resumeId = session.value.resumeId ? String(session.value.resumeId) : form.resumeId;
+    form.jobId = session.value.jobId ? String(session.value.jobId) : form.jobId;
+    review.value = null;
+    studyPlan.value = null;
+    await loadLatestReview();
+  } catch (error) {
+    session.value = null;
+    currentQuestion.value = null;
+    ElMessage.error(error instanceof Error ? error.message : "加载 AI 模拟面试会话失败");
+  } finally {
+    loadingDetail.value = false;
+  }
+}
+
+function normalizeSessionId(value: unknown) {
+  if (Array.isArray(value)) {
+    return value[0] || "";
+  }
+
+  return typeof value === "string" ? value : "";
+}
+
 async function loadLatestReview() {
   if (!session.value) return;
   try {
@@ -438,6 +497,14 @@ function resetInterview() {
 
 onMounted(loadInitialData);
 onUnmounted(closeCamera);
+
+watch(
+  () => route.query.sessionId,
+  async () => {
+    closeCamera();
+    await loadSessionFromRoute();
+  }
+);
 </script>
 
 <style scoped>
@@ -769,6 +836,51 @@ onUnmounted(closeCamera);
 
 .study-material small {
   color: #64748b;
+}
+
+.answer-review-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.answer-review-card {
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.answer-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.answer-review-head strong {
+  color: #0f172a;
+  line-height: 1.6;
+}
+
+.answer-review-card p {
+  margin: 8px 0;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.answer-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.missing-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  color: #b91c1c;
+  font-size: 12px;
 }
 
 .section-title-row {

@@ -26,6 +26,13 @@ public class MockInterviewAnswerVO {
     private List<String> strengths;
     private List<String> problems;
     private List<String> suggestions;
+    private Boolean correct;
+    private BigDecimal similarityScore;
+    private List<String> matchedPoints;
+    private List<String> missingPoints;
+    private List<String> knowledgePoints;
+    private String reviewConclusion;
+    private Boolean wrongBook;
 
     /**
      * Entity 转 VO。
@@ -45,6 +52,13 @@ public class MockInterviewAnswerVO {
         vo.setStrengths(splitLines(entity.getStrengths()));
         vo.setProblems(splitLines(entity.getProblems()));
         vo.setSuggestions(splitLines(entity.getSuggestions()));
+        vo.setCorrect(entity.getCorrectFlag() != null && entity.getCorrectFlag() == 1);
+        vo.setSimilarityScore(entity.getSimilarityScore());
+        vo.setMatchedPoints(splitLines(entity.getMatchedPoints()));
+        vo.setMissingPoints(splitLines(entity.getMissingPoints()));
+        vo.setKnowledgePoints(splitLines(entity.getKnowledgePoints()));
+        vo.setReviewConclusion(entity.getReviewConclusion());
+        vo.setWrongBook(entity.getWrongBookFlag() != null && entity.getWrongBookFlag() == 1);
         return vo;
     }
 

@@ -1,12 +1,15 @@
 package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.job.bootstrap.service.JobApplyDecisionService;
 import com.job.bootstrap.service.JobGreetingService;
 import com.job.bootstrap.service.JobMatchService;
+import com.job.common.dto.decision.JobApplyDecisionRequestDTO;
 import com.job.common.dto.greeting.GreetingGenerateRequestDTO;
 import com.job.common.dto.match.JobMatchRequestDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
+import com.job.common.vo.decision.JobApplyDecisionVO;
 import com.job.common.vo.greeting.GreetingVO;
 import com.job.common.vo.match.JobMatchVO;
 import jakarta.validation.Valid;
@@ -25,6 +28,8 @@ public class JobPositionController {
     private final JobMatchService jobMatchService;
 
     private final JobGreetingService jobGreetingService;
+
+    private final JobApplyDecisionService jobApplyDecisionService;
 
     /**
      * 分析当前用户某份简历与指定岗位的匹配度。
@@ -89,6 +94,32 @@ public class JobPositionController {
                 request.getStyle()
         );
 
+        return Result.build(result, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 生成 AI 投递决策。
+     */
+    @PostMapping("/{jobId}/apply-decision")
+    public Result<JobApplyDecisionVO> generateApplyDecision(
+            @PathVariable Long jobId,
+            @Valid @RequestBody JobApplyDecisionRequestDTO request
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+        JobApplyDecisionVO result = jobApplyDecisionService.generateDecision(userId, request.getResumeId(), jobId);
+        return Result.build(result, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 查询最近一次 AI 投递决策。
+     */
+    @GetMapping("/{jobId}/apply-decision")
+    public Result<JobApplyDecisionVO> latestApplyDecision(
+            @PathVariable Long jobId,
+            @RequestParam Long resumeId
+    ) {
+        Long userId = StpUtil.getLoginIdAsLong();
+        JobApplyDecisionVO result = jobApplyDecisionService.getLatestDecision(userId, resumeId, jobId);
         return Result.build(result, ResultCodeEnum.SUCCESS);
     }
 }

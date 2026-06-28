@@ -48,6 +48,11 @@
             :job-id="String(position.id)"
           />
 
+          <JobApplyDecisionPanel
+            v-if="position?.id"
+            :job-id="String(position.id)"
+          />
+
         <section class="company-detail-card">
           <div class="company-title-row">
             <div class="company-logo">
@@ -165,6 +170,7 @@ import type { JobMessageInfo, PositionDetailInfo, PositionInfo } from "../api/ty
 import { useAuthStore } from "../stores/auth";
 import  JobMatchPanel from "../components/JobMatchPanel.vue";
 import  JobGreetingPanel  from "../components/JobGreetingPanel.vue";
+import JobApplyDecisionPanel from "../components/JobApplyDecisionPanel.vue";
 import { saveApplication } from "../api/application";
 
 const route = useRoute();
