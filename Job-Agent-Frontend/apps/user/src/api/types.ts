@@ -615,6 +615,30 @@ export interface MockInterviewReviewInfo {
 }
 
 /**
+ * 模拟面试补课清单。
+ */
+export interface MockInterviewStudyPlanInfo {
+  sessionId: number;
+  reviewId: number;
+  items: MockInterviewStudyItemInfo[];
+}
+
+export interface MockInterviewStudyItemInfo {
+  knowledgePoint: string;
+  suggestion: string;
+  materials: MockInterviewStudyMaterialInfo[];
+}
+
+export interface MockInterviewStudyMaterialInfo {
+  documentId?: number;
+  chunkId?: number;
+  title?: string;
+  content?: string;
+  source?: string;
+  score?: number;
+}
+
+/**
  * 求职沟通记录状态。
  *
  * 说明:

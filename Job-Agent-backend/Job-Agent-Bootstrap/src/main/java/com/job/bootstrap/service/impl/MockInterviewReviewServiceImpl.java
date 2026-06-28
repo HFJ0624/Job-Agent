@@ -6,15 +6,20 @@ import com.job.bootstrap.mapper.MockInterviewAnswerMapper;
 import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.mapper.MockInterviewReviewRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
+import com.job.bootstrap.rag.service.RagRetrievalService;
+import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.MockInterviewReviewService;
 import com.job.common.entity.interview.MockInterviewAnswer;
 import com.job.common.entity.interview.MockInterviewQuestion;
 import com.job.common.entity.interview.MockInterviewReviewRecord;
 import com.job.common.entity.interview.MockInterviewSession;
 import com.job.common.vo.interview.MockInterviewReviewVO;
+import com.job.common.vo.interview.MockInterviewStudyPlanVO;
+import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -34,12 +39,15 @@ import java.util.*;
 public class MockInterviewReviewServiceImpl implements MockInterviewReviewService {
 
     private static final int NOT_DELETED = 0;
-    private static final String SOURCE_RULE = "RULE";
+    private static final String SOURCE_LLM = "LLM";
+    private static final String AI_SCENE_MOCK_INTERVIEW_REVIEW_GENERATE = "MOCK_INTERVIEW_REVIEW_GENERATE";
 
     private final MockInterviewReviewRecordMapper reviewMapper;
     private final MockInterviewSessionMapper sessionMapper;
     private final MockInterviewQuestionMapper questionMapper;
     private final MockInterviewAnswerMapper answerMapper;
+    private final AiModelGatewayService aiModelGatewayService;
+    private final RagRetrievalService ragRetrievalService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -86,22 +94,13 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         }
 
         /*
-         * 4. 计算总分、薄弱题、能力标签。
+         * 4. 把每道题、用户回答和单题评分交给模型生成总体复盘。
+         *    这里不再使用规则拼接兜底，因为用户要求复盘必须是真实 AI 生成。
          */
-        BigDecimal totalScore = calculateAverageScore(answers);
-        String reviewLevel = resolveLevel(totalScore);
-        List<String> weakQuestions = buildWeakQuestions(answers, questionMap);
-        List<String> abilityTags = buildAbilityTags(answers);
+        LlmReviewResult llmResult = generateLlmReview(userId, session, answers, questionMap);
 
         /*
-         * 5. 生成优势、短板和提升计划。
-         */
-        String strengthSummary = buildStrengthSummary(totalScore, answers);
-        String weaknessSummary = buildWeaknessSummary(totalScore, weakQuestions, answers);
-        String improvementPlan = buildImprovementPlan(totalScore, abilityTags, weakQuestions);
-
-        /*
-         * 6. 保存复盘报告。
+         * 5. 保存模型复盘报告。
          */
         MockInterviewReviewRecord record = new MockInterviewReviewRecord();
         record.setUserId(userId);
@@ -110,21 +109,106 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         record.setJobId(session.getJobId());
         record.setJobTitle(session.getJobTitle());
         record.setCompanyName(session.getCompanyName());
-        record.setTotalScore(totalScore);
-        record.setReviewLevel(reviewLevel);
+        record.setTotalScore(toScore(llmResult.totalScore()));
+        record.setReviewLevel(trimOrDefault(llmResult.reviewLevel(), resolveLevel(toScore(llmResult.totalScore()))));
         record.setAnsweredCount(answers.size());
-        record.setStrengthSummary(strengthSummary);
-        record.setWeaknessSummary(weaknessSummary);
-        record.setImprovementPlan(improvementPlan);
-        record.setWeakQuestions(toJson(weakQuestions));
-        record.setAbilityTags(toJson(abilityTags));
+        record.setStrengthSummary(trimOrDefault(llmResult.strengthSummary(), "AI 未返回优势总结。"));
+        record.setWeaknessSummary(trimOrDefault(llmResult.weaknessSummary(), "AI 未返回短板总结。"));
+        record.setImprovementPlan(trimOrDefault(llmResult.improvementPlan(), "AI 未返回提升计划。"));
+        record.setWeakQuestions(toJson(limitStringList(llmResult.weakQuestions())));
+        record.setAbilityTags(toJson(limitStringList(llmResult.abilityTags())));
         record.setScoreDetailJson(toJson(buildScoreDetail(answers)));
-        record.setSource(SOURCE_RULE);
+        record.setSource(SOURCE_LLM);
         record.setIsDeleted(NOT_DELETED);
 
         reviewMapper.insert(record);
 
         return MockInterviewReviewVO.from(record, objectMapper);
+    }
+
+    @Override
+    public MockInterviewStudyPlanVO buildStudyPlan(Long userId, Long sessionId) {
+        MockInterviewSession session = sessionMapper.selectById(sessionId);
+        if (session == null || !userId.equals(session.getUserId())) {
+            throw new BizException("模拟面试会话不存在或无权限访问");
+        }
+
+        MockInterviewReviewRecord review = reviewMapper.selectOne(
+                new LambdaQueryWrapper<MockInterviewReviewRecord>()
+                        .eq(MockInterviewReviewRecord::getUserId, userId)
+                        .eq(MockInterviewReviewRecord::getSessionId, sessionId)
+                        .eq(MockInterviewReviewRecord::getIsDeleted, NOT_DELETED)
+                        .orderByDesc(MockInterviewReviewRecord::getCreateTime)
+                        .last("limit 1")
+        );
+        if (review == null) {
+            throw new BizException("请先生成 AI 面试总结，再查看补课清单");
+        }
+
+        List<String> knowledgePoints = buildStudyKnowledgePoints(review);
+        MockInterviewStudyPlanVO plan = new MockInterviewStudyPlanVO();
+        plan.setSessionId(sessionId);
+        plan.setReviewId(review.getId());
+
+        for (String knowledgePoint : knowledgePoints) {
+            MockInterviewStudyPlanVO.StudyItem item = new MockInterviewStudyPlanVO.StudyItem();
+            item.setKnowledgePoint(knowledgePoint);
+            item.setSuggestion(buildStudySuggestion(knowledgePoint, review.getImprovementPlan()));
+            item.setMaterials(searchStudyMaterials(userId, session, knowledgePoint));
+            plan.getItems().add(item);
+        }
+        return plan;
+    }
+
+    private List<String> buildStudyKnowledgePoints(MockInterviewReviewRecord review) {
+        LinkedHashSet<String> points = new LinkedHashSet<>();
+        points.addAll(readStringList(review.getWeakQuestions()));
+        points.addAll(readStringList(review.getAbilityTags()));
+
+        /*
+         * 补课清单第一版最多展示 6 个知识点，避免一次复盘后页面过长。
+         */
+        return points.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .limit(6)
+                .toList();
+    }
+
+    private String buildStudySuggestion(String knowledgePoint, String improvementPlan) {
+        if (StringUtils.hasText(improvementPlan)) {
+            return "围绕“" + knowledgePoint + "”复习，并结合 AI 提升计划练习：" + improvementPlan;
+        }
+        return "围绕“" + knowledgePoint + "”补充基础概念、常见面试问法和项目中的真实使用场景。";
+    }
+
+    private List<MockInterviewStudyPlanVO.StudyMaterial> searchStudyMaterials(
+            Long userId,
+            MockInterviewSession session,
+            String knowledgePoint
+    ) {
+        String query = safe(session.getJobTitle()) + " " + knowledgePoint + " 面试 标准答案 知识点";
+        List<RagSearchResultVO> results = ragRetrievalService.search(userId, query, 3);
+        if (results == null || results.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return results.stream()
+                .filter(result -> StringUtils.hasText(result.getContent()))
+                .map(this::toStudyMaterial)
+                .limit(3)
+                .toList();
+    }
+
+    private MockInterviewStudyPlanVO.StudyMaterial toStudyMaterial(RagSearchResultVO result) {
+        MockInterviewStudyPlanVO.StudyMaterial material = new MockInterviewStudyPlanVO.StudyMaterial();
+        material.setDocumentId(result.getDocumentId());
+        material.setChunkId(result.getChunkId());
+        material.setTitle(StringUtils.hasText(result.getTitle()) ? result.getTitle() : result.getReferenceTitle());
+        material.setContent(truncate(result.getContent(), 360));
+        material.setSource(result.getSource());
+        material.setScore(result.getScore());
+        return material;
     }
 
     /**
@@ -149,6 +233,187 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         return MockInterviewReviewVO.from(record, objectMapper);
     }
 
+    private LlmReviewResult generateLlmReview(
+            Long userId,
+            MockInterviewSession session,
+            List<MockInterviewAnswer> answers,
+            Map<Long, MockInterviewQuestion> questionMap
+    ) {
+        Map<String, Object> variables = buildReviewVariables(session, answers, questionMap);
+        String prompt = buildReviewPrompt(session, answers, questionMap);
+        String response = aiModelGatewayService.chat(
+                AI_SCENE_MOCK_INTERVIEW_REVIEW_GENERATE,
+                variables,
+                prompt,
+                userId,
+                buildReviewTraceId(userId, session.getId())
+        );
+
+        try {
+            LlmReviewResult result = objectMapper.readValue(extractJson(response), LlmReviewResult.class);
+            validateLlmReviewResult(result);
+            return result;
+        } catch (BizException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BizException("AI复盘结果解析失败，请稍后重试");
+        }
+    }
+
+    private Map<String, Object> buildReviewVariables(
+            MockInterviewSession session,
+            List<MockInterviewAnswer> answers,
+            Map<Long, MockInterviewQuestion> questionMap
+    ) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("jobTitle", session.getJobTitle());
+        variables.put("job_title", session.getJobTitle());
+        variables.put("companyName", session.getCompanyName());
+        variables.put("company_name", session.getCompanyName());
+        variables.put("answeredCount", answers.size());
+        variables.put("answered_count", answers.size());
+        variables.put("averageScore", calculateAverageScore(answers));
+        variables.put("average_score", variables.get("averageScore"));
+        variables.put("answerDetails", buildAnswerDetails(answers, questionMap));
+        variables.put("answer_details", variables.get("answerDetails"));
+        variables.put("jsonFormat", "只输出 JSON 对象，不要 Markdown，不要解释文本。");
+        variables.put("json_format", variables.get("jsonFormat"));
+        return variables;
+    }
+
+    private String buildReviewPrompt(
+            MockInterviewSession session,
+            List<MockInterviewAnswer> answers,
+            Map<Long, MockInterviewQuestion> questionMap
+    ) {
+        StringBuilder detailBuilder = new StringBuilder();
+        int index = 1;
+        for (MockInterviewAnswer answer : answers) {
+            MockInterviewQuestion question = questionMap.get(answer.getQuestionId());
+            detailBuilder.append("题目 ").append(index++).append(":\n");
+            detailBuilder.append("题目内容: ").append(question == null ? "" : safe(question.getQuestionContent())).append('\n');
+            detailBuilder.append("标准答案: ").append(question == null ? "" : safe(question.getStandardAnswer())).append('\n');
+            detailBuilder.append("用户回答: ").append(safe(answer.getAnswerContent())).append('\n');
+            detailBuilder.append("单题得分: ").append(answer.getScore()).append('\n');
+            detailBuilder.append("单题等级: ").append(safe(answer.getLevel())).append('\n');
+            detailBuilder.append("单题优点: ").append(safe(answer.getStrengths())).append('\n');
+            detailBuilder.append("单题问题: ").append(safe(answer.getProblems())).append('\n');
+            detailBuilder.append("单题建议: ").append(safe(answer.getSuggestions())).append("\n\n");
+        }
+
+        return """
+                请你作为资深技术面试官，基于本轮模拟面试所有题目、标准答案、用户回答和单题评分，生成真实的总体复盘。
+                
+                要求:
+                1. totalScore 为 0-100 的数字，综合单题表现给出。
+                2. reviewLevel 只能是 优秀、良好、一般、待提升。
+                3. strengthSummary 总结用户本轮表现中的优势，不要空泛。
+                4. weaknessSummary 总结主要短板，要结合用户回答和题目。
+                5. abilityTags 输出 2-6 个能力标签。
+                6. weakQuestions 输出 1-5 个薄弱题目或薄弱知识点。
+                7. improvementPlan 要明确告诉用户接下来需要补充什么知识、怎么练。
+                8. 只输出 JSON 对象，不要 Markdown，不要解释文本。
+                
+                JSON 格式:
+                {
+                  "totalScore": 82,
+                  "reviewLevel": "良好",
+                  "strengthSummary": "优势总结",
+                  "weaknessSummary": "短板总结",
+                  "abilityTags": ["标签1", "标签2"],
+                  "weakQuestions": ["薄弱题或知识点1"],
+                  "improvementPlan": "提升计划"
+                }
+                
+                岗位: %s
+                公司: %s
+                已回答题数: %d
+                
+                面试明细:
+                %s
+                """.formatted(
+                safe(session.getJobTitle()),
+                safe(session.getCompanyName()),
+                answers.size(),
+                detailBuilder
+        );
+    }
+
+    private List<Map<String, Object>> buildAnswerDetails(
+            List<MockInterviewAnswer> answers,
+            Map<Long, MockInterviewQuestion> questionMap
+    ) {
+        List<Map<String, Object>> details = new ArrayList<>();
+        for (MockInterviewAnswer answer : answers) {
+            MockInterviewQuestion question = questionMap.get(answer.getQuestionId());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("question", question == null ? "" : question.getQuestionContent());
+            item.put("standardAnswer", question == null ? "" : question.getStandardAnswer());
+            item.put("userAnswer", answer.getAnswerContent());
+            item.put("score", answer.getScore());
+            item.put("level", answer.getLevel());
+            item.put("strengths", answer.getStrengths());
+            item.put("problems", answer.getProblems());
+            item.put("suggestions", answer.getSuggestions());
+            details.add(item);
+        }
+        return details;
+    }
+
+    private String extractJson(String response) {
+        if (!StringUtils.hasText(response)) {
+            throw new BizException("AI复盘结果解析失败，请稍后重试");
+        }
+
+        String cleaned = response.trim();
+        int start = cleaned.indexOf('{');
+        int end = cleaned.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new BizException("AI复盘结果解析失败，请稍后重试");
+        }
+        return cleaned.substring(start, end + 1);
+    }
+
+    private void validateLlmReviewResult(LlmReviewResult result) {
+        if (result == null
+                || result.totalScore() == null
+                || !StringUtils.hasText(result.reviewLevel())
+                || !StringUtils.hasText(result.strengthSummary())
+                || !StringUtils.hasText(result.weaknessSummary())
+                || !StringUtils.hasText(result.improvementPlan())) {
+            throw new BizException("AI复盘结果解析失败，请稍后重试");
+        }
+    }
+
+    private BigDecimal toScore(Double score) {
+        double value = score == null ? 0 : Math.max(0, Math.min(100, score));
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private List<String> limitStringList(List<String> values) {
+        if (values == null) {
+            return Collections.emptyList();
+        }
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .limit(6)
+                .toList();
+    }
+
+    private String trimOrDefault(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value.trim() : defaultValue;
+    }
+
+    private String buildReviewTraceId(Long userId, Long sessionId) {
+        return "mock_review_"
+                + userId
+                + "_"
+                + sessionId
+                + "_"
+                + UUID.randomUUID();
+    }
+
     /**
      * 计算平均分。
      */
@@ -163,157 +428,6 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
                 2,
                 RoundingMode.HALF_UP
         );
-    }
-
-    /**
-     * 生成薄弱题目列表。
-     * 规则：低于70分的题目认为是薄弱题。
-     */
-    private List<String> buildWeakQuestions(
-            List<MockInterviewAnswer> answers,
-            Map<Long, MockInterviewQuestion> questionMap
-    ) {
-        List<String> weakList = new ArrayList<>();
-
-        for (MockInterviewAnswer answer : answers) {
-            if (answer.getScore() != null && answer.getScore().doubleValue() < 70) {
-                MockInterviewQuestion question = questionMap.get(answer.getQuestionId());
-
-                if (question != null) {
-                    weakList.add(question.getQuestionContent() + "（得分：" + answer.getScore() + "）");
-                }
-            }
-        }
-
-        if (weakList.isEmpty()) {
-            weakList.add("本轮没有明显低分题，但仍建议继续强化项目细节和技术原理表达。");
-        }
-
-        return weakList;
-    }
-
-    /**
-     * 生成能力标签。
-     */
-    private List<String> buildAbilityTags(List<MockInterviewAnswer> answers) {
-        List<String> tags = new ArrayList<>();
-
-        boolean hasShortAnswerProblem = false;
-        boolean hasStructureProblem = false;
-        boolean hasTechKeywordProblem = false;
-        boolean hasQuantifyProblem = false;
-
-        for (MockInterviewAnswer answer : answers) {
-            String problems = safe(answer.getProblems());
-            String suggestions = safe(answer.getSuggestions());
-
-            if (problems.contains("偏短") || suggestions.contains("回答偏短")) {
-                hasShortAnswerProblem = true;
-            }
-
-            if (problems.contains("结构") || suggestions.contains("结构")) {
-                hasStructureProblem = true;
-            }
-
-            if (problems.contains("技术关键词") || suggestions.contains("技术关键词")) {
-                hasTechKeywordProblem = true;
-            }
-
-            if (suggestions.contains("量化") || suggestions.contains("结果")) {
-                hasQuantifyProblem = true;
-            }
-        }
-
-        if (hasShortAnswerProblem) {
-            tags.add("回答完整度不足");
-        }
-
-        if (hasStructureProblem) {
-            tags.add("结构化表达不足");
-        }
-
-        if (hasTechKeywordProblem) {
-            tags.add("技术关键词表达不足");
-        }
-
-        if (hasQuantifyProblem) {
-            tags.add("量化结果不足");
-        }
-
-        if (tags.isEmpty()) {
-            tags.add("整体表达较稳定");
-        }
-
-        return tags;
-    }
-
-    /**
-     * 生成优势总结。
-     */
-    private String buildStrengthSummary(BigDecimal totalScore, List<MockInterviewAnswer> answers) {
-        double score = totalScore.doubleValue();
-
-        if (score >= 85) {
-            return "本轮模拟面试整体表现较好，回答完整度、结构化表达和技术表达都比较稳定。";
-        }
-
-        if (score >= 70) {
-            return "本轮模拟面试表现中等偏上，能够回答大部分问题，并具备一定项目表达能力。";
-        }
-
-        if (score >= 60) {
-            return "本轮模拟面试已经覆盖了部分问题方向，但回答深度和结构化表达还需要加强。";
-        }
-
-        return "本轮模拟面试暴露出较多基础表达问题，建议先整理项目话术和常见技术问题答案。";
-    }
-
-    /**
-     * 生成短板总结。
-     */
-    private String buildWeaknessSummary(
-            BigDecimal totalScore,
-            List<String> weakQuestions,
-            List<MockInterviewAnswer> answers
-    ) {
-        if (totalScore.doubleValue() >= 85) {
-            return "本轮没有明显短板，后续可以继续提升回答的业务结果、量化指标和技术深度。";
-        }
-
-        return "本轮主要短板集中在回答完整度、表达结构、技术关键词和项目结果描述上。薄弱题数量："
-                + weakQuestions.size()
-                + "。";
-    }
-
-    /**
-     * 生成提升计划。
-     */
-    private String buildImprovementPlan(
-            BigDecimal totalScore,
-            List<String> abilityTags,
-            List<String> weakQuestions
-    ) {
-        StringBuilder builder = new StringBuilder();
-
-        builder.append("建议按照以下步骤提升：\n");
-
-        builder.append("1. 重新整理简历项目，使用“背景-任务-方案-职责-结果”的结构准备话术。\n");
-
-        if (abilityTags.contains("技术关键词表达不足")) {
-            builder.append("2. 针对岗位技能关键词，补充 Java、Spring、MySQL、Redis 等技术原理和项目使用场景。\n");
-        } else {
-            builder.append("2. 继续强化岗位技能关键词与项目场景之间的关联表达。\n");
-        }
-
-        if (abilityTags.contains("量化结果不足")) {
-            builder.append("3. 给项目经历补充量化结果，例如响应时间、并发量、性能提升比例或业务指标。\n");
-        } else {
-            builder.append("3. 每个项目至少准备一个可量化的结果描述，增强说服力。\n");
-        }
-
-        builder.append("4. 针对薄弱题进行二次模拟练习，直到回答能在 1-2 分钟内完整表达。\n");
-
-        return builder.toString();
     }
 
     /**
@@ -352,11 +466,43 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         return value == null ? "" : value;
     }
 
+    private List<String> readStringList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(
+                    json,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)
+            );
+        } catch (Exception exception) {
+            return Collections.emptyList();
+        }
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (!StringUtils.hasText(value) || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (Exception e) {
             return "[]";
         }
+    }
+
+    private record LlmReviewResult(
+            Double totalScore,
+            String reviewLevel,
+            String strengthSummary,
+            String weaknessSummary,
+            List<String> abilityTags,
+            List<String> weakQuestions,
+            String improvementPlan
+    ) {
     }
 }

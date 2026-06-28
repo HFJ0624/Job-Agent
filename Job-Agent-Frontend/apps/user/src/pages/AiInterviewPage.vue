@@ -122,9 +122,93 @@
 
         <el-result v-else icon="success" title="本轮面试已完成" :sub-title="session.summary || '可以在下方查看每道题得分和建议。'">
           <template #extra>
+            <el-button type="success" :loading="reviewLoading" @click="generateReview">
+              {{ review ? "重新生成 AI 总结" : "生成 AI 面试总结" }}
+            </el-button>
             <el-button type="primary" @click="resetInterview">再来一轮</el-button>
           </template>
         </el-result>
+      </div>
+    </section>
+
+    <section class="table-card review-panel" v-if="session && !currentQuestion">
+      <div class="section-title-row">
+        <div>
+          <h2>AI 面试总结</h2>
+          <p class="muted">基于本轮题目、标准答案、你的语音回答和单题评分生成。</p>
+        </div>
+        <el-button type="primary" :loading="reviewLoading" @click="generateReview">
+          {{ review ? "重新生成" : "生成总结" }}
+        </el-button>
+      </div>
+
+      <el-empty v-if="!review" description="面试结束后点击生成，查看总体评分、短板和补充建议。" />
+
+      <div v-else class="review-content">
+        <div class="review-score">
+          <strong>{{ review.totalScore }} 分</strong>
+          <span>{{ review.reviewLevel }}</span>
+          <small>已回答 {{ review.answeredCount }} 题</small>
+        </div>
+
+        <div class="review-grid">
+          <section class="review-block">
+            <h3>优势总结</h3>
+            <p>{{ review.strengthSummary || "-" }}</p>
+          </section>
+
+          <section class="review-block warning">
+            <h3>短板总结</h3>
+            <p>{{ review.weaknessSummary || "-" }}</p>
+          </section>
+
+          <section class="review-block">
+            <h3>能力标签</h3>
+            <div class="review-tags">
+              <el-tag v-for="tag in review.abilityTags" :key="tag" type="success">
+                {{ tag }}
+              </el-tag>
+            </div>
+          </section>
+
+          <section class="review-block warning">
+            <h3>需要补充</h3>
+            <ul>
+              <li v-for="item in review.weakQuestions" :key="item">{{ item }}</li>
+            </ul>
+          </section>
+        </div>
+
+        <section class="review-block plan">
+          <h3>AI 提升计划</h3>
+          <pre>{{ review.improvementPlan }}</pre>
+        </section>
+
+        <section class="review-block study-plan">
+          <div class="study-plan-title">
+            <div>
+              <h3>薄弱知识点补课清单</h3>
+              <p>根据 AI 总结里的薄弱点，从 RAG 知识库召回学习材料。</p>
+            </div>
+            <el-button size="small" :loading="studyPlanLoading" @click="loadStudyPlan">刷新清单</el-button>
+          </div>
+
+          <el-empty v-if="!studyPlan?.items?.length" description="暂无补课材料，请确认 RAG 知识库已有相关内容。" />
+
+          <div v-else class="study-list">
+            <article v-for="item in studyPlan.items" :key="item.knowledgePoint" class="study-item">
+              <h4>{{ item.knowledgePoint }}</h4>
+              <p>{{ item.suggestion }}</p>
+              <div class="study-materials">
+                <section v-for="material in item.materials" :key="`${material.documentId}-${material.chunkId}`" class="study-material">
+                  <strong>{{ material.title || "学习材料" }}</strong>
+                  <p>{{ material.content }}</p>
+                  <small v-if="material.score !== undefined">相关度 {{ material.score }}</small>
+                </section>
+              </div>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -154,7 +238,8 @@ import { ElMessage } from "element-plus";
 import { pageFrontPositions } from "../api/job";
 import { listResumes } from "../api/resume";
 import { getCurrentMockQuestion, getMockInterviewDetail, startAiInterview, submitMockAudioAnswer } from "../api/mockInterview";
-import type { MockInterviewAnswerInfo, MockInterviewQuestionInfo, MockInterviewSessionInfo, PositionInfo, ResumeInfo } from "../api/types";
+import { generateMockInterviewReview, getLatestMockInterviewReview, getMockInterviewStudyPlan } from "../api/mockInterviewReview";
+import type { MockInterviewAnswerInfo, MockInterviewQuestionInfo, MockInterviewReviewInfo, MockInterviewSessionInfo, MockInterviewStudyPlanInfo, PositionInfo, ResumeInfo } from "../api/types";
 
 const resumes = ref<ResumeInfo[]>([]);
 const jobs = ref<PositionInfo[]>([]);
@@ -174,6 +259,10 @@ const loadingJobs = ref(false);
 const starting = ref(false);
 const submitting = ref(false);
 const loadingDetail = ref(false);
+const reviewLoading = ref(false);
+const review = ref<MockInterviewReviewInfo | null>(null);
+const studyPlanLoading = ref(false);
+const studyPlan = ref<MockInterviewStudyPlanInfo | null>(null);
 
 const form = reactive({ resumeId: "", jobId: "", questionCount: 6, excludeRecentHours: 72 });
 
@@ -210,6 +299,8 @@ async function startInterview() {
   try {
     session.value = await startAiInterview(form);
     currentQuestion.value = await getCurrentMockQuestion(session.value.id);
+    review.value = null;
+    studyPlan.value = null;
     await openCamera();
   } finally {
     starting.value = false;
@@ -279,6 +370,10 @@ async function submitCurrentAudio() {
     await submitMockAudioAnswer(session.value.id, currentQuestion.value.id, audio, recordingSeconds.value);
     await reloadSession();
     currentQuestion.value = await getCurrentMockQuestion(session.value.id);
+    if (!currentQuestion.value) {
+      closeCamera();
+      await loadLatestReview();
+    }
   } finally {
     submitting.value = false;
   }
@@ -294,9 +389,51 @@ async function reloadSession() {
   }
 }
 
+async function loadLatestReview() {
+  if (!session.value) return;
+  try {
+    review.value = await getLatestMockInterviewReview(session.value.id);
+    if (review.value) {
+      await loadStudyPlan();
+    }
+  } catch {
+    review.value = null;
+    studyPlan.value = null;
+  }
+}
+
+async function generateReview() {
+  if (!session.value) return;
+  reviewLoading.value = true;
+  try {
+    review.value = await generateMockInterviewReview(session.value.id);
+    await loadStudyPlan();
+    ElMessage.success("AI 面试总结已生成");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "AI 面试总结生成失败");
+  } finally {
+    reviewLoading.value = false;
+  }
+}
+
+async function loadStudyPlan() {
+  if (!session.value || !review.value) return;
+  studyPlanLoading.value = true;
+  try {
+    studyPlan.value = await getMockInterviewStudyPlan(session.value.id);
+  } catch (error) {
+    studyPlan.value = null;
+    ElMessage.error(error instanceof Error ? error.message : "补课清单加载失败");
+  } finally {
+    studyPlanLoading.value = false;
+  }
+}
+
 function resetInterview() {
   session.value = null;
   currentQuestion.value = null;
+  review.value = null;
+  studyPlan.value = null;
 }
 
 onMounted(loadInitialData);
@@ -493,6 +630,147 @@ onUnmounted(closeCamera);
   padding: 18px;
 }
 
+.review-panel {
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.review-content {
+  display: grid;
+  gap: 16px;
+}
+
+.review-score {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #ecfeff;
+}
+
+.review-score strong {
+  color: #0f766e;
+  font-size: 30px;
+}
+
+.review-score span {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.review-score small {
+  color: #64748b;
+}
+
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.review-block {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.review-block.warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.review-block.plan {
+  background: #f8fafc;
+}
+
+.review-block.study-plan {
+  background: #f8fafc;
+}
+
+.review-block h3 {
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-size: 16px;
+}
+
+.review-block p,
+.review-block li,
+.review-block pre {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.review-block ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.review-block pre {
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+.review-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.study-plan-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.study-plan-title p {
+  margin: 0;
+  color: #64748b;
+}
+
+.study-list {
+  display: grid;
+  gap: 12px;
+}
+
+.study-item {
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.study-item h4 {
+  margin: 0 0 8px;
+  color: #0f172a;
+}
+
+.study-materials {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.study-material {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.study-material strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #0f766e;
+}
+
+.study-material small {
+  color: #64748b;
+}
+
 .section-title-row {
   justify-content: space-between;
   margin-bottom: 14px;
@@ -523,6 +801,14 @@ onUnmounted(closeCamera);
 
   .guide-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .study-plan-title {
+    flex-direction: column;
   }
 }
 </style>

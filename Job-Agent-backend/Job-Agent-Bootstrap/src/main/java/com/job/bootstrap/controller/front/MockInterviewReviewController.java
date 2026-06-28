@@ -6,6 +6,7 @@ import com.job.common.dto.interview.MockInterviewReviewGenerateDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.interview.MockInterviewReviewVO;
+import com.job.common.vo.interview.MockInterviewStudyPlanVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -47,6 +48,16 @@ public class MockInterviewReviewController {
 
         MockInterviewReviewVO vo = mockInterviewReviewService.getLatestReview(userId, sessionId);
 
+        return Result.build(vo, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 根据最近一次复盘报告生成补课清单。
+     */
+    @GetMapping("/study-plan")
+    public Result<MockInterviewStudyPlanVO> studyPlan(@RequestParam Long sessionId) {
+        Long userId = StpUtil.getLoginIdAsLong();
+        MockInterviewStudyPlanVO vo = mockInterviewReviewService.buildStudyPlan(userId, sessionId);
         return Result.build(vo, ResultCodeEnum.SUCCESS);
     }
 }

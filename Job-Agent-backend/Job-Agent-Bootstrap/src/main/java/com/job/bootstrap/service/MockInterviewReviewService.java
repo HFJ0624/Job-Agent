@@ -1,6 +1,7 @@
 package com.job.bootstrap.service;
 
 import com.job.common.vo.interview.MockInterviewReviewVO;
+import com.job.common.vo.interview.MockInterviewStudyPlanVO;
 
 /**
  * 作者:hfj
@@ -25,4 +26,13 @@ public interface MockInterviewReviewService {
      * @return 最近一次复盘报告
      */
     MockInterviewReviewVO getLatestReview(Long userId, Long sessionId);
+
+    /**
+     * 根据最近一次复盘报告生成补课清单。
+     *
+     * @param userId 当前用户ID
+     * @param sessionId 模拟面试会话ID
+     * @return 补课清单
+     */
+    MockInterviewStudyPlanVO buildStudyPlan(Long userId, Long sessionId);
 }
