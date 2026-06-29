@@ -690,6 +690,54 @@ export interface MockInterviewWrongQuestionInfo {
   updateTime?: string;
 }
 
+export interface MockInterviewLearningPlanInfo {
+  id: number;
+  planTitle: string;
+  planDays: number;
+  source: string;
+  weakKnowledgePoints: string[];
+  status: string;
+  createTime?: string;
+  items: MockInterviewLearningPlanItemInfo[];
+}
+
+export interface MockInterviewLearningPlanItemInfo {
+  id: number;
+  dayNo: number;
+  title: string;
+  knowledgePoint: string;
+  learningGoal?: string;
+  practiceTask?: string;
+  reviewSuggestion?: string;
+  completionStatus: string;
+  materials: MockInterviewLearningPlanMaterialInfo[];
+}
+
+export interface MockInterviewLearningPlanMaterialInfo {
+  documentId?: number;
+  chunkId?: number;
+  title?: string;
+  content?: string;
+  source?: string;
+  score?: number;
+}
+
+export interface MockInterviewStudyPlanRetestInfo {
+  id: number;
+  planId: number;
+  itemId: number;
+  knowledgePoint: string;
+  questionContent: string;
+  standardAnswer?: string;
+  userAnswer?: string;
+  score?: number;
+  passed?: boolean;
+  feedback?: string;
+  suggestion?: string;
+  status: string;
+  createTime?: string;
+}
+
 /**
  * 求职沟通记录状态。
  *

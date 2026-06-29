@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { getAdminDashboardOverview } from "../../api/dashboard";
 import type {
+  AdminFollowUpAgentItem,
   AdminDashboardMetric,
   AdminDashboardPendingItem,
   AdminDashboardSystemItem
@@ -12,6 +13,7 @@ const loading = ref(false);
 const metrics = ref<AdminDashboardMetric[]>([]);
 const pendingItems = ref<AdminDashboardPendingItem[]>([]);
 const systemItems = ref<AdminDashboardSystemItem[]>([]);
+const followUpAgentItems = ref<AdminFollowUpAgentItem[]>([]);
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(value || 0);
@@ -32,6 +34,7 @@ async function loadDashboard() {
     metrics.value = overview?.metrics || [];
     pendingItems.value = overview?.pendingItems || [];
     systemItems.value = overview?.systemItems || [];
+    followUpAgentItems.value = overview?.followUpAgentItems || [];
   } catch (error) {
     console.error("[Job-Agent Admin] 加载首页看板失败", error);
     ElMessage.error("首页看板数据加载失败");
@@ -52,6 +55,31 @@ onMounted(loadDashboard);
     </el-card>
     <el-empty v-if="!loading && metrics.length === 0" description="暂无看板数据" />
   </section>
+
+  <el-card v-loading="loading" shadow="never" class="follow-agent-card">
+    <template #header>
+      <div class="card-header">
+        <span>求职跟进 Agent</span>
+        <el-tag type="info" effect="plain">自动提醒 / 邮件通知 / 面试准备</el-tag>
+      </div>
+    </template>
+    <div v-if="followUpAgentItems.length > 0" class="follow-agent-grid">
+      <div v-for="item in followUpAgentItems" :key="item.title" class="follow-agent-item">
+        <div>
+          <span>{{ item.title }}</span>
+          <strong>{{ formatNumber(item.value) }}</strong>
+        </div>
+        <el-tag
+          size="small"
+          :type="item.level === 'danger' ? 'danger' : item.level === 'warning' ? 'warning' : item.level === 'success' ? 'success' : 'info'"
+          effect="light"
+        >
+          {{ item.description }}
+        </el-tag>
+      </div>
+    </div>
+    <el-empty v-else description="暂无求职跟进 Agent 数据" />
+  </el-card>
 
   <section class="admin-two-column">
     <el-card v-loading="loading" shadow="never">

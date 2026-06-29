@@ -6,28 +6,39 @@ import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiPromptVersionMapper;
+import com.job.bootstrap.mapper.JobApplicationRecordMapper;
 import com.job.bootstrap.mapper.JobPositionMapper;
+import com.job.bootstrap.mapper.JobReminderMapper;
 import com.job.bootstrap.mapper.JobResumeMapper;
 import com.job.bootstrap.mapper.JobUserMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.mapper.RagChunkMapper;
 import com.job.bootstrap.mapper.RagDocumentMapper;
+import com.job.bootstrap.mapper.WorkflowTaskMapper;
 import com.job.bootstrap.service.AdminDashboardService;
 import com.job.common.entity.agent.AgentObservationAlertRecord;
 import com.job.common.entity.agent.AgentTraceLog;
 import com.job.common.entity.ai.AiModelCallLog;
 import com.job.common.entity.ai.AiModelConfig;
 import com.job.common.entity.ai.AiPromptVersion;
+import com.job.common.entity.application.JobApplicationRecord;
 import com.job.common.entity.interview.MockInterviewSession;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.rag.RagChunk;
 import com.job.common.entity.rag.RagDocument;
+import com.job.common.entity.reminder.JobReminder;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.entity.user.JobUser;
+import com.job.common.entity.workflow.WorkflowTask;
+import com.job.common.vo.admin.AdminFollowUpAgentItemVO;
 import com.job.common.vo.admin.AdminDashboardMetricVO;
 import com.job.common.vo.admin.AdminDashboardOverviewVO;
 import com.job.common.vo.admin.AdminDashboardPendingItemVO;
 import com.job.common.vo.admin.AdminDashboardSystemItemVO;
+import com.job.enums.ReminderStatus;
+import com.job.enums.ReminderType;
+import com.job.enums.WorkflowTaskStatus;
+import com.job.enums.WorkflowTaskType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -51,10 +62,15 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     private static final String STATUS_PUBLISHED = "PUBLISHED";
     private static final String STATUS_OPEN = "OPEN";
     private static final String STATUS_FINISHED = "FINISHED";
+    private static final String APPLICATION_APPLIED = "APPLIED";
+    private static final String APPLICATION_INTERVIEWING = "INTERVIEWING";
 
     private final JobUserMapper userMapper;
     private final JobPositionMapper positionMapper;
     private final JobResumeMapper resumeMapper;
+    private final JobApplicationRecordMapper applicationRecordMapper;
+    private final JobReminderMapper reminderMapper;
+    private final WorkflowTaskMapper workflowTaskMapper;
     private final AgentTraceLogMapper traceLogMapper;
     private final AiModelCallLogMapper modelCallLogMapper;
     private final RagDocumentMapper ragDocumentMapper;
@@ -107,6 +123,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         overview.getSystemItems().add(new AdminDashboardSystemItemVO("Prompt 版本", countPublishedPromptVersions() + " 个已发布版本"));
         overview.getSystemItems().add(new AdminDashboardSystemItemVO("模拟面试", countMockInterviewSessions(null, null, null) + " 场累计 / 今日 " + countMockInterviewSessions(null, todayStart, tomorrowStart)));
         overview.getSystemItems().add(new AdminDashboardSystemItemVO("已完成面试", countMockInterviewSessions(STATUS_FINISHED, null, null) + " 场"));
+        fillFollowUpAgentItems(overview, todayStart, tomorrowStart);
         return overview;
     }
 
@@ -222,6 +239,99 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         }
         betweenCreateTime(wrapper, MockInterviewSession::getCreateTime, startTime, endTime);
         return mockInterviewSessionMapper.selectCount(wrapper);
+    }
+
+    /**
+     * 填充求职跟进 Agent 看板。
+     *
+     * 方法步骤：
+     * 1. 从求职进度表统计当前已投递和面试中的记录，判断 Agent 可介入的业务规模。
+     * 2. 从提醒表统计今日待提醒和面试提醒，判断自动提醒是否生成。
+     * 3. 从工作流任务表统计面试邮件任务，判断邮件通知链路是否健康。
+     */
+    private void fillFollowUpAgentItems(AdminDashboardOverviewVO overview, Date todayStart, Date tomorrowStart) {
+        overview.getFollowUpAgentItems().add(new AdminFollowUpAgentItemVO(
+                "已投递",
+                countApplications(APPLICATION_APPLIED, null, null),
+                "等待 HR 反馈的求职记录",
+                "info"
+        ));
+        overview.getFollowUpAgentItems().add(new AdminFollowUpAgentItemVO(
+                "面试中",
+                countApplications(APPLICATION_INTERVIEWING, null, null),
+                "已进入面试阶段的求职记录",
+                "warning"
+        ));
+        overview.getFollowUpAgentItems().add(new AdminFollowUpAgentItemVO(
+                "今日待提醒",
+                countPendingReminders(null, todayStart, tomorrowStart),
+                "今天需要用户处理的提醒",
+                "warning"
+        ));
+        overview.getFollowUpAgentItems().add(new AdminFollowUpAgentItemVO(
+                "面试提醒",
+                countPendingReminders(ReminderType.INTERVIEW.name(), null, null),
+                "待触达的面试准备提醒",
+                "success"
+        ));
+        overview.getFollowUpAgentItems().add(new AdminFollowUpAgentItemVO(
+                "邮件任务失败",
+                countInterviewEmailTasks(WorkflowTaskStatus.FAILED_FINAL.name(), null, null),
+                "最终失败的面试通知邮件任务",
+                "danger"
+        ));
+        overview.getFollowUpAgentItems().add(new AdminFollowUpAgentItemVO(
+                "今日邮件任务",
+                countInterviewEmailTasks(null, todayStart, tomorrowStart),
+                "今天创建的面试通知邮件任务",
+                "info"
+        ));
+    }
+
+    /**
+     * 统计求职进度数量。
+     */
+    private long countApplications(String status, Date startTime, Date endTime) {
+        LambdaQueryWrapper<JobApplicationRecord> wrapper = new LambdaQueryWrapper<JobApplicationRecord>()
+                .eq(JobApplicationRecord::getIsDeleted, NOT_DELETED);
+        if (status != null) {
+            wrapper.eq(JobApplicationRecord::getStatus, status);
+        }
+        betweenCreateTime(wrapper, JobApplicationRecord::getCreateTime, startTime, endTime);
+        return applicationRecordMapper.selectCount(wrapper);
+    }
+
+    /**
+     * 统计待处理提醒数量。
+     */
+    private long countPendingReminders(String reminderType, Date startTime, Date endTime) {
+        LambdaQueryWrapper<JobReminder> wrapper = new LambdaQueryWrapper<JobReminder>()
+                .eq(JobReminder::getIsDeleted, NOT_DELETED)
+                .eq(JobReminder::getReminderStatus, ReminderStatus.PENDING.name());
+        if (reminderType != null) {
+            wrapper.eq(JobReminder::getReminderType, reminderType);
+        }
+        if (startTime != null) {
+            wrapper.ge(JobReminder::getRemindTime, startTime);
+        }
+        if (endTime != null) {
+            wrapper.lt(JobReminder::getRemindTime, endTime);
+        }
+        return reminderMapper.selectCount(wrapper);
+    }
+
+    /**
+     * 统计面试邮件通知工作流任务数量。
+     */
+    private long countInterviewEmailTasks(String status, Date startTime, Date endTime) {
+        LambdaQueryWrapper<WorkflowTask> wrapper = new LambdaQueryWrapper<WorkflowTask>()
+                .eq(WorkflowTask::getIsDeleted, NOT_DELETED)
+                .eq(WorkflowTask::getTaskType, WorkflowTaskType.INTERVIEW_EMAIL_NOTIFY.name());
+        if (status != null) {
+            wrapper.eq(WorkflowTask::getStatus, status);
+        }
+        betweenCreateTime(wrapper, WorkflowTask::getCreateTime, startTime, endTime);
+        return workflowTaskMapper.selectCount(wrapper);
     }
 
     private long countOpenAlerts() {

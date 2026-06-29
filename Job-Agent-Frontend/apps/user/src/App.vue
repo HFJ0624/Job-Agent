@@ -38,6 +38,7 @@ async function handleLogout() {
         <RouterLink to="/communication">沟通记录</RouterLink>
         <RouterLink to="/ai-interview">AI 面试</RouterLink>
         <RouterLink to="/wrong-questions">错题本</RouterLink>
+        <RouterLink to="/learning-plan">学习计划</RouterLink>
       </nav>
 
       <div class="top-actions">

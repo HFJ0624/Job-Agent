@@ -16,4 +16,9 @@ public class AdminDashboardOverviewVO {
     private List<AdminDashboardPendingItemVO> pendingItems = new ArrayList<>();
 
     private List<AdminDashboardSystemItemVO> systemItems = new ArrayList<>();
+
+    /**
+     * 求职跟进 Agent 看板数据。
+     */
+    private List<AdminFollowUpAgentItemVO> followUpAgentItems = new ArrayList<>();
 }

@@ -56,12 +56,23 @@ export interface AdminDashboardSystemItem {
 }
 
 /**
+ * 后台首页求职跟进 Agent 看板项。
+ */
+export interface AdminFollowUpAgentItem {
+  title: string;
+  value: number;
+  description: string;
+  level: "success" | "warning" | "danger" | "info" | string;
+}
+
+/**
  * 后台首页聚合数据。
  */
 export interface AdminDashboardOverview {
   metrics: AdminDashboardMetric[];
   pendingItems: AdminDashboardPendingItem[];
   systemItems: AdminDashboardSystemItem[];
+  followUpAgentItems?: AdminFollowUpAgentItem[];
 }
 
 /**

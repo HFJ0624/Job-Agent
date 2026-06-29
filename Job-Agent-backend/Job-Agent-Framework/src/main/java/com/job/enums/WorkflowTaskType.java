@@ -9,5 +9,10 @@ public enum WorkflowTaskType {
 
     RAG_REBUILD_USER,
 
-    AGENT_EVAL_RUN_DATASET
+    AGENT_EVAL_RUN_DATASET,
+
+    /**
+     * 已约面试后，异步给用户发送面试通知邮件。
+     */
+    INTERVIEW_EMAIL_NOTIFY
 }

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
+import com.job.bootstrap.service.ApplicationFollowUpAgentService;
 import com.job.bootstrap.service.JobApplicationService;
 import com.job.bootstrap.service.JobCompanyService;
 import com.job.bootstrap.service.JobPositionService;
@@ -33,6 +34,7 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     private final JobApplicationRecordMapper jobApplicationRecordMapper;
     private final JobPositionService jobPositionService;
     private final JobCompanyService jobCompanyService;
+    private final ApplicationFollowUpAgentService applicationFollowUpAgentService;
 
     private static final String STATUS_INTERESTED = "INTERESTED";
     private static final String STATUS_COMMUNICATED = "COMMUNICATED";
@@ -199,6 +201,13 @@ public class JobApplicationServiceImpl implements JobApplicationService {
         record.setLastAction("状态更新为：" + newStatus);
         jobApplicationRecordMapper.updateById(record);
 
+        /*
+         * 状态进入面试中后，统一交给求职跟进 Agent 创建提醒、准备材料和邮件通知任务。
+         */
+        if (STATUS_INTERVIEWING.equals(newStatus)) {
+            applicationFollowUpAgentService.onInterviewScheduled(record);
+        }
+
         return JobApplicationVO.from(record);
     }
 
@@ -251,6 +260,13 @@ public class JobApplicationServiceImpl implements JobApplicationService {
         }
 
         jobApplicationRecordMapper.updateById(application);
+
+        /*
+         * 沟通记录同步出面试时间时，也走同一个自动跟进入口，避免只有手动更新状态才触发。
+         */
+        if (interviewTime != null) {
+            applicationFollowUpAgentService.onInterviewScheduled(application);
+        }
     }
 
     /**
