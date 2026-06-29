@@ -99,6 +99,48 @@ select {
   font-weight: 800;
 }
 
+.user-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  display: none;
+  min-width: 148px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+}
+
+.user-menu:hover .user-dropdown,
+.user-menu:focus-within .user-dropdown {
+  display: grid;
+  gap: 4px;
+}
+
+.user-dropdown a {
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #375354;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.user-dropdown a:hover,
+.user-dropdown .router-link-active {
+  color: var(--primary-dark);
+  background: #eefafa;
+}
+
 .nav-avatar {
   display: grid;
   width: 32px;

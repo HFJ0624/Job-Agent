@@ -153,6 +153,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/ExternalConnectorManage"
   },
   {
+    id: 17,
+    path: "/agent/follow-up",
+    name: "FollowUpAgent",
+    title: "求职跟进 Agent",
+    icon: "Bell",
+    component: "agent/FollowUpAgentManage"
+  },
+  {
     id: 13,
     path: "/interview/mock",
     name: "MockInterviewManage",

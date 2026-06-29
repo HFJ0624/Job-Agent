@@ -2,15 +2,19 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.mapper.AgentFollowUpRuleMapper;
 import com.job.bootstrap.mapper.JobReminderMapper;
 import com.job.bootstrap.mapper.WorkflowTaskMapper;
 import com.job.bootstrap.service.ApplicationFollowUpAgentService;
 import com.job.bootstrap.service.InterviewPrepareService;
 import com.job.bootstrap.service.WorkflowTaskService;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
+import com.job.common.entity.agent.AgentFollowUpRule;
 import com.job.common.entity.application.JobApplicationRecord;
 import com.job.common.entity.reminder.JobReminder;
 import com.job.common.entity.workflow.WorkflowTask;
+import com.job.enums.AgentFollowUpRuleStatus;
+import com.job.enums.AgentFollowUpRuleType;
 import com.job.enums.ReminderStatus;
 import com.job.enums.ReminderType;
 import com.job.enums.WorkflowTaskStatus;
@@ -26,12 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 功能：求职跟进 Agent 第一版实现。
- *
- * 设计说明：
- * 1. 这里不直接发送邮件，而是创建工作流任务，让异步调度器负责发送和重试。
- * 2. 面试准备提醒复用 job_reminder，避免新增一套重复的待办表。
- * 3. 面试准备材料复用 InterviewPrepareService，保证和用户手动点击“生成面试准备”得到的是同一套结果。
+ * 求职跟进 Agent 事件服务。
  */
 @Service
 @RequiredArgsConstructor
@@ -39,39 +38,39 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
 
     private static final int NOT_DELETED = 0;
     private static final int UNREAD = 0;
-    private static final int INTERVIEW_ADVANCE_MINUTES = 30;
+    private static final int DEFAULT_INTERVIEW_ADVANCE_MINUTES = 30;
+    private static final int DEFAULT_MAX_RETRY_COUNT = 3;
+    private static final int DEFAULT_RETRY_INTERVAL_SECONDS = 300;
 
+    private final AgentFollowUpRuleMapper agentFollowUpRuleMapper;
     private final JobReminderMapper jobReminderMapper;
     private final WorkflowTaskMapper workflowTaskMapper;
     private final WorkflowTaskService workflowTaskService;
     private final InterviewPrepareService interviewPrepareService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 面试已确认事件入口。
+     *
+     * 步骤：
+     * 1. 读取后台启用的 INTERVIEW_SCHEDULED 规则，让提醒时间、文案、邮件开关可配置。
+     * 2. 创建或更新面试准备提醒，避免用户重复改面试时间后生成多条提醒。
+     * 3. 尝试生成面试准备材料，失败不阻断主流程。
+     * 4. 按规则创建异步邮件任务，让工作流负责发送、重试和失败记录。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void onInterviewScheduled(JobApplicationRecord application) {
         if (application == null || application.getId() == null || application.getInterviewTime() == null) {
             return;
         }
-
-        /*
-         * 1. 自动生成或更新面试准备提醒，让用户端提醒中心能看到这件事。
-         */
-        createOrUpdateInterviewPrepareReminder(application);
-
-        /*
-         * 2. 尝试提前生成面试准备材料。
-         *    这里是“尽力而为”：准备材料失败不能阻断主流程，否则用户更新面试状态会被无关失败回滚。
-         */
+        AgentFollowUpRule rule = loadInterviewScheduledRule();
+        createOrUpdateInterviewPrepareReminder(application, rule);
         tryGenerateInterviewPrepare(application);
-
-        /*
-         * 3. 创建异步邮件通知任务，发送失败由工作流重试，不影响当前求职状态更新。
-         */
-        createInterviewEmailTask(application);
+        createInterviewEmailTask(application, rule);
     }
 
-    private void createOrUpdateInterviewPrepareReminder(JobApplicationRecord application) {
+    private void createOrUpdateInterviewPrepareReminder(JobApplicationRecord application, AgentFollowUpRule rule) {
         JobReminder reminder = jobReminderMapper.selectOne(
                 new LambdaQueryWrapper<JobReminder>()
                         .eq(JobReminder::getUserId, application.getUserId())
@@ -89,21 +88,24 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
             reminder.setJobId(application.getJobId());
             reminder.setReminderType(ReminderType.INTERVIEW.name());
             reminder.setIsDeleted(NOT_DELETED);
+            reminder.setCreateTime(new Date());
         }
 
+        int advanceMinutes = interviewAdvanceMinutes(rule);
         Date eventTime = application.getInterviewTime();
-        Date remindTime = minusMinutes(eventTime, INTERVIEW_ADVANCE_MINUTES);
+        Date remindTime = minusMinutes(eventTime, advanceMinutes);
         if (remindTime.before(new Date())) {
             remindTime = new Date();
         }
 
-        reminder.setReminderTitle("面试准备提醒");
-        reminder.setReminderContent(buildReminderContent(application));
+        reminder.setReminderTitle(safeText(rule == null ? null : rule.getReminderTitle(), "面试准备提醒"));
+        reminder.setReminderContent(renderRuleTemplate(rule, application));
         reminder.setEventTime(eventTime);
         reminder.setRemindTime(remindTime);
-        reminder.setAdvanceMinutes(INTERVIEW_ADVANCE_MINUTES);
+        reminder.setAdvanceMinutes(advanceMinutes);
         reminder.setReminderStatus(ReminderStatus.PENDING.name());
         reminder.setIsRead(UNREAD);
+        reminder.setUpdateTime(new Date());
 
         if (reminder.getId() == null) {
             jobReminderMapper.insert(reminder);
@@ -112,7 +114,10 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
         }
     }
 
-    private void createInterviewEmailTask(JobApplicationRecord application) {
+    private void createInterviewEmailTask(JobApplicationRecord application, AgentFollowUpRule rule) {
+        if (rule != null && safeInt(rule.getEmailEnabled()) <= 0) {
+            return;
+        }
         if (hasActiveInterviewEmailTask(application)) {
             return;
         }
@@ -122,8 +127,8 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
         request.setBizId(application.getId());
         request.setUserId(application.getUserId());
         request.setRequestJson(toJson(buildEmailTaskPayload(application)));
-        request.setMaxRetryCount(3);
-        request.setRetryIntervalSeconds(300);
+        request.setMaxRetryCount(rule == null ? DEFAULT_MAX_RETRY_COUNT : safePositive(rule.getMaxRetryCount(), DEFAULT_MAX_RETRY_COUNT));
+        request.setRetryIntervalSeconds(rule == null ? DEFAULT_RETRY_INTERVAL_SECONDS : safePositive(rule.getRetryIntervalSeconds(), DEFAULT_RETRY_INTERVAL_SECONDS));
         workflowTaskService.createTask(request);
     }
 
@@ -139,8 +144,8 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
             );
         } catch (Exception ignored) {
             /*
-             * 面试准备材料属于增强能力，不应该影响求职状态、提醒和邮件任务创建。
-             * 失败原因可以通过后续面试准备入口再次触发时暴露给用户。
+             * 面试准备材料是增强能力，不能影响状态更新、提醒创建和邮件任务创建。
+             * 真实失败原因可以在用户手动重新生成准备材料时暴露，主链路这里保持可用。
              */
         }
     }
@@ -161,6 +166,17 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
         return count != null && count > 0;
     }
 
+    private AgentFollowUpRule loadInterviewScheduledRule() {
+        return agentFollowUpRuleMapper.selectOne(
+                new LambdaQueryWrapper<AgentFollowUpRule>()
+                        .eq(AgentFollowUpRule::getRuleType, AgentFollowUpRuleType.INTERVIEW_SCHEDULED.name())
+                        .eq(AgentFollowUpRule::getStatus, AgentFollowUpRuleStatus.ENABLED.name())
+                        .eq(AgentFollowUpRule::getIsDeleted, NOT_DELETED)
+                        .orderByDesc(AgentFollowUpRule::getCreateTime)
+                        .last("LIMIT 1")
+        );
+    }
+
     private Map<String, Object> buildEmailTaskPayload(JobApplicationRecord application) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("applicationId", application.getId());
@@ -172,7 +188,19 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
         return payload;
     }
 
-    private String buildReminderContent(JobApplicationRecord application) {
+    private String renderRuleTemplate(AgentFollowUpRule rule, JobApplicationRecord application) {
+        String template = rule == null ? null : rule.getReminderTemplate();
+        if (!StringUtils.hasText(template)) {
+            return buildDefaultReminderContent(application);
+        }
+        return template.trim()
+                .replace("{companyName}", safe(application.getCompanyName()))
+                .replace("{jobTitle}", safe(application.getJobTitle()))
+                .replace("{hrName}", safe(application.getHrName()))
+                .replace("{status}", safe(application.getStatus()));
+    }
+
+    private String buildDefaultReminderContent(JobApplicationRecord application) {
         StringBuilder builder = new StringBuilder();
         builder.append("你已约面试，请提前准备简历项目、岗位 JD 和常见问答。");
         if (StringUtils.hasText(application.getCompanyName()) || StringUtils.hasText(application.getJobTitle())) {
@@ -183,6 +211,13 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
                     .append("。");
         }
         return builder.toString();
+    }
+
+    private int interviewAdvanceMinutes(AgentFollowUpRule rule) {
+        if (rule == null || rule.getDelayMinutes() == null || rule.getDelayMinutes() == 0) {
+            return DEFAULT_INTERVIEW_ADVANCE_MINUTES;
+        }
+        return Math.abs(rule.getDelayMinutes());
     }
 
     private Date minusMinutes(Date date, int minutes) {
@@ -202,5 +237,17 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
 
     private String safe(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
+    }
+
+    private String safeText(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value.trim() : defaultValue;
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private int safePositive(Integer value, int defaultValue) {
+        return value == null || value <= 0 ? defaultValue : value;
     }
 }

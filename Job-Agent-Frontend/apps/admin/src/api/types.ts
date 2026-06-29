@@ -960,6 +960,66 @@ export interface PageResult<T> {
   pages: number;
 }
 
+export interface AgentFollowUpApplicationQuery {
+  pageNum: number;
+  pageSize: number;
+  userId?: string | number;
+  status?: string;
+  keyword?: string;
+  failedEmailOnly?: boolean;
+}
+
+export interface AgentFollowUpApplicationInfo {
+  id: number;
+  userId: number;
+  jobId?: number;
+  resumeId?: number;
+  companyName?: string;
+  jobTitle?: string;
+  status?: string;
+  priority?: string;
+  hrName?: string;
+  hrContact?: string;
+  applyTime?: string;
+  interviewTime?: string;
+  nextFollowTime?: string;
+  lastAction?: string;
+  reminderCount?: number;
+  pendingReminderCount?: number;
+  emailTaskCount?: number;
+  failedEmailTaskCount?: number;
+  latestEmailTaskStatus?: string;
+  latestEmailTaskTime?: string;
+}
+
+export interface AgentFollowUpRuleQuery {
+  pageNum: number;
+  pageSize: number;
+  ruleName?: string;
+  ruleType?: string;
+  status?: string;
+}
+
+export interface AgentFollowUpRuleInfo {
+  id?: number;
+  ruleCode: string;
+  ruleName: string;
+  ruleType: string;
+  triggerStatus?: string;
+  delayMinutes?: number;
+  reminderType?: string;
+  reminderTitle?: string;
+  reminderTemplate?: string;
+  emailEnabled?: number;
+  workflowEnabled?: number;
+  maxRetryCount?: number;
+  retryIntervalSeconds?: number;
+  status?: string;
+  remark?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
 /**
  * AI 模型配置查询参数。
  */

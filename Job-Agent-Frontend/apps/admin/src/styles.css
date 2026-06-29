@@ -164,6 +164,17 @@ body {
   font-size: 24px;
 }
 
+.follow-agent-item.clickable {
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.follow-agent-item.clickable:hover {
+  border-color: var(--admin-primary);
+  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.12);
+  transform: translateY(-1px);
+}
+
 .card-header {
   justify-content: space-between;
   gap: 16px;

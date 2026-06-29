@@ -1046,3 +1046,26 @@ export interface ReminderPostponePayload {
   remindTime: string;
   eventTime?: string;
 }
+
+export interface FrontFollowUpActionInfo {
+  actionCode: string;
+  title: string;
+  description: string;
+  buttonText: string;
+  priority: string;
+  targetPath: string;
+}
+
+export interface FrontFollowUpApplicationInfo {
+  application: JobApplicationInfo;
+  pendingReminders: JobReminderInfo[];
+  suggestedActions: FrontFollowUpActionInfo[];
+  priority: string;
+  priorityReason?: string;
+}
+
+export interface FrontFollowUpCenterInfo {
+  applicationStats: JobApplicationStatsInfo;
+  reminderStats: ReminderStatsInfo;
+  applications: FrontFollowUpApplicationInfo[];
+}

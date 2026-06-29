@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { getAdminDashboardOverview } from "../../api/dashboard";
 import type {
@@ -9,6 +10,7 @@ import type {
   AdminDashboardSystemItem
 } from "../../api/types";
 
+const router = useRouter();
 const loading = ref(false);
 const metrics = ref<AdminDashboardMetric[]>([]);
 const pendingItems = ref<AdminDashboardPendingItem[]>([]);
@@ -44,6 +46,33 @@ async function loadDashboard() {
 }
 
 onMounted(loadDashboard);
+
+function isFollowAgentItemClickable(item: AdminFollowUpAgentItem) {
+  return item.title === "邮件任务失败" || item.title === "今日邮件任务";
+}
+
+function openFollowAgentDetail(item: AdminFollowUpAgentItem) {
+  if (!isFollowAgentItemClickable(item)) {
+    return;
+  }
+
+  /*
+   * 第一版只跳转已有的工作流任务明细页。
+   * 其他卡片需要后续补 admin 求职进度/提醒明细页后再接入。
+   */
+  const query: Record<string, string> = {
+    taskType: "INTERVIEW_EMAIL_NOTIFY"
+  };
+
+  if (item.title === "邮件任务失败") {
+    query.status = "FAILED_FINAL";
+  }
+
+  router.push({
+    path: "/agent/workflow-tasks",
+    query
+  });
+}
 </script>
 
 <template>
@@ -64,7 +93,13 @@ onMounted(loadDashboard);
       </div>
     </template>
     <div v-if="followUpAgentItems.length > 0" class="follow-agent-grid">
-      <div v-for="item in followUpAgentItems" :key="item.title" class="follow-agent-item">
+      <div
+        v-for="item in followUpAgentItems"
+        :key="item.title"
+        class="follow-agent-item"
+        :class="{ clickable: isFollowAgentItemClickable(item) }"
+        @click="openFollowAgentDetail(item)"
+      >
         <div>
           <span>{{ item.title }}</span>
           <strong>{{ formatNumber(item.value) }}</strong>

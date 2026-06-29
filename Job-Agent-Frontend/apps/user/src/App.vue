@@ -37,19 +37,26 @@ async function handleLogout() {
         <RouterLink to="/application">求职进度</RouterLink>
         <RouterLink to="/communication">沟通记录</RouterLink>
         <RouterLink to="/ai-interview">AI 面试</RouterLink>
-        <RouterLink to="/wrong-questions">错题本</RouterLink>
-        <RouterLink to="/learning-plan">学习计划</RouterLink>
       </nav>
 
       <div class="top-actions">
         <template v-if="authStore.isLogin">
-          <RouterLink class="user-entry" to="/profile">
-            <span class="nav-avatar">
-              <img v-if="navAvatarUrl" :src="navAvatarUrl" alt="用户头像" />
-              <span v-else>{{ navAvatarText }}</span>
-            </span>
-            <span>{{ authStore.displayName }}</span>
-          </RouterLink>
+          <div class="user-menu">
+            <RouterLink class="user-entry" to="/profile">
+              <span class="nav-avatar">
+                <img v-if="navAvatarUrl" :src="navAvatarUrl" alt="用户头像" />
+                <span v-else>{{ navAvatarText }}</span>
+              </span>
+              <span>{{ authStore.displayName }}</span>
+            </RouterLink>
+
+            <div class="user-dropdown">
+              <RouterLink to="/profile">个人资料</RouterLink>
+              <RouterLink to="/follow-up">跟进中心</RouterLink>
+              <RouterLink to="/wrong-questions">错题本</RouterLink>
+              <RouterLink to="/learning-plan">学习计划</RouterLink>
+            </div>
+          </div>
           <button class="primary-button" @click="handleLogout">退出</button>
         </template>
         <template v-else>

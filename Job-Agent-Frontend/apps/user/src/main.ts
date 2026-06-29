@@ -14,6 +14,7 @@ import RegisterPage from "./pages/RegisterPage.vue";
 import ProfilePage from "./pages/ProfilePage.vue";
 import JobRecommendPage from "./pages/JobRecommendPage.vue";
 import ApplicationPage from "./pages/ApplicationPage.vue";
+import FollowUpCenterPage from "./pages/FollowUpCenterPage.vue";
 import CommunicationPage from "./pages/CommunicationPage.vue";
 import AiInterviewPage from "./pages/AiInterviewPage.vue";
 import WrongQuestionPage from "./pages/WrongQuestionPage.vue";
@@ -34,6 +35,7 @@ const router = createRouter({
     { path: "/register", name: "register", component: RegisterPage },
     { path: "/profile", name: "profile", component: ProfilePage },
     { path: "/job-recommend", name: "job-recommend", component: JobRecommendPage },
+    { path: "/follow-up", name: "follow-up", component: FollowUpCenterPage },
     { path: "/application", name: "application", component: ApplicationPage },
     { path: "/communication", name: "communication", component: CommunicationPage },
     { path: "/ai-interview", name: "ai-interview", component: AiInterviewPage },

@@ -35,6 +35,7 @@
             <el-option label="RAG_REBUILD_ALL" value="RAG_REBUILD_ALL" />
             <el-option label="RAG_REBUILD_USER" value="RAG_REBUILD_USER" />
             <el-option label="AGENT_EVAL_RUN_DATASET" value="AGENT_EVAL_RUN_DATASET" />
+            <el-option label="INTERVIEW_EMAIL_NOTIFY" value="INTERVIEW_EMAIL_NOTIFY" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -128,6 +129,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   cancelWorkflowTask,
@@ -140,6 +142,7 @@ import {
 } from "../../api/workflow";
 import type { WorkflowTaskInfo, WorkflowTaskLogInfo, WorkflowTaskQuery } from "../../api/types";
 
+const route = useRoute();
 const statusOptions = ["PENDING", "RUNNING", "SUCCESS", "FAILED_RETRYABLE", "FAILED_FINAL", "CANCELLED"];
 
 const query = reactive<WorkflowTaskQuery>({
@@ -163,7 +166,29 @@ const creating = ref("");
 const targetUserId = ref<number | null>(null);
 const targetDatasetId = ref<number | null>(null);
 
-onMounted(loadTasks);
+onMounted(() => {
+  applyRouteQuery();
+  loadTasks();
+});
+
+function applyRouteQuery() {
+  /*
+   * 从后台首页跳转过来时，会带 taskType/status 等筛选参数。
+   * 这里只接受工作流列表本身已经支持的字段，避免 URL 上的无关参数污染查询。
+   */
+  query.taskType = toQueryValue(route.query.taskType);
+  query.status = toQueryValue(route.query.status);
+  query.bizId = toQueryValue(route.query.bizId);
+  query.userId = toQueryValue(route.query.userId);
+  query.taskNo = toQueryValue(route.query.taskNo);
+}
+
+function toQueryValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value[0] ? String(value[0]) : "";
+  }
+  return value ? String(value) : "";
+}
 
 async function loadTasks() {
   loading.value = true;
