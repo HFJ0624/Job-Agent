@@ -8,6 +8,9 @@ import com.job.bootstrap.mapper.JobReminderMapper;
 import com.job.bootstrap.mapper.MockInterviewStudyPlanItemMapper;
 import com.job.bootstrap.mapper.MockInterviewStudyPlanMapper;
 import com.job.bootstrap.mapper.MockInterviewWrongQuestionMapper;
+import com.job.bootstrap.service.JobReminderService;
+import com.job.bootstrap.service.MockInterviewLearningPlanService;
+import com.job.bootstrap.service.MockInterviewWrongQuestionService;
 import com.job.bootstrap.service.impl.AgentInboxServiceImpl;
 import com.job.common.entity.communication.HrReplyRecognitionRecord;
 import com.job.common.vo.agent.AgentInboxVO;
@@ -40,6 +43,9 @@ class AgentInboxServiceImplTest {
         MockInterviewWrongQuestionMapper wrongQuestionMapper = mock(MockInterviewWrongQuestionMapper.class);
         MockInterviewStudyPlanMapper studyPlanMapper = mock(MockInterviewStudyPlanMapper.class);
         MockInterviewStudyPlanItemMapper studyPlanItemMapper = mock(MockInterviewStudyPlanItemMapper.class);
+        JobReminderService reminderService = mock(JobReminderService.class);
+        MockInterviewLearningPlanService learningPlanService = mock(MockInterviewLearningPlanService.class);
+        MockInterviewWrongQuestionService wrongQuestionService = mock(MockInterviewWrongQuestionService.class);
 
         HrReplyRecognitionRecord recognition = new HrReplyRecognitionRecord();
         recognition.setId(9L);
@@ -69,7 +75,10 @@ class AgentInboxServiceImplTest {
                 prepareMapper,
                 wrongQuestionMapper,
                 studyPlanMapper,
-                studyPlanItemMapper
+                studyPlanItemMapper,
+                reminderService,
+                learningPlanService,
+                wrongQuestionService
         );
 
         AgentInboxVO inbox = service.getTodayInbox(1L);

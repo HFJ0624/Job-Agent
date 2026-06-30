@@ -30,6 +30,44 @@
       </article>
     </section>
 
+    <section class="daily-report-panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Daily Report</p>
+          <h2>最近 Agent 日报</h2>
+        </div>
+        <button class="secondary-button" type="button" :disabled="reportLoading" @click="generateDailyReport">
+          {{ reportLoading ? "生成中..." : "生成今日日报" }}
+        </button>
+      </div>
+
+      <p v-if="reportErrorMessage" class="form-error">{{ reportErrorMessage }}</p>
+      <p v-if="reportLoading && dailyReports.length === 0" class="empty-state">正在整理最近日报...</p>
+      <el-empty v-else-if="dailyReports.length === 0" description="暂无 Agent 日报" />
+
+      <div v-else class="daily-report-list">
+        <article v-for="report in dailyReports" :key="report.id" class="daily-report-card">
+          <div>
+            <div class="report-title-row">
+              <h3>{{ report.reportTitle }}</h3>
+              <el-tag :type="emailStatusTagType(report.emailStatus)">
+                {{ emailStatusText(report.emailStatus) }}
+              </el-tag>
+            </div>
+            <p class="report-summary">{{ report.summaryText || "暂无摘要" }}</p>
+            <div class="meta-line">
+              <span>日期：{{ report.reportDate }}</span>
+              <span>待办：{{ report.inboxTotalCount }}</span>
+              <span>高优先级：{{ report.highPriorityCount }}</span>
+              <span>已到期：{{ report.dueCount }}</span>
+            </div>
+            <p v-if="report.emailError" class="report-error">邮件说明：{{ report.emailError }}</p>
+          </div>
+          <pre class="report-content">{{ report.contentText }}</pre>
+        </article>
+      </div>
+    </section>
+
     <section class="toolbar">
       <label>
         <span>优先级</span>
@@ -136,12 +174,19 @@ import {
   markAgentInboxItemDone,
   snoozeAgentInboxItem
 } from "../api/agentInbox";
-import type { AgentInboxInfo, AgentInboxItemInfo } from "../api/types";
+import {
+  generateTodayAgentDailyReport,
+  listRecentAgentDailyReports
+} from "../api/agentDailyReport";
+import type { AgentDailyReportInfo, AgentInboxInfo, AgentInboxItemInfo } from "../api/types";
 
 const router = useRouter();
 const inbox = ref<AgentInboxInfo | null>(null);
+const dailyReports = ref<AgentDailyReportInfo[]>([]);
 const loading = ref(false);
+const reportLoading = ref(false);
 const errorMessage = ref("");
+const reportErrorMessage = ref("");
 const priorityFilter = ref("");
 const typeFilter = ref("");
 const snoozeDialogVisible = ref(false);
@@ -167,7 +212,10 @@ const filteredItems = computed(() => {
   });
 });
 
-onMounted(loadInbox);
+onMounted(() => {
+  loadInbox();
+  loadDailyReports();
+});
 
 async function loadInbox() {
   loading.value = true;
@@ -182,6 +230,49 @@ async function loadInbox() {
   }
 }
 
+/**
+ * 加载最近 Agent 日报。
+ *
+ * 步骤：
+ * 1. 调用后端最近日报接口，只取最近 7 条，避免 Inbox 页面过重。
+ * 2. 失败时只提示日报区域错误，不影响上方待办列表继续使用。
+ */
+async function loadDailyReports() {
+  reportLoading.value = true;
+  reportErrorMessage.value = "";
+  try {
+    dailyReports.value = await listRecentAgentDailyReports(7);
+  } catch (error) {
+    reportErrorMessage.value = error instanceof Error ? error.message : "Agent 日报加载失败";
+  } finally {
+    reportLoading.value = false;
+  }
+}
+
+/**
+ * 手动生成今日日报。
+ *
+ * 步骤：
+ * 1. 调用后端生成接口，第一版默认同时发送邮件。
+ * 2. 生成后重新加载日报列表，让用户能立即看到落库结果。
+ */
+async function generateDailyReport() {
+  reportLoading.value = true;
+  reportErrorMessage.value = "";
+  try {
+    const report = await generateTodayAgentDailyReport(true);
+    ElMessage.success(emailStatusText(report.emailStatus) === "发送失败"
+      ? "日报已生成，但邮件发送失败"
+      : "今日日报已生成");
+    await loadDailyReports();
+  } catch (error) {
+    reportErrorMessage.value = error instanceof Error ? error.message : "Agent 日报生成失败";
+    ElMessage.error(reportErrorMessage.value);
+  } finally {
+    reportLoading.value = false;
+  }
+}
+
 function goTarget(item: AgentInboxItemInfo) {
   router.push(item.targetPath || "/follow-up");
 }
@@ -193,8 +284,9 @@ function goTarget(item: AgentInboxItemInfo) {
  * 第二版只更新 Inbox 处理记录，不联动修改原始业务表。
  */
 async function markDone(item: AgentInboxItemInfo) {
-  await markAgentInboxItemDone(item.itemKey);
-  ElMessage.success("已从 Agent 待办中移除");
+  const payload = await buildDonePayload(item);
+  await markAgentInboxItemDone(item.itemKey, payload);
+  ElMessage.success(doneSuccessText(item));
   await loadInbox();
 }
 
@@ -264,6 +356,55 @@ function normalizeDateTime(value?: string | Date) {
   return value;
 }
 
+/**
+ * 构造完成动作入参。
+ *
+ * 说明：
+ * 1. 提醒和学习计划由后端按类型直接联动完成。
+ * 2. 错题需要用户选择掌握状态，避免误把不熟的题直接标记为已掌握。
+ */
+async function buildDonePayload(item: AgentInboxItemInfo) {
+  if (item.itemType !== "WRONG_QUESTION_REVIEW") {
+    return undefined;
+  }
+
+  const result = await ElMessageBox.confirm(
+    "这道错题你现在掌握了吗？选择“已掌握”会同步更新错题本状态，选择“继续复习”会进入复习中。",
+    "错题掌握状态",
+    {
+      type: "info",
+      confirmButtonText: "已掌握",
+      cancelButtonText: "继续复习",
+      distinguishCancelAndClose: true
+    }
+  ).then(
+    () => "MASTERED",
+    (action) => {
+      if (action === "cancel") {
+        return "REVIEWING";
+      }
+      throw new Error("cancelled");
+    }
+  );
+
+  return {
+    businessStatus: result
+  };
+}
+
+function doneSuccessText(item: AgentInboxItemInfo) {
+  if (item.itemType === "REMINDER") {
+    return "提醒已完成";
+  }
+  if (item.itemType === "LEARNING_PLAN") {
+    return "学习计划任务已完成";
+  }
+  if (item.itemType === "WRONG_QUESTION_REVIEW") {
+    return "错题状态已更新";
+  }
+  return "已从 Agent 待办中移除";
+}
+
 function priorityText(priority: string) {
   if (priority === "HIGH") return "高";
   if (priority === "LOW") return "低";
@@ -273,6 +414,20 @@ function priorityText(priority: string) {
 function priorityTagType(priority: string) {
   if (priority === "HIGH") return "danger";
   if (priority === "LOW") return "info";
+  return "warning";
+}
+
+function emailStatusText(status: string) {
+  if (status === "SENT") return "已发送";
+  if (status === "FAILED") return "发送失败";
+  if (status === "SKIPPED") return "未发送";
+  return "待发送";
+}
+
+function emailStatusTagType(status: string) {
+  if (status === "SENT") return "success";
+  if (status === "FAILED") return "danger";
+  if (status === "SKIPPED") return "info";
   return "warning";
 }
 </script>
@@ -286,6 +441,8 @@ function priorityTagType(priority: string) {
 
 .inbox-hero,
 .toolbar,
+.daily-report-panel,
+.daily-report-card,
 .summary-card,
 .inbox-card {
   border: 1px solid #e5e7eb;
@@ -346,6 +503,76 @@ function priorityTagType(priority: string) {
 .summary-card.normal {
   background: #eff6ff;
   border-color: #bfdbfe;
+}
+
+.daily-report-panel {
+  padding: 18px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.panel-header h2 {
+  margin: 4px 0 0;
+  color: #111827;
+  font-size: 20px;
+}
+
+.daily-report-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.daily-report-card {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(260px, 1.2fr);
+  gap: 14px;
+  padding: 16px;
+}
+
+.report-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.report-title-row h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+}
+
+.report-summary {
+  margin: 10px 0 0;
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.report-error {
+  margin: 10px 0 0;
+  color: #dc2626;
+  font-size: 13px;
+}
+
+.report-content {
+  max-height: 220px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #334155;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .toolbar {
@@ -441,6 +668,7 @@ function priorityTagType(priority: string) {
 @media (max-width: 900px) {
   .summary-grid,
   .toolbar,
+  .daily-report-card,
   .inbox-card {
     grid-template-columns: 1fr;
   }

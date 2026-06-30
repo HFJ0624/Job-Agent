@@ -436,6 +436,26 @@ export interface AgentInboxInfo {
 }
 
 /**
+ * Agent 主动日报记录。
+ */
+export interface AgentDailyReportInfo {
+  id: number;
+  userId: number;
+  reportDate: string;
+  reportTitle: string;
+  summaryText?: string;
+  contentText?: string;
+  inboxTotalCount: number;
+  highPriorityCount: number;
+  dueCount: number;
+  emailTo?: string;
+  emailStatus: "PENDING" | "SENT" | "SKIPPED" | "FAILED" | string;
+  emailError?: string;
+  sendTime?: string;
+  createTime?: string;
+}
+
+/**
  * 用户求职偏好。
  */
 export interface UserJobPreferenceInfo {

@@ -10,7 +10,12 @@ import com.job.bootstrap.mapper.MockInterviewStudyPlanItemMapper;
 import com.job.bootstrap.mapper.MockInterviewStudyPlanMapper;
 import com.job.bootstrap.mapper.MockInterviewWrongQuestionMapper;
 import com.job.bootstrap.service.AgentInboxService;
+import com.job.bootstrap.service.JobReminderService;
+import com.job.bootstrap.service.MockInterviewLearningPlanService;
+import com.job.bootstrap.service.MockInterviewWrongQuestionService;
 import com.job.common.dto.agent.AgentInboxActionDTO;
+import com.job.common.dto.interview.MockInterviewStudyPlanItemStatusDTO;
+import com.job.common.dto.interview.MockInterviewWrongQuestionStatusDTO;
 import com.job.common.entity.agent.AgentInboxActionRecord;
 import com.job.common.entity.application.JobApplicationRecord;
 import com.job.common.entity.communication.HrReplyRecognitionRecord;
@@ -61,6 +66,9 @@ public class AgentInboxServiceImpl implements AgentInboxService {
     private final MockInterviewWrongQuestionMapper wrongQuestionMapper;
     private final MockInterviewStudyPlanMapper studyPlanMapper;
     private final MockInterviewStudyPlanItemMapper studyPlanItemMapper;
+    private final JobReminderService jobReminderService;
+    private final MockInterviewLearningPlanService learningPlanService;
+    private final MockInterviewWrongQuestionService wrongQuestionService;
 
     @Override
     public AgentInboxVO getTodayInbox(Long userId) {
@@ -119,6 +127,7 @@ public class AgentInboxServiceImpl implements AgentInboxService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void markDone(Long userId, String itemKey, AgentInboxActionDTO dto) {
+        completeSourceBusiness(userId, itemKey, dto);
         saveAction(userId, itemKey, ACTION_DONE, null, dto);
     }
 
@@ -221,6 +230,50 @@ public class AgentInboxServiceImpl implements AgentInboxService {
         record.setSnoozeUntil(snoozeUntil);
         record.setNote(dto == null ? null : dto.getNote());
         actionRecordMapper.updateById(record);
+    }
+
+    private void completeSourceBusiness(Long userId, String itemKey, AgentInboxActionDTO dto) {
+        String itemType = resolveItemType(itemKey);
+        Long sourceId = resolveSourceId(itemKey);
+        if (sourceId == null) {
+            return;
+        }
+
+        /*
+         * REMINDER：复用提醒模块自己的完成逻辑，避免 Inbox 直接改 job_reminder 表。
+         */
+        if ("REMINDER".equals(itemType)) {
+            jobReminderService.markDone(userId, sourceId);
+            return;
+        }
+
+        /*
+         * LEARNING_PLAN：复用学习计划 item 状态更新逻辑。
+         */
+        if ("LEARNING_PLAN".equals(itemType)) {
+            MockInterviewStudyPlanItemStatusDTO statusDTO = new MockInterviewStudyPlanItemStatusDTO();
+            statusDTO.setCompletionStatus("DONE");
+            learningPlanService.updateItemStatus(userId, sourceId, statusDTO);
+            return;
+        }
+
+        /*
+         * WRONG_QUESTION_REVIEW：错题完成需要明确掌握状态。
+         * 如果前端没有传，默认进入 REVIEWING，避免直接把用户未掌握内容标记为 MASTERED。
+         */
+        if ("WRONG_QUESTION_REVIEW".equals(itemType)) {
+            MockInterviewWrongQuestionStatusDTO statusDTO = new MockInterviewWrongQuestionStatusDTO();
+            statusDTO.setMasteryStatus(resolveWrongQuestionStatus(dto));
+            wrongQuestionService.updateMasteryStatus(userId, sourceId, statusDTO);
+        }
+    }
+
+    private String resolveWrongQuestionStatus(AgentInboxActionDTO dto) {
+        String status = dto == null ? null : dto.getBusinessStatus();
+        if ("MASTERED".equals(status) || "REVIEWING".equals(status) || "UNMASTERED".equals(status)) {
+            return status;
+        }
+        return "REVIEWING";
     }
 
     private String resolveItemType(String itemKey) {

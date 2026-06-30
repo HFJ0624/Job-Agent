@@ -11,10 +11,16 @@ export function getTodayAgentInbox() {
 /**
  * 标记 Agent 待办完成。
  */
-export function markAgentInboxItemDone(itemKey: string, note?: string) {
+export function markAgentInboxItemDone(
+  itemKey: string,
+  payload?: {
+    note?: string;
+    businessStatus?: string;
+  }
+) {
   return request<void>(`/front/agent-inbox/items/${encodeURIComponent(itemKey)}/done`, {
     method: "POST",
-    body: JSON.stringify({ note })
+    body: JSON.stringify(payload || {})
   });
 }
 
