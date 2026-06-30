@@ -1,5 +1,6 @@
 package com.job.bootstrap.service.inbox;
 
+import com.job.bootstrap.mapper.AgentInboxActionRecordMapper;
 import com.job.bootstrap.mapper.HrReplyRecognitionRecordMapper;
 import com.job.bootstrap.mapper.InterviewPrepareRecordMapper;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
@@ -32,6 +33,7 @@ class AgentInboxServiceImplTest {
     @Test
     void shouldBuildHighPriorityInboxItemForPendingHrRecognition() {
         JobReminderMapper reminderMapper = mock(JobReminderMapper.class);
+        AgentInboxActionRecordMapper actionRecordMapper = mock(AgentInboxActionRecordMapper.class);
         HrReplyRecognitionRecordMapper recognitionMapper = mock(HrReplyRecognitionRecordMapper.class);
         JobApplicationRecordMapper applicationMapper = mock(JobApplicationRecordMapper.class);
         InterviewPrepareRecordMapper prepareMapper = mock(InterviewPrepareRecordMapper.class);
@@ -57,8 +59,10 @@ class AgentInboxServiceImplTest {
         when(wrongQuestionMapper.selectList(any())).thenReturn(List.of());
         when(studyPlanMapper.selectList(any())).thenReturn(List.of());
         when(studyPlanItemMapper.selectList(any())).thenReturn(List.of());
+        when(actionRecordMapper.selectList(any())).thenReturn(List.of());
 
         AgentInboxServiceImpl service = new AgentInboxServiceImpl(
+                actionRecordMapper,
                 reminderMapper,
                 recognitionMapper,
                 applicationMapper,

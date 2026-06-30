@@ -81,19 +81,61 @@
           </div>
         </div>
 
-        <button class="primary-button" type="button" @click="goTarget(item)">
-          {{ item.actionText || "去处理" }}
-        </button>
+        <div class="card-actions">
+          <button class="primary-button" type="button" @click="goTarget(item)">
+            {{ item.actionText || "去处理" }}
+          </button>
+          <button class="secondary-button" type="button" @click="markDone(item)">
+            完成
+          </button>
+          <button class="secondary-button" type="button" @click="openSnoozeDialog(item)">
+            稍后
+          </button>
+          <button class="text-button danger" type="button" @click="ignoreItem(item)">
+            忽略
+          </button>
+        </div>
       </article>
     </section>
+
+    <el-dialog v-model="snoozeDialogVisible" title="稍后提醒" width="420px">
+      <el-form label-position="top">
+        <el-form-item label="稍后提醒时间">
+          <el-date-picker
+            v-model="snoozeForm.snoozeUntil"
+            type="datetime"
+            placeholder="选择重新显示时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="snoozeForm.note"
+            type="textarea"
+            :rows="2"
+            placeholder="可选，例如：下午再处理"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="snoozeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitSnooze">确认稍后提醒</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
-import { getTodayAgentInbox } from "../api/agentInbox";
+import { ElMessage, ElMessageBox } from "element-plus";
+import {
+  getTodayAgentInbox,
+  ignoreAgentInboxItem,
+  markAgentInboxItemDone,
+  snoozeAgentInboxItem
+} from "../api/agentInbox";
 import type { AgentInboxInfo, AgentInboxItemInfo } from "../api/types";
 
 const router = useRouter();
@@ -102,6 +144,15 @@ const loading = ref(false);
 const errorMessage = ref("");
 const priorityFilter = ref("");
 const typeFilter = ref("");
+const snoozeDialogVisible = ref(false);
+const currentSnoozeItem = ref<AgentInboxItemInfo | null>(null);
+const snoozeForm = reactive<{
+  snoozeUntil: string | Date | undefined;
+  note: string;
+}>({
+  snoozeUntil: "",
+  note: ""
+});
 
 const filteredItems = computed(() => {
   const source = inbox.value?.items || [];
@@ -133,6 +184,84 @@ async function loadInbox() {
 
 function goTarget(item: AgentInboxItemInfo) {
   router.push(item.targetPath || "/follow-up");
+}
+
+/**
+ * 标记待办完成。
+ *
+ * 说明：
+ * 第二版只更新 Inbox 处理记录，不联动修改原始业务表。
+ */
+async function markDone(item: AgentInboxItemInfo) {
+  await markAgentInboxItemDone(item.itemKey);
+  ElMessage.success("已从 Agent 待办中移除");
+  await loadInbox();
+}
+
+/**
+ * 忽略待办。
+ */
+async function ignoreItem(item: AgentInboxItemInfo) {
+  await ElMessageBox.confirm(
+    "忽略后这条待办不会再出现在 Agent Inbox 中，确认忽略吗？",
+    "确认忽略",
+    {
+      type: "warning",
+      confirmButtonText: "确认忽略",
+      cancelButtonText: "取消"
+    }
+  );
+
+  await ignoreAgentInboxItem(item.itemKey);
+  ElMessage.success("已忽略该待办");
+  await loadInbox();
+}
+
+/**
+ * 打开稍后提醒弹窗。
+ */
+function openSnoozeDialog(item: AgentInboxItemInfo) {
+  currentSnoozeItem.value = item;
+  snoozeForm.snoozeUntil = defaultSnoozeTime();
+  snoozeForm.note = "";
+  snoozeDialogVisible.value = true;
+}
+
+/**
+ * 提交稍后提醒。
+ */
+async function submitSnooze() {
+  if (!currentSnoozeItem.value) {
+    return;
+  }
+
+  const snoozeUntil = normalizeDateTime(snoozeForm.snoozeUntil);
+  if (!snoozeUntil) {
+    ElMessage.warning("请选择稍后提醒时间");
+    return;
+  }
+
+  await snoozeAgentInboxItem(currentSnoozeItem.value.itemKey, snoozeUntil, snoozeForm.note);
+  ElMessage.success("已设置稍后提醒");
+  snoozeDialogVisible.value = false;
+  await loadInbox();
+}
+
+function defaultSnoozeTime() {
+  const date = new Date();
+  date.setHours(date.getHours() + 2);
+  return date;
+}
+
+function normalizeDateTime(value?: string | Date) {
+  if (!value) {
+    return "";
+  }
+  if (value instanceof Date) {
+    const pad = (num: number) => String(num).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  }
+  return value;
 }
 
 function priorityText(priority: string) {
@@ -296,6 +425,17 @@ function priorityTagType(priority: string) {
   margin-top: 10px;
   color: #6b7280;
   font-size: 13px;
+}
+
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  min-width: 112px;
+}
+
+.card-actions .danger {
+  color: #dc2626;
 }
 
 @media (max-width: 900px) {

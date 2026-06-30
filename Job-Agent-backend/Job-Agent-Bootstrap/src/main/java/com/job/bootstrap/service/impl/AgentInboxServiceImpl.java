@@ -1,6 +1,7 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.job.bootstrap.mapper.AgentInboxActionRecordMapper;
 import com.job.bootstrap.mapper.HrReplyRecognitionRecordMapper;
 import com.job.bootstrap.mapper.InterviewPrepareRecordMapper;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
@@ -9,6 +10,8 @@ import com.job.bootstrap.mapper.MockInterviewStudyPlanItemMapper;
 import com.job.bootstrap.mapper.MockInterviewStudyPlanMapper;
 import com.job.bootstrap.mapper.MockInterviewWrongQuestionMapper;
 import com.job.bootstrap.service.AgentInboxService;
+import com.job.common.dto.agent.AgentInboxActionDTO;
+import com.job.common.entity.agent.AgentInboxActionRecord;
 import com.job.common.entity.application.JobApplicationRecord;
 import com.job.common.entity.communication.HrReplyRecognitionRecord;
 import com.job.common.entity.interview.InterviewPrepareRecord;
@@ -19,12 +22,16 @@ import com.job.common.entity.reminder.JobReminder;
 import com.job.common.vo.agent.AgentInboxVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Agent Inbox 聚合服务实现。
@@ -42,7 +49,11 @@ public class AgentInboxServiceImpl implements AgentInboxService {
     private static final String PRIORITY_HIGH = "HIGH";
     private static final String PRIORITY_NORMAL = "NORMAL";
     private static final String PRIORITY_LOW = "LOW";
+    private static final String ACTION_DONE = "DONE";
+    private static final String ACTION_IGNORED = "IGNORED";
+    private static final String ACTION_SNOOZED = "SNOOZED";
 
+    private final AgentInboxActionRecordMapper actionRecordMapper;
     private final JobReminderMapper reminderMapper;
     private final HrReplyRecognitionRecordMapper recognitionRecordMapper;
     private final JobApplicationRecordMapper applicationRecordMapper;
@@ -85,6 +96,14 @@ public class AgentInboxServiceImpl implements AgentInboxService {
          */
         items.addAll(buildStudyPlanItems(userId));
 
+        /*
+         * 7. 叠加用户处理记录。
+         *    DONE / IGNORED：不再展示。
+         *    SNOOZED：未到稍后提醒时间前不展示，到时间后重新展示。
+         */
+        items = filterByActionRecords(userId, items);
+
+        items = new ArrayList<>(items);
         items.sort(itemComparator());
 
         AgentInboxVO vo = new AgentInboxVO();
@@ -95,6 +114,133 @@ public class AgentInboxServiceImpl implements AgentInboxService {
         vo.setNormalCount((int) items.stream().filter(item -> PRIORITY_NORMAL.equals(item.getPriority())).count());
         vo.setSummaryText(buildSummaryText(vo));
         return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void markDone(Long userId, String itemKey, AgentInboxActionDTO dto) {
+        saveAction(userId, itemKey, ACTION_DONE, null, dto);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void ignore(Long userId, String itemKey, AgentInboxActionDTO dto) {
+        saveAction(userId, itemKey, ACTION_IGNORED, null, dto);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void snooze(Long userId, String itemKey, AgentInboxActionDTO dto) {
+        Date snoozeUntil = dto == null ? null : dto.getSnoozeUntil();
+        if (snoozeUntil == null) {
+            throw new IllegalArgumentException("稍后提醒时间不能为空");
+        }
+        saveAction(userId, itemKey, ACTION_SNOOZED, snoozeUntil, dto);
+    }
+
+    private List<AgentInboxVO.Item> filterByActionRecords(Long userId, List<AgentInboxVO.Item> items) {
+        if (items.isEmpty()) {
+            return items;
+        }
+
+        List<String> itemKeys = items.stream()
+                .map(AgentInboxVO.Item::getItemKey)
+                .toList();
+
+        List<AgentInboxActionRecord> actionRecords = actionRecordMapper.selectList(
+                new LambdaQueryWrapper<AgentInboxActionRecord>()
+                        .eq(AgentInboxActionRecord::getUserId, userId)
+                        .eq(AgentInboxActionRecord::getIsDeleted, NOT_DELETED)
+                        .in(AgentInboxActionRecord::getItemKey, itemKeys)
+        );
+
+        Map<String, AgentInboxActionRecord> actionRecordMap = actionRecords.stream()
+                .collect(Collectors.toMap(
+                        AgentInboxActionRecord::getItemKey,
+                        Function.identity(),
+                        (left, right) -> {
+                            Date leftTime = left.getUpdateTime() == null ? left.getCreateTime() : left.getUpdateTime();
+                            Date rightTime = right.getUpdateTime() == null ? right.getCreateTime() : right.getUpdateTime();
+                            if (leftTime == null) {
+                                return right;
+                            }
+                            if (rightTime == null) {
+                                return left;
+                            }
+                            return rightTime.after(leftTime) ? right : left;
+                        }
+                ));
+
+        Date now = new Date();
+        return items.stream()
+                .filter(item -> shouldShowItem(item, actionRecordMap.get(item.getItemKey()), now))
+                .toList();
+    }
+
+    private boolean shouldShowItem(AgentInboxVO.Item item, AgentInboxActionRecord actionRecord, Date now) {
+        if (actionRecord == null) {
+            return true;
+        }
+        if (ACTION_DONE.equals(actionRecord.getActionStatus()) || ACTION_IGNORED.equals(actionRecord.getActionStatus())) {
+            return false;
+        }
+        if (ACTION_SNOOZED.equals(actionRecord.getActionStatus())) {
+            return actionRecord.getSnoozeUntil() == null || !actionRecord.getSnoozeUntil().after(now);
+        }
+        return true;
+    }
+
+    private void saveAction(Long userId, String itemKey, String actionStatus, Date snoozeUntil, AgentInboxActionDTO dto) {
+        if (!StringUtils.hasText(itemKey)) {
+            throw new IllegalArgumentException("待办 itemKey 不能为空");
+        }
+
+        AgentInboxActionRecord record = actionRecordMapper.selectOne(
+                new LambdaQueryWrapper<AgentInboxActionRecord>()
+                        .eq(AgentInboxActionRecord::getUserId, userId)
+                        .eq(AgentInboxActionRecord::getItemKey, itemKey)
+                        .eq(AgentInboxActionRecord::getIsDeleted, NOT_DELETED)
+                        .last("limit 1")
+        );
+
+        if (record == null) {
+            record = new AgentInboxActionRecord();
+            record.setUserId(userId);
+            record.setItemKey(itemKey);
+            record.setItemType(resolveItemType(itemKey));
+            record.setSourceId(resolveSourceId(itemKey));
+            record.setIsDeleted(NOT_DELETED);
+            record.setActionStatus(actionStatus);
+            record.setSnoozeUntil(snoozeUntil);
+            record.setNote(dto == null ? null : dto.getNote());
+            actionRecordMapper.insert(record);
+            return;
+        }
+
+        record.setActionStatus(actionStatus);
+        record.setSnoozeUntil(snoozeUntil);
+        record.setNote(dto == null ? null : dto.getNote());
+        actionRecordMapper.updateById(record);
+    }
+
+    private String resolveItemType(String itemKey) {
+        int index = itemKey.lastIndexOf("_");
+        if (index <= 0) {
+            return itemKey;
+        }
+        return itemKey.substring(0, index);
+    }
+
+    private Long resolveSourceId(String itemKey) {
+        int index = itemKey.lastIndexOf("_");
+        if (index <= 0 || index >= itemKey.length() - 1) {
+            return null;
+        }
+        try {
+            return Long.parseLong(itemKey.substring(index + 1));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private List<AgentInboxVO.Item> buildReminderItems(Long userId) {
