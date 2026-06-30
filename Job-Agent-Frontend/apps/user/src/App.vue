@@ -52,6 +52,7 @@ async function handleLogout() {
 
             <div class="user-dropdown">
               <RouterLink to="/profile">个人资料</RouterLink>
+              <RouterLink to="/agent-inbox">Agent 待办</RouterLink>
               <RouterLink to="/follow-up">跟进中心</RouterLink>
               <RouterLink to="/wrong-questions">错题本</RouterLink>
               <RouterLink to="/learning-plan">学习计划</RouterLink>

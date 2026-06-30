@@ -85,6 +85,11 @@
 
         <aside class="action-panel">
           <h4>Agent 建议</h4>
+          <button class="action-button recognize" type="button" @click="openRecognitionDialog(item)">
+            <span>HR回复识别</span>
+            <small>粘贴 HR 最新回复，让 Agent 判断下一步动作</small>
+            <b>粘贴并识别</b>
+          </button>
           <button
             v-for="action in item.suggestedActions"
             :key="`${item.application.id}-${action.actionCode}`"
@@ -100,16 +105,127 @@
         </aside>
       </article>
     </section>
+
+    <el-dialog v-model="recognitionDialogVisible" title="AI识别HR回复" width="680px">
+      <el-form label-position="top">
+        <el-form-item label="岗位">
+          <el-input :model-value="recognitionContextTitle" disabled />
+        </el-form-item>
+
+        <el-form-item label="HR 回复内容">
+          <el-input
+            v-model="recognitionForm.hrReplyText"
+            type="textarea"
+            :rows="5"
+            placeholder="把招聘平台里的 HR 回复粘贴到这里，AI 会识别意图并给出下一步建议"
+          />
+        </el-form-item>
+
+        <el-form-item label="补充说明">
+          <el-input
+            v-model="recognitionForm.userNote"
+            type="textarea"
+            :rows="2"
+            placeholder="可选，例如：我希望尽量约到周五下午"
+          />
+        </el-form-item>
+
+        <el-button type="primary" :loading="recognizing" @click="submitRecognition">
+          开始识别
+        </el-button>
+
+        <section v-if="recognitionResult" class="recognition-result">
+          <div class="recognition-head">
+            <el-tag type="primary">
+              {{ recognitionResult.intentTypeDesc || recognitionResult.intentType || "未知意图" }}
+            </el-tag>
+            <span>置信度：{{ formatConfidence(recognitionResult.confidence) }}</span>
+          </div>
+
+          <p class="recognition-reason">{{ recognitionResult.reason || "AI 未返回原因" }}</p>
+
+          <el-form-item label="建议求职状态">
+            <el-select v-model="recognitionConfirmForm.suggestedStatus" style="width: 100%">
+              <el-option label="已沟通" value="COMMUNICATED" />
+              <el-option label="已投递" value="APPLIED" />
+              <el-option label="面试中" value="INTERVIEWING" />
+              <el-option label="Offer" value="OFFER" />
+              <el-option label="已拒绝" value="REJECTED" />
+              <el-option label="已关闭" value="CLOSED" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="面试时间">
+            <el-date-picker
+              v-model="recognitionConfirmForm.interviewTime"
+              type="datetime"
+              placeholder="可选，面试邀约时填写"
+              style="width: 100%"
+            />
+          </el-form-item>
+
+          <el-form-item label="下次跟进时间">
+            <el-date-picker
+              v-model="recognitionConfirmForm.nextFollowTime"
+              type="datetime"
+              placeholder="可选，需要后续跟进时填写"
+              style="width: 100%"
+            />
+          </el-form-item>
+
+          <el-form-item label="执行动作">
+            <div class="recognition-actions">
+              <el-checkbox v-model="recognitionConfirmForm.updateApplicationStatus">更新求职进度</el-checkbox>
+              <el-checkbox v-model="recognitionConfirmForm.createReminder">创建提醒</el-checkbox>
+              <el-checkbox v-model="recognitionConfirmForm.generateInterviewPrepare">生成面试准备任务</el-checkbox>
+            </div>
+          </el-form-item>
+
+          <div v-if="recognitionResult.todoItems?.length" class="recognition-box">
+            <strong>建议待办</strong>
+            <ul>
+              <li v-for="todo in recognitionResult.todoItems" :key="todo">{{ todo }}</li>
+            </ul>
+          </div>
+
+          <div v-if="recognitionResult.replySuggestion" class="recognition-box">
+            <strong>建议回复</strong>
+            <p>{{ recognitionResult.replySuggestion }}</p>
+          </div>
+        </section>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="recognitionDialogVisible = false">取消</el-button>
+        <el-button
+          type="success"
+          :disabled="!recognitionResult"
+          :loading="recognitionConfirming"
+          @click="confirmRecognition"
+        >
+          确认执行
+        </el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { getFollowUpCenter } from "../api/followUpAgent";
+import {
+  confirmHrReplyRecognition,
+  recognizeHrReplyFromApplication
+} from "../api/hrReplyRecognition";
 import { markReminderDone } from "../api/reminder";
-import type { FrontFollowUpActionInfo, FrontFollowUpApplicationInfo, FrontFollowUpCenterInfo } from "../api/types";
+import type {
+  FrontFollowUpActionInfo,
+  FrontFollowUpApplicationInfo,
+  FrontFollowUpCenterInfo,
+  HrReplyRecognitionInfo
+} from "../api/types";
 
 const router = useRouter();
 const center = ref<FrontFollowUpCenterInfo | null>(null);
@@ -117,6 +233,41 @@ const loading = ref(false);
 const errorMessage = ref("");
 const priorityFilter = ref("");
 const keyword = ref("");
+const recognitionDialogVisible = ref(false);
+const recognizing = ref(false);
+const recognitionConfirming = ref(false);
+const recognitionResult = ref<HrReplyRecognitionInfo | null>(null);
+const recognitionCurrentItem = ref<FrontFollowUpApplicationInfo | null>(null);
+
+const recognitionForm = reactive({
+  applicationId: 0,
+  hrReplyText: "",
+  userNote: ""
+});
+
+const recognitionConfirmForm = reactive<{
+  updateApplicationStatus: boolean;
+  createReminder: boolean;
+  generateInterviewPrepare: boolean;
+  suggestedStatus: string;
+  interviewTime: string | Date | undefined;
+  nextFollowTime: string | Date | undefined;
+  note: string;
+}>({
+  updateApplicationStatus: true,
+  createReminder: true,
+  generateInterviewPrepare: false,
+  suggestedStatus: "COMMUNICATED",
+  interviewTime: "",
+  nextFollowTime: "",
+  note: ""
+});
+
+const recognitionContextTitle = computed(() => {
+  const application = recognitionCurrentItem.value?.application;
+  if (!application) return "";
+  return `${application.companyName || "未知公司"} / ${application.jobTitle || "未命名岗位"}`;
+});
 
 const filteredItems = computed(() => {
   const source = center.value?.applications || [];
@@ -159,6 +310,106 @@ async function completeReminder(id: number) {
 
 function goAction(action: FrontFollowUpActionInfo) {
   router.push(action.targetPath || "/application");
+}
+
+/**
+ * 打开 HR 回复识别弹窗。
+ *
+ * 步骤：
+ * 1. 记录当前岗位对应的 applicationId。
+ * 2. 清空上一次输入和识别结果。
+ * 3. 等待用户粘贴 HR 回复后再调用模型。
+ */
+function openRecognitionDialog(item: FrontFollowUpApplicationInfo) {
+  recognitionCurrentItem.value = item;
+  recognitionForm.applicationId = item.application.id;
+  recognitionForm.hrReplyText = "";
+  recognitionForm.userNote = "";
+  recognitionResult.value = null;
+  resetRecognitionConfirmForm(null);
+  recognitionDialogVisible.value = true;
+}
+
+/**
+ * 从跟进中心入口提交 HR 回复识别。
+ */
+async function submitRecognition() {
+  if (!recognitionForm.hrReplyText.trim()) {
+    ElMessage.warning("请输入 HR 回复内容");
+    return;
+  }
+
+  recognizing.value = true;
+
+  try {
+    const data = await recognizeHrReplyFromApplication(recognitionForm.applicationId, {
+      hrReplyText: recognitionForm.hrReplyText,
+      userNote: recognitionForm.userNote
+    });
+    recognitionResult.value = data;
+    resetRecognitionConfirmForm(data);
+    ElMessage.success("HR 回复已识别，请确认要执行的动作");
+  } finally {
+    recognizing.value = false;
+  }
+}
+
+/**
+ * 确认执行识别结果。
+ *
+ * 跟进中心入口没有沟通记录，所以这里默认不保存沟通记录，只更新求职进度和提醒。
+ */
+async function confirmRecognition() {
+  if (!recognitionResult.value) {
+    ElMessage.warning("请先识别 HR 回复");
+    return;
+  }
+
+  recognitionConfirming.value = true;
+
+  try {
+    await confirmHrReplyRecognition(recognitionResult.value.id, {
+      saveCommunication: false,
+      updateApplicationStatus: recognitionConfirmForm.updateApplicationStatus,
+      createReminder: recognitionConfirmForm.createReminder,
+      generateInterviewPrepare: recognitionConfirmForm.generateInterviewPrepare,
+      suggestedStatus: recognitionConfirmForm.suggestedStatus,
+      interviewTime: normalizeDateTime(recognitionConfirmForm.interviewTime),
+      nextFollowTime: normalizeDateTime(recognitionConfirmForm.nextFollowTime),
+      note: recognitionConfirmForm.note
+    });
+    ElMessage.success("已按确认结果更新跟进信息");
+    recognitionDialogVisible.value = false;
+    await loadCenter();
+  } finally {
+    recognitionConfirming.value = false;
+  }
+}
+
+function resetRecognitionConfirmForm(result: HrReplyRecognitionInfo | null) {
+  const actions = result?.defaultActions || {};
+  recognitionConfirmForm.updateApplicationStatus = actions.updateApplicationStatus ?? true;
+  recognitionConfirmForm.createReminder = actions.createReminder ?? true;
+  recognitionConfirmForm.generateInterviewPrepare = actions.generateInterviewPrepare ?? false;
+  recognitionConfirmForm.suggestedStatus = result?.suggestedStatus || "COMMUNICATED";
+  recognitionConfirmForm.interviewTime = result?.interviewTime || "";
+  recognitionConfirmForm.nextFollowTime = result?.nextFollowTime || "";
+  recognitionConfirmForm.note = result?.reason || "";
+}
+
+function normalizeDateTime(value?: string | Date) {
+  if (!value) return undefined;
+  if (value instanceof Date) {
+    const pad = (num: number) => String(num).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  }
+  return value;
+}
+
+function formatConfidence(value?: number) {
+  if (value === undefined || value === null) return "0%";
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${Math.round(normalized)}%`;
 }
 
 function priorityText(priority: FrontFollowUpApplicationInfo["priority"]) {
@@ -383,6 +634,12 @@ function priorityText(priority: FrontFollowUpApplicationInfo["priority"]) {
   color: #b91c1c;
 }
 
+.action-button.recognize {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
 .action-button small {
   color: #4b5563;
   line-height: 1.5;
@@ -390,6 +647,48 @@ function priorityText(priority: FrontFollowUpApplicationInfo["priority"]) {
 
 .action-button b {
   margin-top: 4px;
+}
+
+.recognition-result {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.recognition-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.recognition-reason {
+  margin: 0 0 12px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.recognition-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recognition-box {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #334155;
+}
+
+.recognition-box p,
+.recognition-box ul {
+  margin: 8px 0 0;
+  line-height: 1.6;
 }
 
 @media (max-width: 900px) {

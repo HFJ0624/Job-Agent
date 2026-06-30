@@ -191,6 +191,10 @@
                 HR回复
               </el-button>
 
+              <el-button size="small" type="primary" plain @click="openRecognitionDialog(record)">
+                AI识别HR
+              </el-button>
+
               <el-button size="small" type="warning" plain @click="copyAiReplyFromRecord(record)">
                 复制AI
               </el-button>
@@ -504,6 +508,106 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- HR 回复识别 Agent：先识别意图，再由用户确认是否执行更新动作 -->
+    <el-dialog v-model="recognitionDialogVisible" title="AI识别HR回复" width="680px">
+      <el-form label-position="top">
+        <el-form-item label="HR 回复内容">
+          <el-input
+            v-model="recognitionForm.hrReplyText"
+            type="textarea"
+            :rows="5"
+            placeholder="把招聘平台里的 HR 回复粘贴到这里，AI 会识别意图并给出下一步建议"
+          />
+        </el-form-item>
+
+        <el-form-item label="补充说明">
+          <el-input
+            v-model="recognitionForm.userNote"
+            type="textarea"
+            :rows="2"
+            placeholder="可选，例如：我希望尽量约到周五下午"
+          />
+        </el-form-item>
+
+        <el-button type="primary" :loading="recognizing" @click="submitRecognition">
+          开始识别
+        </el-button>
+
+        <section v-if="recognitionResult" class="recognition-result">
+          <div class="recognition-head">
+            <el-tag type="primary">
+              {{ recognitionResult.intentTypeDesc || recognitionResult.intentType || "未知意图" }}
+            </el-tag>
+            <span>置信度：{{ formatConfidence(recognitionResult.confidence) }}</span>
+          </div>
+
+          <p class="recognition-reason">{{ recognitionResult.reason || "AI 未返回原因" }}</p>
+
+          <el-form-item label="建议求职状态">
+            <el-select v-model="recognitionConfirmForm.suggestedStatus" style="width: 100%">
+              <el-option label="已沟通" value="COMMUNICATED" />
+              <el-option label="已投递" value="APPLIED" />
+              <el-option label="面试中" value="INTERVIEWING" />
+              <el-option label="Offer" value="OFFER" />
+              <el-option label="已拒绝" value="REJECTED" />
+              <el-option label="已关闭" value="CLOSED" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="面试时间">
+            <el-date-picker
+              v-model="recognitionConfirmForm.interviewTime"
+              type="datetime"
+              placeholder="可选，面试邀约时填写"
+              style="width: 100%"
+            />
+          </el-form-item>
+
+          <el-form-item label="下次跟进时间">
+            <el-date-picker
+              v-model="recognitionConfirmForm.nextFollowTime"
+              type="datetime"
+              placeholder="可选，需要后续跟进时填写"
+              style="width: 100%"
+            />
+          </el-form-item>
+
+          <el-form-item label="执行动作">
+            <div class="recognition-actions">
+              <el-checkbox v-model="recognitionConfirmForm.saveCommunication">保存到沟通记录</el-checkbox>
+              <el-checkbox v-model="recognitionConfirmForm.updateApplicationStatus">更新求职进度</el-checkbox>
+              <el-checkbox v-model="recognitionConfirmForm.createReminder">创建提醒</el-checkbox>
+              <el-checkbox v-model="recognitionConfirmForm.generateInterviewPrepare">生成面试准备任务</el-checkbox>
+            </div>
+          </el-form-item>
+
+          <div v-if="recognitionResult.todoItems?.length" class="recognition-box">
+            <strong>建议待办</strong>
+            <ul>
+              <li v-for="item in recognitionResult.todoItems" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+
+          <div v-if="recognitionResult.replySuggestion" class="recognition-box">
+            <strong>建议回复</strong>
+            <p>{{ recognitionResult.replySuggestion }}</p>
+          </div>
+        </section>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="recognitionDialogVisible = false">取消</el-button>
+        <el-button
+          type="success"
+          :disabled="!recognitionResult"
+          :loading="recognitionConfirming"
+          @click="confirmRecognition"
+        >
+          确认执行
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -524,10 +628,15 @@ import {
   pageCommunications,
   updateCommunicationStatus
 } from "../api/communication";
+import {
+  confirmHrReplyRecognition,
+  recognizeHrReplyFromCommunication
+} from "../api/hrReplyRecognition";
 import type {
   CommunicationMessageInfo,
   CommunicationRecordInfo,
-  CommunicationStatsInfo
+  CommunicationStatsInfo,
+  HrReplyRecognitionInfo
 } from "../api/types";
 
 /**
@@ -619,9 +728,61 @@ const detailVisible = ref(false);
 const replyDialogVisible = ref(false);
 
 /**
+ * HR 回复识别 Agent 弹窗。
+ */
+const recognitionDialogVisible = ref(false);
+
+/**
+ * HR 回复识别 loading。
+ */
+const recognizing = ref(false);
+
+/**
+ * HR 回复识别确认执行 loading。
+ */
+const recognitionConfirming = ref(false);
+
+/**
  * 面试邀约弹窗。
  */
 const interviewDialogVisible = ref(false);
+
+/**
+ * HR 回复识别表单。
+ */
+const recognitionForm = reactive({
+  communicationId: 0,
+  hrReplyText: "",
+  userNote: ""
+});
+
+/**
+ * HR 回复识别结果。
+ */
+const recognitionResult = ref<HrReplyRecognitionInfo | null>(null);
+
+/**
+ * 用户确认执行表单。
+ */
+const recognitionConfirmForm = reactive<{
+  saveCommunication: boolean;
+  updateApplicationStatus: boolean;
+  createReminder: boolean;
+  generateInterviewPrepare: boolean;
+  suggestedStatus: string;
+  interviewTime: string | Date | undefined;
+  nextFollowTime: string | Date | undefined;
+  note: string;
+}>({
+  saveCommunication: true,
+  updateApplicationStatus: true,
+  createReminder: true,
+  generateInterviewPrepare: false,
+  suggestedStatus: "COMMUNICATED",
+  interviewTime: "",
+  nextFollowTime: "",
+  note: ""
+});
 
 /**
  * HR 回复 + AI 回复表单。
@@ -858,6 +1019,89 @@ function openReplyDialog(record: CommunicationRecordInfo) {
   replyForm.aiReplyText = record.aiReplyText || "";
 
   replyDialogVisible.value = true;
+}
+
+/**
+ * 打开 HR 回复识别 Agent 弹窗。
+ *
+ * 步骤：
+ * 1. 带入当前沟通记录 ID，确保后端能做权限校验。
+ * 2. 优先回填已有 HR 回复，用户也可以在弹窗内重新粘贴。
+ * 3. 清空上一次识别结果，避免误把旧结果确认到新记录上。
+ */
+function openRecognitionDialog(record: CommunicationRecordInfo) {
+  recognitionForm.communicationId = record.id;
+  recognitionForm.hrReplyText = record.hrReply || "";
+  recognitionForm.userNote = "";
+  recognitionResult.value = null;
+  resetRecognitionConfirmForm(null);
+  recognitionDialogVisible.value = true;
+}
+
+/**
+ * 提交 HR 回复识别。
+ *
+ * 步骤：
+ * 1. 校验 HR 回复不为空。
+ * 2. 调用后端模型识别接口，后端只保存 PENDING 识别记录。
+ * 3. 用识别结果初始化确认表单，等待用户选择是否执行动作。
+ */
+async function submitRecognition() {
+  if (!recognitionForm.hrReplyText.trim()) {
+    ElMessage.warning("请输入 HR 回复内容");
+    return;
+  }
+
+  recognizing.value = true;
+
+  try {
+    const data = await recognizeHrReplyFromCommunication(recognitionForm.communicationId, {
+      hrReplyText: recognitionForm.hrReplyText,
+      userNote: recognitionForm.userNote
+    });
+
+    recognitionResult.value = data;
+    resetRecognitionConfirmForm(data);
+    ElMessage.success("HR 回复已识别，请确认要执行的动作");
+  } finally {
+    recognizing.value = false;
+  }
+}
+
+/**
+ * 确认执行 HR 回复识别结果。
+ *
+ * 步骤：
+ * 1. 把用户勾选的动作和可编辑字段传给后端。
+ * 2. 后端确认后才真正更新沟通记录、求职进度和提醒。
+ * 3. 刷新列表，让用户马上看到状态变化。
+ */
+async function confirmRecognition() {
+  if (!recognitionResult.value) {
+    ElMessage.warning("请先识别 HR 回复");
+    return;
+  }
+
+  recognitionConfirming.value = true;
+
+  try {
+    await confirmHrReplyRecognition(recognitionResult.value.id, {
+      saveCommunication: recognitionConfirmForm.saveCommunication,
+      updateApplicationStatus: recognitionConfirmForm.updateApplicationStatus,
+      createReminder: recognitionConfirmForm.createReminder,
+      generateInterviewPrepare: recognitionConfirmForm.generateInterviewPrepare,
+      suggestedStatus: recognitionConfirmForm.suggestedStatus,
+      interviewTime: normalizeDateTime(recognitionConfirmForm.interviewTime),
+      nextFollowTime: normalizeDateTime(recognitionConfirmForm.nextFollowTime),
+      note: recognitionConfirmForm.note
+    });
+
+    ElMessage.success("已按确认结果更新跟进信息");
+    recognitionDialogVisible.value = false;
+    await loadPage();
+  } finally {
+    recognitionConfirming.value = false;
+  }
 }
 
 /**
@@ -1330,6 +1574,37 @@ function normalizeDateTime(value?: string | Date) {
   return value;
 }
 
+/**
+ * 重置 HR 回复识别确认表单。
+ *
+ * 步骤：
+ * 1. 优先使用后端 defaultActions，保持前后端默认动作一致。
+ * 2. 将 AI 识别出的状态、面试时间、跟进时间带入表单。
+ * 3. 用户仍可在确认前手动修改，最终以后端收到的确认参数为准。
+ */
+function resetRecognitionConfirmForm(result: HrReplyRecognitionInfo | null) {
+  const actions = result?.defaultActions || {};
+  recognitionConfirmForm.saveCommunication = actions.saveCommunication ?? true;
+  recognitionConfirmForm.updateApplicationStatus = actions.updateApplicationStatus ?? true;
+  recognitionConfirmForm.createReminder = actions.createReminder ?? true;
+  recognitionConfirmForm.generateInterviewPrepare = actions.generateInterviewPrepare ?? false;
+  recognitionConfirmForm.suggestedStatus = result?.suggestedStatus || "COMMUNICATED";
+  recognitionConfirmForm.interviewTime = result?.interviewTime || "";
+  recognitionConfirmForm.nextFollowTime = result?.nextFollowTime || "";
+  recognitionConfirmForm.note = result?.reason || "";
+}
+
+/**
+ * 展示模型置信度。
+ */
+function formatConfidence(value?: number) {
+  if (value === undefined || value === null) {
+    return "0%";
+  }
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${Math.round(normalized)}%`;
+}
+
 onMounted(() => {
   loadPage();
 });
@@ -1592,6 +1867,48 @@ onMounted(() => {
   color: #344054;
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.recognition-result {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.recognition-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.recognition-reason {
+  margin: 0 0 12px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.recognition-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recognition-box {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #334155;
+}
+
+.recognition-box p,
+.recognition-box ul {
+  margin: 8px 0 0;
+  line-height: 1.6;
 }
 
 .extract-result-box {

@@ -81,14 +81,6 @@ export const adminMenus: AdminMenuItem[] = [
     ]
   },
   {
-    id: 5,
-    path: "/community",
-    name: "Community",
-    title: "社区管理",
-    icon: "ChatLineRound",
-    component: "community/PostManage"
-  },
-  {
     id: 6,
     path: "/agent/logs",
     name: "AgentLogs",

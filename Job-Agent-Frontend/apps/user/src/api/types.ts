@@ -402,6 +402,40 @@ export interface AgentChatMessage {
 }
 
 /**
+ * Agent Inbox 单条待办。
+ */
+export interface AgentInboxItemInfo {
+  itemKey: string;
+  itemType: string;
+  itemTypeDesc?: string;
+  priority: "HIGH" | "NORMAL" | "LOW" | string;
+  title: string;
+  description?: string;
+  actionText?: string;
+  targetPath?: string;
+  sourceId?: number;
+  applicationId?: number;
+  communicationId?: number;
+  jobId?: number;
+  companyName?: string;
+  jobTitle?: string;
+  dueTime?: string;
+  createTime?: string;
+}
+
+/**
+ * Agent Inbox 今日待办聚合结果。
+ */
+export interface AgentInboxInfo {
+  totalCount: number;
+  highPriorityCount: number;
+  dueCount: number;
+  normalCount: number;
+  summaryText?: string;
+  items: AgentInboxItemInfo[];
+}
+
+/**
  * 用户求职偏好。
  */
 export interface UserJobPreferenceInfo {
@@ -983,6 +1017,64 @@ export interface InterviewInviteConfirmPayload {
   interviewPlatform?: string;
   meetingLink?: string;
   interviewContact?: string;
+  nextFollowTime?: string;
+  note?: string;
+}
+
+/**
+ * HR 回复识别结果。
+ *
+ * 说明：
+ * AI 只负责识别和建议，真正更新业务数据必须由用户点击确认。
+ */
+export interface HrReplyRecognitionInfo {
+  id: number;
+  applicationId?: number;
+  communicationId?: number;
+  jobId?: number;
+  resumeId?: number;
+  companyName?: string;
+  jobTitle?: string;
+  currentStatus?: string;
+  hrReplyText: string;
+  intentType?: string;
+  intentTypeDesc?: string;
+  confidence?: number;
+  suggestedStatus?: string;
+  suggestedStatusDesc?: string;
+  communicationStatus?: string;
+  interviewTime?: string;
+  nextFollowTime?: string;
+  todoItems?: string[];
+  replySuggestion?: string;
+  reason?: string;
+  recognitionJson?: string;
+  confirmStatus?: string;
+  executedActionsJson?: string;
+  errorMsg?: string;
+  defaultActions?: Record<string, boolean>;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
+ * HR 回复识别请求。
+ */
+export interface HrReplyRecognizePayload {
+  hrReplyText: string;
+  userNote?: string;
+}
+
+/**
+ * HR 回复识别确认请求。
+ */
+export interface HrReplyRecognitionConfirmPayload {
+  saveCommunication?: boolean;
+  updateApplicationStatus?: boolean;
+  createReminder?: boolean;
+  generateInterviewPrepare?: boolean;
+  suggestedStatus?: string;
+  interviewTime?: string;
   nextFollowTime?: string;
   note?: string;
 }
