@@ -51,6 +51,21 @@ public class AgentDailyReportRecord extends BaseEntity {
     private String contentJson;
 
     /**
+     * 日报生成状态：SUCCESS / FAILED。
+     */
+    private String generationStatus;
+
+    /**
+     * 日报生成来源：LLM / RULE。
+     */
+    private String generationSource;
+
+    /**
+     * 生成失败原因。模型调用失败或 JSON 解析失败时记录。
+     */
+    private String generationError;
+
+    /**
      * Inbox 待办总数快照。
      */
     private Integer inboxTotalCount;

@@ -445,6 +445,9 @@ export interface AgentDailyReportInfo {
   reportTitle: string;
   summaryText?: string;
   contentText?: string;
+  generationStatus?: "PENDING" | "SUCCESS" | "FAILED" | string;
+  generationSource?: "LLM" | "RULE" | string;
+  generationError?: string;
   inboxTotalCount: number;
   highPriorityCount: number;
   dueCount: number;
@@ -453,6 +456,19 @@ export interface AgentDailyReportInfo {
   emailError?: string;
   sendTime?: string;
   createTime?: string;
+}
+
+/**
+ * Agent 主动日报订阅配置。
+ */
+export interface AgentDailyReportSubscriptionInfo {
+  id?: number;
+  userId?: number;
+  enabled: number;
+  sendTime: string;
+  emailEnabled: number;
+  lastGenerateDate?: string;
+  updateTime?: string;
 }
 
 /**

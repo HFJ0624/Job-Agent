@@ -36,6 +36,9 @@
           <p class="eyebrow">Daily Report</p>
           <h2>最近 Agent 日报</h2>
         </div>
+        <button class="secondary-button" type="button" @click="openReportSettingDialog">
+          日报设置
+        </button>
         <button class="secondary-button" type="button" :disabled="reportLoading" @click="generateDailyReport">
           {{ reportLoading ? "生成中..." : "生成今日日报" }}
         </button>
@@ -53,6 +56,9 @@
               <el-tag :type="emailStatusTagType(report.emailStatus)">
                 {{ emailStatusText(report.emailStatus) }}
               </el-tag>
+              <el-tag :type="generationStatusTagType(report.generationStatus)">
+                {{ generationStatusText(report.generationStatus) }}
+              </el-tag>
             </div>
             <p class="report-summary">{{ report.summaryText || "暂无摘要" }}</p>
             <div class="meta-line">
@@ -61,6 +67,7 @@
               <span>高优先级：{{ report.highPriorityCount }}</span>
               <span>已到期：{{ report.dueCount }}</span>
             </div>
+            <p v-if="report.generationError" class="report-error">AI 生成说明：{{ report.generationError }}</p>
             <p v-if="report.emailError" class="report-error">邮件说明：{{ report.emailError }}</p>
           </div>
           <pre class="report-content">{{ report.contentText }}</pre>
@@ -161,6 +168,45 @@
         <el-button type="primary" @click="submitSnooze">确认稍后提醒</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="reportSettingDialogVisible" title="Agent 日报设置" width="420px">
+      <el-form label-position="top">
+        <el-form-item label="是否启用日报">
+          <el-switch
+            v-model="reportSettingForm.enabled"
+            :active-value="1"
+            :inactive-value="0"
+            active-text="启用"
+            inactive-text="关闭"
+          />
+        </el-form-item>
+        <el-form-item label="发送时间">
+          <el-time-picker
+            v-model="reportSettingForm.sendTime"
+            format="HH:mm"
+            value-format="HH:mm"
+            placeholder="选择发送时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="是否发送邮件">
+          <el-switch
+            v-model="reportSettingForm.emailEnabled"
+            :active-value="1"
+            :inactive-value="0"
+            active-text="发送"
+            inactive-text="只生成站内日报"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="reportSettingDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="reportSettingSaving" @click="saveReportSetting">
+          保存设置
+        </el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
@@ -176,27 +222,42 @@ import {
 } from "../api/agentInbox";
 import {
   generateTodayAgentDailyReport,
-  listRecentAgentDailyReports
+  getAgentDailyReportSubscription,
+  listRecentAgentDailyReports,
+  saveAgentDailyReportSubscription
 } from "../api/agentDailyReport";
-import type { AgentDailyReportInfo, AgentInboxInfo, AgentInboxItemInfo } from "../api/types";
+import type {
+  AgentDailyReportInfo,
+  AgentDailyReportSubscriptionInfo,
+  AgentInboxInfo,
+  AgentInboxItemInfo
+} from "../api/types";
 
 const router = useRouter();
 const inbox = ref<AgentInboxInfo | null>(null);
 const dailyReports = ref<AgentDailyReportInfo[]>([]);
 const loading = ref(false);
 const reportLoading = ref(false);
+const reportSettingSaving = ref(false);
 const errorMessage = ref("");
 const reportErrorMessage = ref("");
 const priorityFilter = ref("");
 const typeFilter = ref("");
 const snoozeDialogVisible = ref(false);
+const reportSettingDialogVisible = ref(false);
 const currentSnoozeItem = ref<AgentInboxItemInfo | null>(null);
+const reportSubscription = ref<AgentDailyReportSubscriptionInfo | null>(null);
 const snoozeForm = reactive<{
   snoozeUntil: string | Date | undefined;
   note: string;
 }>({
   snoozeUntil: "",
   note: ""
+});
+const reportSettingForm = reactive({
+  enabled: 1,
+  sendTime: "09:00",
+  emailEnabled: 1
 });
 
 const filteredItems = computed(() => {
@@ -215,6 +276,7 @@ const filteredItems = computed(() => {
 onMounted(() => {
   loadInbox();
   loadDailyReports();
+  loadReportSubscription();
 });
 
 async function loadInbox() {
@@ -250,6 +312,63 @@ async function loadDailyReports() {
 }
 
 /**
+ * 加载当前用户的日报订阅配置。
+ *
+ * 步骤：
+ * 1. 后端如果没有配置，会自动创建默认配置。
+ * 2. 前端同步到表单，保证用户打开设置弹窗时看到的是数据库真实值。
+ */
+async function loadReportSubscription() {
+  try {
+    const subscription = await getAgentDailyReportSubscription();
+    reportSubscription.value = subscription;
+    reportSettingForm.enabled = subscription.enabled;
+    reportSettingForm.sendTime = subscription.sendTime || "09:00";
+    reportSettingForm.emailEnabled = subscription.emailEnabled;
+  } catch (error) {
+    reportErrorMessage.value = error instanceof Error ? error.message : "日报设置加载失败";
+  }
+}
+
+function openReportSettingDialog() {
+  if (reportSubscription.value) {
+    reportSettingForm.enabled = reportSubscription.value.enabled;
+    reportSettingForm.sendTime = reportSubscription.value.sendTime || "09:00";
+    reportSettingForm.emailEnabled = reportSubscription.value.emailEnabled;
+  }
+  reportSettingDialogVisible.value = true;
+}
+
+/**
+ * 保存日报订阅设置。
+ *
+ * 步骤：
+ * 1. 校验发送时间，防止空时间进入后端。
+ * 2. 保存成功后刷新本地订阅缓存，后续手动生成也会按该配置决定是否发邮件。
+ */
+async function saveReportSetting() {
+  if (!reportSettingForm.sendTime) {
+    ElMessage.warning("请选择日报发送时间");
+    return;
+  }
+
+  reportSettingSaving.value = true;
+  try {
+    reportSubscription.value = await saveAgentDailyReportSubscription({
+      enabled: reportSettingForm.enabled,
+      sendTime: reportSettingForm.sendTime,
+      emailEnabled: reportSettingForm.emailEnabled
+    });
+    ElMessage.success("日报设置已保存");
+    reportSettingDialogVisible.value = false;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "日报设置保存失败");
+  } finally {
+    reportSettingSaving.value = false;
+  }
+}
+
+/**
  * 手动生成今日日报。
  *
  * 步骤：
@@ -260,7 +379,8 @@ async function generateDailyReport() {
   reportLoading.value = true;
   reportErrorMessage.value = "";
   try {
-    const report = await generateTodayAgentDailyReport(true);
+    const sendEmail = reportSubscription.value?.emailEnabled !== 0;
+    const report = await generateTodayAgentDailyReport(sendEmail);
     ElMessage.success(emailStatusText(report.emailStatus) === "发送失败"
       ? "日报已生成，但邮件发送失败"
       : "今日日报已生成");
@@ -430,6 +550,20 @@ function emailStatusTagType(status: string) {
   if (status === "SKIPPED") return "info";
   return "warning";
 }
+
+function generationStatusText(status?: string) {
+  if (status === "SUCCESS") return "AI 已生成";
+  if (status === "FAILED") return "AI 生成失败";
+  if (status === "PENDING") return "生成中";
+  return "未生成";
+}
+
+function generationStatusTagType(status?: string) {
+  if (status === "SUCCESS") return "success";
+  if (status === "FAILED") return "danger";
+  if (status === "PENDING") return "warning";
+  return "info";
+}
 </script>
 
 <style scoped>
@@ -521,6 +655,13 @@ function emailStatusTagType(status: string) {
   margin: 4px 0 0;
   color: #111827;
   font-size: 20px;
+}
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .daily-report-list {

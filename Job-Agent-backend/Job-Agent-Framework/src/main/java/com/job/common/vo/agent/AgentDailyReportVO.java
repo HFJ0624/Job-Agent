@@ -26,6 +26,12 @@ public class AgentDailyReportVO {
 
     private String contentText;
 
+    private String generationStatus;
+
+    private String generationSource;
+
+    private String generationError;
+
     private Integer inboxTotalCount;
 
     private Integer highPriorityCount;

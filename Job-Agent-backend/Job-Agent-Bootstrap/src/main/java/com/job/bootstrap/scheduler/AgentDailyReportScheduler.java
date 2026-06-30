@@ -10,9 +10,9 @@ import org.springframework.stereotype.Component;
  * Agent 主动日报定时任务。
  *
  * 执行策略：
- * 1. 每天上午 9 点生成并发送日报，适合作为用户开始求职前的提醒。
- * 2. 服务层内部按 userId + reportDate 幂等更新，调度重复执行也不会产生多条日报。
- * 3. 调度器只记录总量日志，避免高频输出影响控制台可读性。
+ * 1. 每分钟轻量扫描一次订阅配置，只有 sendTime 命中当前 HH:mm 的用户才会生成日报。
+ * 2. 服务层内部使用 lastGenerateDate 去重，避免同一分钟或重启后重复发送。
+ * 3. 调度器只在有生成数量或异常时输出日志，避免控制台被定时任务刷屏。
  */
 @Slf4j
 @Component
@@ -22,12 +22,12 @@ public class AgentDailyReportScheduler {
     private final AgentDailyReportService agentDailyReportService;
 
     /**
-     * 每天 09:00 执行一次主动日报生成。
+     * 每分钟扫描一次到点订阅。
      */
-    @Scheduled(cron = "0 0 9 * * ?")
+    @Scheduled(cron = "0 * * * * ?")
     public void generateDailyReports() {
         try {
-            int count = agentDailyReportService.generateTodayForActiveUsers();
+            int count = agentDailyReportService.generateDueSubscriptions();
             if (count > 0) {
                 log.info("Agent 主动日报本次生成数量：{}", count);
             }
