@@ -39,6 +39,9 @@
         <button class="secondary-button" type="button" @click="openReportSettingDialog">
           日报设置
         </button>
+        <button class="secondary-button" type="button" @click="router.push('/agent-actions')">
+          行动中心
+        </button>
         <button class="secondary-button" type="button" :disabled="reportLoading" @click="generateDailyReport">
           {{ reportLoading ? "生成中..." : "生成今日日报" }}
         </button>

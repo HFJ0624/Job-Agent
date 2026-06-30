@@ -472,6 +472,27 @@ export interface AgentDailyReportSubscriptionInfo {
 }
 
 /**
+ * Agent 行动确认项。
+ */
+export interface AgentActionItemInfo {
+  id: number;
+  actionKey: string;
+  sourceType: string;
+  sourceId?: number;
+  actionType: string;
+  actionTitle: string;
+  actionDesc?: string;
+  priority: "HIGH" | "NORMAL" | "LOW" | string;
+  actionStatus: "PENDING" | "DONE" | "IGNORED" | "SNOOZED" | "FAILED" | string;
+  targetPath?: string;
+  snoozeUntil?: string;
+  note?: string;
+  doneTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/**
  * 用户求职偏好。
  */
 export interface UserJobPreferenceInfo {

@@ -1,6 +1,9 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.mapper.AgentActionItemMapper;
 import com.job.bootstrap.mapper.AgentDailyReportRecordMapper;
 import com.job.bootstrap.mapper.AgentDailyReportSubscriptionMapper;
 import com.job.bootstrap.mapper.JobUserMapper;
@@ -8,6 +11,7 @@ import com.job.bootstrap.service.AgentDailyReportService;
 import com.job.bootstrap.service.AgentInboxService;
 import com.job.bootstrap.service.JobMailSenderService;
 import com.job.common.dto.agent.AgentDailyReportSubscriptionSaveDTO;
+import com.job.common.entity.agent.AgentActionItem;
 import com.job.common.entity.agent.AgentDailyReportRecord;
 import com.job.common.entity.agent.AgentDailyReportSubscription;
 import com.job.common.entity.user.JobUser;
@@ -25,6 +29,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -55,11 +60,14 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
     private static final DateTimeFormatter SEND_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
     private final AgentDailyReportRecordMapper reportRecordMapper;
+    private final AgentActionItemMapper actionItemMapper;
     private final AgentDailyReportSubscriptionMapper subscriptionMapper;
     private final JobUserMapper jobUserMapper;
     private final AgentInboxService agentInboxService;
     private final AgentDailyReportAiComposer aiComposer;
+    private final AgentActionItemFactory actionItemFactory;
     private final JobMailSenderService mailSenderService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -97,6 +105,7 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
             record.setGenerationError(null);
             record.setUpdateTime(new Date());
             reportRecordMapper.updateById(record);
+            createActionItemsFromDailyReport(record);
         } catch (Exception exception) {
             record.setGenerationStatus(GENERATION_FAILED);
             record.setGenerationSource(SOURCE_LLM);
@@ -243,6 +252,53 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
             record.setEmailError(shortText(exception.getMessage(), 1000));
         }
         reportRecordMapper.updateById(record);
+    }
+
+    private void createActionItemsFromDailyReport(AgentDailyReportRecord record) {
+        List<String> topActions = parseTopActions(record.getContentJson());
+        List<AgentActionItem> items = actionItemFactory.fromDailyReportTopActions(
+                record.getUserId(),
+                record.getId(),
+                topActions
+        );
+
+        /*
+         * V1 行动项只做确认追踪。这里按 actionKey 幂等插入，避免用户重复生成同一天日报后出现重复行动。
+         */
+        for (AgentActionItem item : items) {
+            Long exists = actionItemMapper.selectCount(
+                    new LambdaQueryWrapper<AgentActionItem>()
+                            .eq(AgentActionItem::getUserId, item.getUserId())
+                            .eq(AgentActionItem::getActionKey, item.getActionKey())
+                            .eq(AgentActionItem::getIsDeleted, NOT_DELETED)
+            );
+            if (exists == null || exists == 0) {
+                actionItemMapper.insert(item);
+            }
+        }
+    }
+
+    private List<String> parseTopActions(String contentJson) {
+        List<String> actions = new ArrayList<>();
+        if (!StringUtils.hasText(contentJson)) {
+            return actions;
+        }
+
+        try {
+            JsonNode topActions = objectMapper.readTree(contentJson).path("topActions");
+            if (!topActions.isArray()) {
+                return actions;
+            }
+            for (JsonNode actionNode : topActions) {
+                String action = actionNode.asText();
+                if (StringUtils.hasText(action)) {
+                    actions.add(action.trim());
+                }
+            }
+            return actions;
+        } catch (Exception exception) {
+            return actions;
+        }
     }
 
     private AgentDailyReportRecord findByUserAndDate(Long userId, Date reportDate) {

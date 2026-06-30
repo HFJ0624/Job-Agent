@@ -22,9 +22,9 @@ public class AgentDailyReportScheduler {
     private final AgentDailyReportService agentDailyReportService;
 
     /**
-     * 每分钟扫描一次到点订阅。
+     * 每小时扫描一次到点订阅。
      */
-    @Scheduled(cron = "0 * * * * ?")
+    @Scheduled(cron = "0 0 * * * ?")
     public void generateDailyReports() {
         try {
             int count = agentDailyReportService.generateDueSubscriptions();
