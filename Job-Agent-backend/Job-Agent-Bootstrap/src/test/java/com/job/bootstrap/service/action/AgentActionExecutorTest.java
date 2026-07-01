@@ -8,12 +8,15 @@ import com.job.bootstrap.service.impl.AgentActionExecutor;
 import com.job.common.dto.interview.MockInterviewStudyPlanItemStatusDTO;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentActionItem;
+import com.job.common.vo.workflow.WorkflowTaskVO;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Agent 行动执行器测试。
@@ -38,13 +41,14 @@ class AgentActionExecutorTest {
         item.setActionType("LEARNING_PLAN_DONE");
         item.setBizId(18L);
 
-        executor.execute(item);
+        Long workflowTaskId = executor.execute(item);
 
         verify(learningPlanService).updateItemStatus(
                 eq(9L),
                 eq(18L),
                 any(MockInterviewStudyPlanItemStatusDTO.class)
         );
+        assertEquals(null, workflowTaskId);
     }
 
     @Test
@@ -59,6 +63,8 @@ class AgentActionExecutorTest {
                 wrongQuestionService,
                 workflowTaskService
         );
+        when(workflowTaskService.createTask(any(WorkflowTaskCreateDTO.class)))
+                .thenReturn(WorkflowTaskVO.builder().id(66L).build());
 
         AgentActionItem item = new AgentActionItem();
         item.setUserId(9L);
@@ -72,8 +78,9 @@ class AgentActionExecutorTest {
                 }
                 """);
 
-        executor.execute(item);
+        Long workflowTaskId = executor.execute(item);
 
         verify(workflowTaskService).createTask(any(WorkflowTaskCreateDTO.class));
+        assertEquals(66L, workflowTaskId);
     }
 }

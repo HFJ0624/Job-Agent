@@ -91,6 +91,13 @@ public class AgentActionItem extends BaseEntity {
     private String executeError;
 
     /**
+     * 关联的工作流任务 ID。
+     *
+     * 只有 WORKFLOW_TASK_CREATE 这类异步动作会写入，用来在行动中心展示执行进度和失败原因。
+     */
+    private Long workflowTaskId;
+
+    /**
      * 稍后处理时间。
      */
     private Date snoozeUntil;

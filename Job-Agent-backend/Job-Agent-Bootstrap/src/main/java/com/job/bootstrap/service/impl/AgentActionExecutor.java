@@ -10,6 +10,7 @@ import com.job.common.dto.interview.MockInterviewWrongQuestionStatusDTO;
 import com.job.common.dto.reminder.ReminderCreateDTO;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentActionItem;
+import com.job.common.vo.workflow.WorkflowTaskVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -20,7 +21,7 @@ import org.springframework.util.StringUtils;
  * 说明：
  * 1. 执行器只处理已经明确允许联动的 actionType，未知 actionType 直接失败，避免 AI 建议误改业务数据。
  * 2. 行动项状态由 AgentActionCenterService 统一更新，这里只负责调用具体业务服务。
- * 3. 跳转查看、人工沟通这类动作继续保持 MANUAL_CONFIRM，不进入执行器。
+ * 3. 返回值用于把异步工作流任务 ID 回写到行动项，普通同步动作返回 null。
  */
 @Component
 @RequiredArgsConstructor
@@ -43,50 +44,51 @@ public class AgentActionExecutor {
      * 执行行动项联动。
      *
      * @param item 已校验归属当前用户的行动项
+     * @return 新建的工作流任务 ID；同步动作返回 null
      */
-    public void execute(AgentActionItem item) {
+    public Long execute(AgentActionItem item) {
         if (ACTION_REMINDER_CREATE.equals(item.getActionType())) {
             reminderService.createReminder(item.getUserId(), parsePayload(item.getActionPayload(), ReminderCreateDTO.class));
-            return;
+            return null;
         }
         if (ACTION_REMINDER_DONE.equals(item.getActionType())) {
             reminderService.markDone(item.getUserId(), requireBizId(item));
-            return;
+            return null;
         }
         if (ACTION_LEARNING_PLAN_DONE.equals(item.getActionType())) {
             MockInterviewStudyPlanItemStatusDTO dto = new MockInterviewStudyPlanItemStatusDTO();
             dto.setCompletionStatus("DONE");
             learningPlanService.updateItemStatus(item.getUserId(), requireBizId(item), dto);
-            return;
+            return null;
         }
         if (ACTION_WRONG_QUESTION_REVIEWED.equals(item.getActionType())
                 || ACTION_WRONG_QUESTION_MASTERED.equals(item.getActionType())) {
             MockInterviewWrongQuestionStatusDTO dto = new MockInterviewWrongQuestionStatusDTO();
             dto.setMasteryStatus(ACTION_WRONG_QUESTION_MASTERED.equals(item.getActionType()) ? "MASTERED" : "REVIEWING");
             wrongQuestionService.updateMasteryStatus(item.getUserId(), requireBizId(item), dto);
-            return;
+            return null;
         }
         if (ACTION_WORKFLOW_TASK_CREATE.equals(item.getActionType())) {
-            createWorkflowTask(item);
-            return;
+            return createWorkflowTask(item);
         }
         throw new IllegalArgumentException("当前行动类型暂不支持联动执行：" + item.getActionType());
     }
 
-    private void createWorkflowTask(AgentActionItem item) {
+    private Long createWorkflowTask(AgentActionItem item) {
         /*
          * 步骤：
          * 1. 从行动项 payload 解析工作流创建参数。
          * 2. 强制使用行动项归属用户作为任务 userId，避免 payload 越权创建其他用户任务。
          * 3. 如果 payload 没有 bizId，则复用行动项 bizId，便于邮件通知等任务定位业务记录。
-         * 4. 这里只负责入队，真正执行由工作流调度器按重试、状态机和失败恢复规则处理。
+         * 4. 创建任务后返回 taskId，让行动项可以展示异步执行进度。
          */
         WorkflowTaskCreateDTO request = parsePayload(item.getActionPayload(), WorkflowTaskCreateDTO.class);
         request.setUserId(item.getUserId());
         if (request.getBizId() == null) {
             request.setBizId(item.getBizId());
         }
-        workflowTaskService.createTask(request);
+        WorkflowTaskVO task = workflowTaskService.createTask(request);
+        return task == null ? null : task.getId();
     }
 
     private Long requireBizId(AgentActionItem item) {

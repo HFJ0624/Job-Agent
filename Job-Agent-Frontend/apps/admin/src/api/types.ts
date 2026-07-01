@@ -499,6 +499,48 @@ export interface WorkflowTaskLogInfo {
 /**
  * Agent 观测看板查询参数。
  */
+export interface AgentActionItemQuery {
+  pageNum: number;
+  pageSize: number;
+  userId?: string | number;
+  sourceType?: string;
+  actionType?: string;
+  actionStatus?: string;
+  failedOnly?: boolean;
+  hasWorkflowTask?: boolean | string;
+  workflowTaskId?: string | number;
+  keyword?: string;
+}
+
+export interface AgentActionItemInfo {
+  id: number;
+  userId: number;
+  actionKey: string;
+  sourceType: string;
+  sourceId?: number;
+  actionType: string;
+  bizType?: string;
+  bizId?: number;
+  actionTitle: string;
+  actionDesc?: string;
+  actionPayload?: string;
+  priority: string;
+  actionStatus: string;
+  targetPath?: string;
+  executeError?: string;
+  workflowTaskId?: number;
+  workflowTaskNo?: string;
+  workflowTaskStatus?: string;
+  workflowTaskProgress?: number;
+  workflowTaskStep?: string;
+  workflowTaskError?: string;
+  snoozeUntil?: string;
+  note?: string;
+  doneTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
 export interface AgentObservationDashboardQuery {
   startTime?: string;
   endTime?: string;

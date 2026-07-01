@@ -161,6 +161,14 @@ export const adminMenus: AdminMenuItem[] = [
     component: "agent/OperationDashboard"
   },
   {
+    id: 19,
+    path: "/agent/actions",
+    name: "AgentActions",
+    title: "Agent 行动项",
+    icon: "Checked",
+    component: "agent/ActionItemManage"
+  },
+  {
     id: 13,
     path: "/interview/mock",
     name: "MockInterviewManage",

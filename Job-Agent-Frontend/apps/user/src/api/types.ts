@@ -488,6 +488,12 @@ export interface AgentActionItemInfo {
   actionStatus: "PENDING" | "DONE" | "IGNORED" | "SNOOZED" | "FAILED" | string;
   targetPath?: string;
   executeError?: string;
+  workflowTaskId?: number;
+  workflowTaskNo?: string;
+  workflowTaskStatus?: string;
+  workflowTaskProgress?: number;
+  workflowTaskStep?: string;
+  workflowTaskError?: string;
   snoozeUntil?: string;
   note?: string;
   doneTime?: string;

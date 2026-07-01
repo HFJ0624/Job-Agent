@@ -12,6 +12,8 @@ public class AgentActionItemVO {
 
     private Long id;
 
+    private Long userId;
+
     private String actionKey;
 
     private String sourceType;
@@ -34,7 +36,21 @@ public class AgentActionItemVO {
 
     private String targetPath;
 
+    private String actionPayload;
+
     private String executeError;
+
+    private Long workflowTaskId;
+
+    private String workflowTaskNo;
+
+    private String workflowTaskStatus;
+
+    private Integer workflowTaskProgress;
+
+    private String workflowTaskStep;
+
+    private String workflowTaskError;
 
     private Date snoozeUntil;
 

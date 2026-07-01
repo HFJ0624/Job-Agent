@@ -36,4 +36,25 @@ class AgentActionItemFactoryTest {
         assertThat(items.get(0).getTargetPath()).isEqualTo("/agent-inbox");
         assertThat(items.get(0).getActionKey()).isEqualTo("DAILY_REPORT_11_1");
     }
+
+    @Test
+    void shouldBuildExecutableActionItemsFromDailyReportExecutableActions() {
+        AgentActionItemFactory factory = new AgentActionItemFactory();
+        AgentActionItemFactory.ExecutableActionSpec spec = new AgentActionItemFactory.ExecutableActionSpec();
+        spec.setActionTitle("发送面试通知邮件");
+        spec.setActionDesc("确认后创建邮件通知工作流任务");
+        spec.setActionType("WORKFLOW_TASK_CREATE");
+        spec.setBizType("WORKFLOW_TASK");
+        spec.setBizId(123L);
+        spec.setActionPayload("{\"taskType\":\"INTERVIEW_EMAIL_NOTIFY\",\"bizId\":123}");
+        spec.setPriority("HIGH");
+
+        List<AgentActionItem> items = factory.fromDailyReportExecutableActions(7L, 11L, List.of(spec));
+
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).getActionKey()).isEqualTo("DAILY_REPORT_11_EXEC_1");
+        assertThat(items.get(0).getActionType()).isEqualTo("WORKFLOW_TASK_CREATE");
+        assertThat(items.get(0).getBizId()).isEqualTo(123L);
+        assertThat(items.get(0).getActionPayload()).contains("INTERVIEW_EMAIL_NOTIFY");
+    }
 }

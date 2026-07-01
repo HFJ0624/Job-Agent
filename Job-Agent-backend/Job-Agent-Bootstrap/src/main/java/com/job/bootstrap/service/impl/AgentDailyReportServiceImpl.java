@@ -255,12 +255,10 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
     }
 
     private void createActionItemsFromDailyReport(AgentDailyReportRecord record) {
-        List<String> topActions = parseTopActions(record.getContentJson());
-        List<AgentActionItem> items = actionItemFactory.fromDailyReportTopActions(
-                record.getUserId(),
-                record.getId(),
-                topActions
-        );
+        List<AgentActionItemFactory.ExecutableActionSpec> executableActions = parseExecutableActions(record.getContentJson());
+        List<AgentActionItem> items = executableActions.isEmpty()
+                ? actionItemFactory.fromDailyReportTopActions(record.getUserId(), record.getId(), parseTopActions(record.getContentJson()))
+                : actionItemFactory.fromDailyReportExecutableActions(record.getUserId(), record.getId(), executableActions);
 
         /*
          * V1 行动项只做确认追踪。这里按 actionKey 幂等插入，避免用户重复生成同一天日报后出现重复行动。
@@ -298,6 +296,61 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
             return actions;
         } catch (Exception exception) {
             return actions;
+        }
+    }
+
+    private List<AgentActionItemFactory.ExecutableActionSpec> parseExecutableActions(String contentJson) {
+        List<AgentActionItemFactory.ExecutableActionSpec> actions = new ArrayList<>();
+        if (!StringUtils.hasText(contentJson)) {
+            return actions;
+        }
+
+        try {
+            JsonNode executableActions = objectMapper.readTree(contentJson).path("executableActions");
+            if (!executableActions.isArray()) {
+                return actions;
+            }
+            for (JsonNode actionNode : executableActions) {
+                AgentActionItemFactory.ExecutableActionSpec spec = new AgentActionItemFactory.ExecutableActionSpec();
+                spec.setActionTitle(text(actionNode, "actionTitle"));
+                spec.setActionDesc(text(actionNode, "actionDesc"));
+                spec.setActionType(text(actionNode, "actionType"));
+                spec.setBizType(text(actionNode, "bizType"));
+                spec.setBizId(actionNode.path("bizId").isNumber() ? actionNode.path("bizId").asLong() : null);
+                spec.setActionPayload(jsonText(actionNode.path("actionPayload")));
+                spec.setPriority(text(actionNode, "priority"));
+                spec.setTargetPath(text(actionNode, "targetPath"));
+                if (StringUtils.hasText(spec.getActionTitle())) {
+                    actions.add(spec);
+                }
+            }
+            return actions;
+        } catch (Exception exception) {
+            return actions;
+        }
+    }
+
+    private String text(JsonNode node, String fieldName) {
+        JsonNode value = node.path(fieldName);
+        if (value == null || value.isMissingNode() || value.isNull()) {
+            return null;
+        }
+        String text = value.asText();
+        return StringUtils.hasText(text) ? text.trim() : null;
+    }
+
+    private String jsonText(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            String value = node.asText();
+            return StringUtils.hasText(value) ? value.trim() : null;
+        }
+        try {
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception exception) {
+            return null;
         }
     }
 

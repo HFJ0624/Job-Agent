@@ -26,12 +26,26 @@
           </div>
           <h3>{{ item.actionTitle }}</h3>
           <p>{{ item.actionDesc || "暂无说明" }}</p>
+
           <div class="meta-line">
             <span>状态：{{ statusText(item.actionStatus) }}</span>
             <span>动作：{{ actionTypeText(item.actionType) }}</span>
             <span v-if="item.snoozeUntil">稍后：{{ item.snoozeUntil }}</span>
             <span v-if="item.createTime">创建：{{ item.createTime }}</span>
           </div>
+
+          <div v-if="item.workflowTaskId" class="workflow-box">
+            <div class="workflow-head">
+              <strong>工作流任务：{{ item.workflowTaskNo || item.workflowTaskId }}</strong>
+              <el-tag :type="workflowStatusTag(item.workflowTaskStatus)" effect="plain">
+                {{ workflowStatusText(item.workflowTaskStatus) }}
+              </el-tag>
+            </div>
+            <el-progress :percentage="item.workflowTaskProgress || 0" :status="workflowProgressStatus(item.workflowTaskStatus)" />
+            <p v-if="item.workflowTaskStep">当前阶段：{{ item.workflowTaskStep }}</p>
+            <p v-if="item.workflowTaskError" class="execute-error">工作流失败：{{ item.workflowTaskError }}</p>
+          </div>
+
           <p v-if="item.executeError" class="execute-error">执行失败：{{ item.executeError }}</p>
         </div>
 
@@ -128,8 +142,9 @@ function goTarget(item: AgentActionItemInfo) {
 
 async function confirmAction(item: AgentActionItemInfo) {
   const executable = isExecutableAction(item);
+  const retrying = item.actionStatus === "FAILED";
   const message = executable
-    ? "确认后系统会真实执行该行动，例如创建提醒、更新学习计划或创建工作流任务。确认执行吗？"
+    ? `${retrying ? "这条行动之前执行失败，" : ""}确认后系统会真实执行该行动，例如创建提醒、更新学习计划或创建工作流任务。确认执行吗？`
     : "该行动是人工确认类型，确认后只会标记为已完成，不会自动修改其他业务数据。确认完成吗？";
 
   await ElMessageBox.confirm(message, "确认行动", {
@@ -214,7 +229,7 @@ function sourceText(sourceType: string) {
 }
 
 function statusText(status: string) {
-  if (status === "FAILED") return "执行失败";
+  if (status === "FAILED") return "执行失败，可重试";
   if (status === "SNOOZED") return "稍后处理";
   if (status === "DONE") return "已完成";
   if (status === "IGNORED") return "已忽略";
@@ -236,7 +251,33 @@ function isExecutableAction(item: AgentActionItemInfo) {
 }
 
 function confirmButtonText(item: AgentActionItemInfo) {
+  if (item.actionStatus === "FAILED" && isExecutableAction(item)) {
+    return "重新执行";
+  }
   return isExecutableAction(item) ? "确认执行" : "标记完成";
+}
+
+function workflowStatusText(status?: string) {
+  if (status === "PENDING") return "等待执行";
+  if (status === "RUNNING") return "执行中";
+  if (status === "SUCCESS") return "执行成功";
+  if (status === "FAILED_RETRYABLE") return "等待重试";
+  if (status === "FAILED_FINAL") return "最终失败";
+  if (status === "CANCELLED") return "已取消";
+  return status || "未知";
+}
+
+function workflowStatusTag(status?: string) {
+  if (status === "SUCCESS") return "success";
+  if (status === "FAILED_RETRYABLE" || status === "FAILED_FINAL") return "danger";
+  if (status === "RUNNING") return "warning";
+  return "info";
+}
+
+function workflowProgressStatus(status?: string) {
+  if (status === "SUCCESS") return "success";
+  if (status === "FAILED_FINAL") return "exception";
+  return undefined;
 }
 </script>
 
@@ -315,10 +356,31 @@ function confirmButtonText(item: AgentActionItemInfo) {
   line-height: 1.6;
 }
 
+.workflow-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.workflow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-box p,
+.execute-error {
+  font-size: 13px;
+}
+
 .execute-error {
   margin-top: 10px;
   color: #dc2626;
-  font-size: 13px;
 }
 
 .meta-line {

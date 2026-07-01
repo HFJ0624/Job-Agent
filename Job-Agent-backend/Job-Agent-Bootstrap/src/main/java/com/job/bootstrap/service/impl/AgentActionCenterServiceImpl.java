@@ -2,9 +2,11 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.job.bootstrap.mapper.AgentActionItemMapper;
+import com.job.bootstrap.mapper.WorkflowTaskMapper;
 import com.job.bootstrap.service.AgentActionCenterService;
 import com.job.common.dto.agent.AgentActionItemStatusDTO;
 import com.job.common.entity.agent.AgentActionItem;
+import com.job.common.entity.workflow.WorkflowTask;
 import com.job.common.vo.agent.AgentActionItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,7 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
     private static final String ACTION_MANUAL_CONFIRM = "MANUAL_CONFIRM";
 
     private final AgentActionItemMapper actionItemMapper;
+    private final WorkflowTaskMapper workflowTaskMapper;
     private final AgentActionExecutor actionExecutor;
 
     @Override
@@ -69,7 +72,10 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
          */
         try {
             if (!ACTION_MANUAL_CONFIRM.equals(item.getActionType())) {
-                actionExecutor.execute(item);
+                Long workflowTaskId = actionExecutor.execute(item);
+                if (workflowTaskId != null) {
+                    item.setWorkflowTaskId(workflowTaskId);
+                }
             }
             item.setActionStatus(STATUS_DONE);
             item.setExecuteError(null);
@@ -129,6 +135,7 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
     private AgentActionItemVO toVO(AgentActionItem item) {
         AgentActionItemVO vo = new AgentActionItemVO();
         vo.setId(item.getId());
+        vo.setUserId(item.getUserId());
         vo.setActionKey(item.getActionKey());
         vo.setSourceType(item.getSourceType());
         vo.setSourceId(item.getSourceId());
@@ -140,13 +147,42 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         vo.setPriority(item.getPriority());
         vo.setActionStatus(item.getActionStatus());
         vo.setTargetPath(item.getTargetPath());
+        vo.setActionPayload(item.getActionPayload());
         vo.setExecuteError(item.getExecuteError());
+        vo.setWorkflowTaskId(item.getWorkflowTaskId());
+        fillWorkflowTaskSnapshot(vo, item.getWorkflowTaskId());
         vo.setSnoozeUntil(item.getSnoozeUntil());
         vo.setNote(item.getNote());
         vo.setDoneTime(item.getDoneTime());
         vo.setCreateTime(item.getCreateTime());
         vo.setUpdateTime(item.getUpdateTime());
         return vo;
+    }
+
+    private void fillWorkflowTaskSnapshot(AgentActionItemVO vo, Long workflowTaskId) {
+        if (workflowTaskId == null) {
+            return;
+        }
+        /*
+         * 步骤：
+         * 1. 行动项只保存 workflowTaskId，避免复制一份易过期的任务状态。
+         * 2. 查询列表时读取任务快照，让用户看到最新状态、进度和失败原因。
+         * 3. 如果任务被删除或不存在，只保留 workflowTaskId，前端仍能知道曾经关联过异步任务。
+         */
+        WorkflowTask task = workflowTaskMapper.selectOne(
+                new LambdaQueryWrapper<WorkflowTask>()
+                        .eq(WorkflowTask::getId, workflowTaskId)
+                        .eq(WorkflowTask::getIsDeleted, NOT_DELETED)
+                        .last("limit 1")
+        );
+        if (task == null) {
+            return;
+        }
+        vo.setWorkflowTaskNo(task.getTaskNo());
+        vo.setWorkflowTaskStatus(task.getStatus());
+        vo.setWorkflowTaskProgress(task.getProgressPercent());
+        vo.setWorkflowTaskStep(task.getCurrentStep());
+        vo.setWorkflowTaskError(task.getErrorMsg());
     }
 
     private String shortText(String value, int maxLength) {
