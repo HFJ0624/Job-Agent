@@ -16,6 +16,7 @@ import com.job.bootstrap.service.AgentEvalService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
+import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
 import com.job.common.dto.agent.AgentEvalDatasetQueryDTO;
 import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
@@ -27,7 +28,9 @@ import com.job.common.entity.agent.AgentEvalRun;
 import com.job.common.entity.agent.AgentTraceLog;
 import com.job.common.vo.agent.AgentChatVO;
 import com.job.common.vo.agent.AgentEvalCaseVO;
+import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import com.job.common.vo.agent.AgentEvalDatasetVO;
+import com.job.common.vo.agent.AgentEvalHealthReportVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 import com.job.common.vo.rag.RagSearchResultVO;
@@ -82,6 +85,8 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     private final AgentChatService agentChatService;
     private final AiModelGatewayService aiModelGatewayService;
     private final ObjectMapper objectMapper;
+    private final AgentEvalHealthReportBuilder healthReportBuilder;
+    private final AgentEvalCoreTemplateFactory coreTemplateFactory;
 
     @Override
     public IPage<AgentEvalDatasetVO> pageDatasets(AgentEvalDatasetQueryDTO query) {
@@ -164,6 +169,37 @@ public class AgentEvalServiceImpl implements AgentEvalService {
             agentEvalCaseMapper.updateById(evalCase);
         }
         return AgentEvalCaseVO.from(evalCase);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentEvalCoreTemplateCreateResultVO createCoreTemplates(AgentEvalCoreTemplateCreateDTO request) {
+        /*
+         * 核心链路模板生成步骤:
+         * 1. 校验数据集和测试用户，保证生成的模板有明确归属。
+         * 2. 查询当前数据集下已有 CORE_TEMPLATE 用例，避免重复生成。
+         * 3. overwrite=true 时先软删旧模板，再插入新模板；overwrite=false 时跳过已有类型。
+         * 4. 插入完成后返回创建数量和跳过类型，前端据此给出明确提示。
+         */
+        validateCoreTemplateRequest(request);
+        Long datasetId = request.getDatasetId();
+        Long userId = request.getUserId();
+        boolean overwrite = Boolean.TRUE.equals(request.getOverwrite());
+        List<AgentEvalCase> existingTemplates = listCoreTemplateCases(datasetId);
+
+        AgentEvalCoreTemplateCreateResultVO result = coreTemplateFactory.buildTemplates(datasetId, userId, overwrite, existingTemplates);
+        if (overwrite && !existingTemplates.isEmpty()) {
+            softDeleteCoreTemplates(existingTemplates);
+        }
+
+        Date now = new Date();
+        for (AgentEvalCase evalCase : result.getCreatedCases()) {
+            evalCase.setIsDeleted(NOT_DELETED);
+            evalCase.setCreateTime(now);
+            evalCase.setUpdateTime(now);
+            agentEvalCaseMapper.insert(evalCase);
+        }
+        return result;
     }
 
     @Override
@@ -282,8 +318,42 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     }
 
     @Override
+    public AgentEvalHealthReportVO buildHealthReport(Long datasetId) {
+        /*
+         * 体检报告查询步骤:
+         * 1. 先按数据集范围查最近一次 Eval 批次，作为本次质量体检的主批次。
+         * 2. 再查当前启用用例，用它计算工具、RAG、记忆、Guardrails、JSON 输出这五类核心链路覆盖率。
+         * 3. 如果存在最近批次，则查该批次所有结果，用它统计失败分类、薄弱指标和质量建议。
+         * 4. 统计逻辑交给 AgentEvalHealthReportBuilder，Service 只负责数据准备，避免接口层堆复杂规则。
+         */
+        AgentEvalRun latestRun = findLatestRun(datasetId);
+        List<AgentEvalCase> enabledCases = listEnabledCases(datasetId);
+        List<AgentEvalResult> latestResults = latestRun == null ? Collections.emptyList() : listResultsByRun(latestRun.getId());
+        return healthReportBuilder.build(latestRun, enabledCases, latestResults);
+    }
+
+    @Override
     public Integer runAllEnabledCases() {
         return runAll().getPassCount();
+    }
+
+    private AgentEvalRun findLatestRun(Long datasetId) {
+        LambdaQueryWrapper<AgentEvalRun> wrapper = new LambdaQueryWrapper<AgentEvalRun>()
+                .eq(AgentEvalRun::getIsDeleted, NOT_DELETED)
+                .eq(datasetId != null, AgentEvalRun::getDatasetId, datasetId)
+                .eq(datasetId == null, AgentEvalRun::getRunType, RUN_TYPE_ALL)
+                .orderByDesc(AgentEvalRun::getCreateTime)
+                .last("limit 1");
+        return agentEvalRunMapper.selectOne(wrapper);
+    }
+
+    private List<AgentEvalResult> listResultsByRun(Long runId) {
+        if (runId == null) {
+            return Collections.emptyList();
+        }
+        return agentEvalResultMapper.selectList(new LambdaQueryWrapper<AgentEvalResult>()
+                .eq(AgentEvalResult::getRunId, runId)
+                .orderByAsc(AgentEvalResult::getId));
     }
 
     private List<AgentEvalResult> executeCases(Long runId, List<AgentEvalCase> cases) {
@@ -928,6 +998,34 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         }
         if (!StringUtils.hasText(request.getInputMessage())) {
             throw new IllegalArgumentException("用户输入不能为空");
+        }
+    }
+
+    private void validateCoreTemplateRequest(AgentEvalCoreTemplateCreateDTO request) {
+        if (request == null || request.getDatasetId() == null) {
+            throw new IllegalArgumentException("请选择要生成模板的数据集");
+        }
+        if (request.getUserId() == null) {
+            throw new IllegalArgumentException("测试用户ID不能为空");
+        }
+        getDatasetRequired(request.getDatasetId());
+    }
+
+    private List<AgentEvalCase> listCoreTemplateCases(Long datasetId) {
+        return agentEvalCaseMapper.selectList(new LambdaQueryWrapper<AgentEvalCase>()
+                .eq(AgentEvalCase::getDatasetId, datasetId)
+                .eq(AgentEvalCase::getIsDeleted, NOT_DELETED)
+                .like(AgentEvalCase::getTags, "CORE_TEMPLATE")
+                .orderByAsc(AgentEvalCase::getId));
+    }
+
+    private void softDeleteCoreTemplates(List<AgentEvalCase> existingTemplates) {
+        Date now = new Date();
+        for (AgentEvalCase evalCase : existingTemplates) {
+            evalCase.setIsDeleted(DELETED);
+            evalCase.setEnableStatus(0);
+            evalCase.setUpdateTime(now);
+            agentEvalCaseMapper.updateById(evalCase);
         }
     }
 

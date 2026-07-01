@@ -3,12 +3,15 @@ package com.job.bootstrap.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
+import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
 import com.job.common.dto.agent.AgentEvalDatasetQueryDTO;
 import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
 import com.job.common.dto.agent.AgentEvalRunQueryDTO;
 import com.job.common.vo.agent.AgentEvalCaseVO;
+import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import com.job.common.vo.agent.AgentEvalDatasetVO;
+import com.job.common.vo.agent.AgentEvalHealthReportVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 
@@ -31,6 +34,8 @@ public interface AgentEvalService {
 
     AgentEvalCaseVO saveCase(Long id, AgentEvalCaseSaveDTO request);
 
+    AgentEvalCoreTemplateCreateResultVO createCoreTemplates(AgentEvalCoreTemplateCreateDTO request);
+
     void deleteCase(Long id);
 
     AgentEvalRunVO runCase(Long caseId);
@@ -46,6 +51,14 @@ public interface AgentEvalService {
     IPage<AgentEvalResultVO> pageResults(AgentEvalResultQueryDTO query);
 
     List<AgentEvalDatasetVO> listEnabledDatasets();
+
+    /**
+     * 构建 Agent 核心链路质量体检报告。
+     *
+     * @param datasetId 数据集 ID，为空时使用全量最近一次回归批次
+     * @return 核心链路质量体检报告
+     */
+    AgentEvalHealthReportVO buildHealthReport(Long datasetId);
 
     /**
      * 兼容旧接口：运行所有启用用例并返回通过数量。

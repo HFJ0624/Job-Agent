@@ -7,10 +7,84 @@
         <p>管理评测数据集和用例，批量回归工具选择、参数、RAG 命中和回答质量。</p>
       </div>
       <div class="header-actions">
+        <el-button type="warning" @click="openTemplateDialog">生成核心链路模板</el-button>
         <el-button :loading="running" @click="runAll">全量回归</el-button>
         <el-button type="primary" @click="openCaseDialog()">新增用例</el-button>
         <el-button type="success" @click="openDatasetDialog()">新增数据集</el-button>
       </div>
+    </section>
+
+    <section class="table-card health-card">
+      <div class="section-title-row">
+        <div>
+          <h2>核心链路质量体检</h2>
+          <p>基于最近一次回归批次，聚合工具选择、RAG、记忆、Guardrails、JSON 输出和回答质量。</p>
+        </div>
+        <el-button :loading="loadingHealth" @click="loadHealthReport">刷新体检</el-button>
+      </div>
+      <el-empty v-if="!healthReport?.latestRunId" description="暂无回归批次，请先运行核心链路数据集" />
+      <template v-else>
+        <div class="health-summary">
+          <div>
+            <span>最近批次</span>
+            <strong>#{{ healthReport.latestRunId }} {{ healthReport.latestRunName || "" }}</strong>
+          </div>
+          <div>
+            <span>整体通过率</span>
+            <strong>{{ formatMetric(healthReport.passRate) }}</strong>
+          </div>
+          <div>
+            <span>核心覆盖率</span>
+            <strong>{{ formatMetric(healthReport.coreCoverageRate) }}</strong>
+          </div>
+          <div>
+            <span>最薄弱指标</span>
+            <strong>{{ healthReport.weakestMetric || "-" }}</strong>
+          </div>
+        </div>
+
+        <div class="health-grid">
+          <div class="health-panel">
+            <h3>指标体检</h3>
+            <div v-for="item in healthReport.metricItems" :key="item.metricCode" class="health-row">
+              <span>{{ item.metricName }}</span>
+              <strong>{{ formatHealthMetric(item) }}</strong>
+              <el-tag :type="metricTagType(item.status)" effect="light">{{ item.status || "NO_DATA" }}</el-tag>
+            </div>
+          </div>
+          <div class="health-panel">
+            <h3>覆盖情况</h3>
+            <p>已覆盖</p>
+            <div class="tag-row">
+              <el-tag v-for="item in healthReport.coveredCoreTypes" :key="item" type="success" effect="light">{{ item }}</el-tag>
+            </div>
+            <p>缺失</p>
+            <div class="tag-row">
+              <el-tag v-for="item in healthReport.missingCoreTypes" :key="item" type="warning" effect="light">{{ item }}</el-tag>
+              <span v-if="!healthReport.missingCoreTypes.length" class="muted-text">核心链路已覆盖</span>
+            </div>
+          </div>
+          <div class="health-panel">
+            <h3>失败分类</h3>
+            <div v-if="healthReport.failureItems.length">
+              <div v-for="item in healthReport.failureItems" :key="item.failureType" class="failure-item">
+                <strong>{{ item.failureType }} × {{ item.count }}</strong>
+                <span>{{ item.suggestion }}</span>
+              </div>
+            </div>
+            <el-empty v-else description="最近批次暂无失败分类" />
+          </div>
+        </div>
+
+        <el-alert
+          v-for="item in healthReport.qualitySuggestions"
+          :key="item"
+          class="suggestion-alert"
+          type="warning"
+          :closable="false"
+          :title="item"
+        />
+      </template>
     </section>
 
     <section class="metric-grid">
@@ -354,6 +428,31 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="templateDialogVisible" title="生成核心链路模板" width="560px">
+      <el-form :model="templateForm" label-width="120px">
+        <el-form-item label="目标数据集">
+          <el-select v-model="templateForm.datasetId" placeholder="请选择数据集" style="width: 100%">
+            <el-option v-for="item in datasetOptions" :key="item.id" :label="item.datasetName" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="测试用户ID">
+          <el-input-number v-model="templateForm.userId" :min="1" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="覆盖旧模板">
+          <el-switch v-model="templateForm.overwrite" active-text="覆盖" inactive-text="跳过已有" />
+        </el-form-item>
+        <el-alert
+          type="info"
+          :closable="false"
+          title="将生成 TOOL_CALL、RAG_RETRIEVAL、MEMORY_RECALL、GUARDRAIL、JSON_OUTPUT 五类基础用例。默认跳过已有模板，避免覆盖你手动调好的用例。"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="templateDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creatingTemplates" @click="submitCoreTemplates">生成</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="jsonDialogVisible" :title="jsonDialogTitle" width="860px">
       <pre class="json-preview">{{ jsonDialogContent || "-" }}</pre>
     </el-dialog>
@@ -364,8 +463,10 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
+  createEvalCoreTemplates,
   deleteEvalCase,
   deleteEvalDataset,
+  getEvalHealthReport,
   listEnabledEvalDatasets,
   pageEvalCases,
   pageEvalDatasets,
@@ -381,21 +482,25 @@ import {
 import type {
   AgentEvalCaseInfo,
   AgentEvalCaseQuery,
+  AgentEvalCoreTemplateCreatePayload,
   AgentEvalDatasetInfo,
   AgentEvalDatasetQuery,
+  AgentEvalHealthMetric,
+  AgentEvalHealthReport,
   AgentEvalResultInfo,
   AgentEvalResultQuery,
   AgentEvalRunInfo,
   AgentEvalRunQuery
 } from "../../api/types";
 
-const evalTypes = ["END_TO_END", "TOOL_CALL", "RAG_RETRIEVAL", "ANSWER_QUALITY"];
+const evalTypes = ["END_TO_END", "TOOL_CALL", "RAG_RETRIEVAL", "MEMORY_RECALL", "GUARDRAIL", "JSON_OUTPUT", "ANSWER_QUALITY"];
 
 const datasets = ref<AgentEvalDatasetInfo[]>([]);
 const datasetOptions = ref<AgentEvalDatasetInfo[]>([]);
 const cases = ref<AgentEvalCaseInfo[]>([]);
 const runs = ref<AgentEvalRunInfo[]>([]);
 const results = ref<AgentEvalResultInfo[]>([]);
+const healthReport = ref<AgentEvalHealthReport>();
 const caseTotal = ref(0);
 const resultTotal = ref(0);
 
@@ -403,12 +508,15 @@ const loadingDatasets = ref(false);
 const loadingCases = ref(false);
 const loadingRuns = ref(false);
 const loadingResults = ref(false);
+const loadingHealth = ref(false);
 const running = ref(false);
 const savingDataset = ref(false);
 const savingCase = ref(false);
+const creatingTemplates = ref(false);
 
 const datasetDialogVisible = ref(false);
 const caseDialogVisible = ref(false);
+const templateDialogVisible = ref(false);
 const jsonDialogVisible = ref(false);
 const jsonDialogTitle = ref("");
 const jsonDialogContent = ref("");
@@ -420,6 +528,11 @@ const resultQuery = reactive<AgentEvalResultQuery>({ pageNum: 1, pageSize: 10 })
 
 const datasetForm = reactive<AgentEvalDatasetInfo>(emptyDatasetForm());
 const caseForm = reactive<AgentEvalCaseInfo>(emptyCaseForm());
+const templateForm = reactive<AgentEvalCoreTemplateCreatePayload>({
+  datasetId: undefined,
+  userId: 1,
+  overwrite: false
+});
 
 const latestRun = computed(() => runs.value[0]);
 const latestPassRate = computed(() => {
@@ -498,8 +611,17 @@ async function loadResults() {
   }
 }
 
+async function loadHealthReport() {
+  loadingHealth.value = true;
+  try {
+    healthReport.value = await getEvalHealthReport(caseQuery.datasetId);
+  } finally {
+    loadingHealth.value = false;
+  }
+}
+
 async function reloadAll() {
-  await Promise.all([loadDatasets(), loadCases(), loadRuns(), loadResults()]);
+  await Promise.all([loadDatasets(), loadCases(), loadRuns(), loadResults(), loadHealthReport()]);
 }
 
 function openDatasetDialog(row?: AgentEvalDatasetInfo) {
@@ -510,6 +632,15 @@ function openDatasetDialog(row?: AgentEvalDatasetInfo) {
 function openCaseDialog(row?: AgentEvalCaseInfo) {
   Object.assign(caseForm, emptyCaseForm(), row || {});
   caseDialogVisible.value = true;
+}
+
+function openTemplateDialog() {
+  Object.assign(templateForm, {
+    datasetId: typeof caseQuery.datasetId === "number" ? caseQuery.datasetId : undefined,
+    userId: 1,
+    overwrite: false
+  });
+  templateDialogVisible.value = true;
 }
 
 async function submitDataset() {
@@ -538,6 +669,26 @@ async function submitCase() {
   }
 }
 
+async function submitCoreTemplates() {
+  if (!templateForm.datasetId) {
+    ElMessage.warning("请先选择目标数据集");
+    return;
+  }
+  creatingTemplates.value = true;
+  try {
+    // 1. 后端会按数据集生成五类核心链路模板，默认跳过已有类型。
+    // 2. 生成后刷新用例列表和体检报告，让覆盖率立即反映新模板。
+    const result = await createEvalCoreTemplates(templateForm);
+    ElMessage.success(`已生成 ${result.createdCount} 条模板，跳过 ${result.skippedCount} 条`);
+    templateDialogVisible.value = false;
+    caseQuery.datasetId = templateForm.datasetId;
+    caseQuery.pageNum = 1;
+    await Promise.all([loadCases(), loadHealthReport()]);
+  } finally {
+    creatingTemplates.value = false;
+  }
+}
+
 async function removeDataset(row: AgentEvalDatasetInfo) {
   await ElMessageBox.confirm(`确认删除数据集「${row.datasetName}」？`, "删除确认", { type: "warning" });
   await deleteEvalDataset(row.id!);
@@ -557,7 +708,7 @@ async function runCase(row: AgentEvalCaseInfo) {
   try {
     await runEvalCase(row.id!);
     ElMessage.success("用例运行完成");
-    await Promise.all([loadRuns(), loadResults()]);
+    await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
   } finally {
     running.value = false;
   }
@@ -568,7 +719,7 @@ async function runDataset(row: AgentEvalDatasetInfo) {
   try {
     await runEvalDataset(row.id!);
     ElMessage.success("数据集回归完成");
-    await Promise.all([loadRuns(), loadResults()]);
+    await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
   } finally {
     running.value = false;
   }
@@ -579,7 +730,7 @@ async function runAll() {
   try {
     await runAllEvalCases();
     ElMessage.success("全量回归完成");
-    await Promise.all([loadRuns(), loadResults()]);
+    await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
   } finally {
     running.value = false;
   }
@@ -596,6 +747,7 @@ function filterCasesByDataset(row: AgentEvalDatasetInfo) {
   caseQuery.datasetId = row.id;
   caseQuery.pageNum = 1;
   loadCases();
+  loadHealthReport();
 }
 
 function filterResultsByRun(row: AgentEvalRunInfo) {
@@ -612,6 +764,19 @@ function searchCases() {
 function resetCaseQuery() {
   Object.assign(caseQuery, { pageNum: 1, pageSize: 10, datasetId: "", caseName: "", evalType: "", expectedToolName: "" });
   loadCases();
+  loadHealthReport();
+}
+
+function formatHealthMetric(item: AgentEvalHealthMetric) {
+  if (item.metricValue === undefined || item.metricValue === null) return "-";
+  return item.percentMetric === false ? String(item.metricValue) : `${item.metricValue}%`;
+}
+
+function metricTagType(status?: string) {
+  if (status === "GOOD") return "success";
+  if (status === "WARN") return "warning";
+  if (status === "RISK") return "danger";
+  return "info";
 }
 
 function openJsonDialog(title: string, content?: string) {
@@ -704,6 +869,85 @@ onMounted(reloadAll);
   margin-bottom: 16px;
 }
 
+.health-card {
+  margin-bottom: 16px;
+}
+
+.health-summary {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1.2fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.health-summary > div,
+.health-panel {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.health-summary span {
+  display: block;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.health-summary strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.health-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.health-panel p {
+  margin: 10px 0 6px;
+  color: #6b7280;
+}
+
+.health-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 82px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.failure-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.failure-item span,
+.muted-text {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.suggestion-alert {
+  margin-top: 10px;
+}
+
 .metric-card {
   padding: 14px;
   border: 1px solid #e5e7eb;
@@ -740,6 +984,11 @@ onMounted(reloadAll);
 @media (max-width: 1200px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .health-summary,
+  .health-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

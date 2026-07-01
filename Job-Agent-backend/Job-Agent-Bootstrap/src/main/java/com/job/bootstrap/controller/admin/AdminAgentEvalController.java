@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.bootstrap.service.AgentEvalService;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
+import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
 import com.job.common.dto.agent.AgentEvalDatasetQueryDTO;
 import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
@@ -11,7 +12,9 @@ import com.job.common.dto.agent.AgentEvalRunQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.agent.AgentEvalCaseVO;
+import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import com.job.common.vo.agent.AgentEvalDatasetVO;
+import com.job.common.vo.agent.AgentEvalHealthReportVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -50,6 +54,11 @@ public class AdminAgentEvalController {
         return Result.build(agentEvalService.listEnabledDatasets(), ResultCodeEnum.SUCCESS);
     }
 
+    @GetMapping("/health-report")
+    public Result<AgentEvalHealthReportVO> healthReport(@RequestParam(required = false) Long datasetId) {
+        return Result.build(agentEvalService.buildHealthReport(datasetId), ResultCodeEnum.SUCCESS);
+    }
+
     @PostMapping("/datasets")
     public Result<AgentEvalDatasetVO> createDataset(@RequestBody AgentEvalDatasetSaveDTO request) {
         return Result.build(agentEvalService.saveDataset(null, request), ResultCodeEnum.SUCCESS);
@@ -75,6 +84,13 @@ public class AdminAgentEvalController {
     @PostMapping("/cases")
     public Result<AgentEvalCaseVO> createCase(@RequestBody AgentEvalCaseSaveDTO request) {
         return Result.build(agentEvalService.saveCase(null, request), ResultCodeEnum.SUCCESS);
+    }
+
+    @PostMapping("/cases/core-templates")
+    public Result<AgentEvalCoreTemplateCreateResultVO> createCoreTemplates(
+            @RequestBody AgentEvalCoreTemplateCreateDTO request
+    ) {
+        return Result.build(agentEvalService.createCoreTemplates(request), ResultCodeEnum.SUCCESS);
     }
 
     @PutMapping("/cases/{id}")

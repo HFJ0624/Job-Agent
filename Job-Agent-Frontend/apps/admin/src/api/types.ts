@@ -350,6 +350,25 @@ export interface AgentEvalCaseQuery {
 }
 
 /**
+ * Agent Eval 核心链路模板创建参数。
+ */
+export interface AgentEvalCoreTemplateCreatePayload {
+  datasetId?: number;
+  userId: number;
+  overwrite?: boolean;
+}
+
+/**
+ * Agent Eval 核心链路模板创建结果。
+ */
+export interface AgentEvalCoreTemplateCreateResult {
+  createdCount: number;
+  skippedCount: number;
+  skippedTypes: string[];
+  createdCases: AgentEvalCaseInfo[];
+}
+
+/**
  * Agent Eval 批量运行记录。
  */
 export interface AgentEvalRunInfo {
@@ -435,6 +454,52 @@ export interface AgentEvalResultQuery {
   evalType?: string;
   passStatus?: number | string;
   failureType?: string;
+}
+
+/**
+ * Agent Eval 质量体检指标项。
+ */
+export interface AgentEvalHealthMetric {
+  metricCode: string;
+  metricName: string;
+  metricValue?: number;
+  percentMetric?: boolean;
+  status?: string;
+  description?: string;
+}
+
+/**
+ * Agent Eval 失败分类项。
+ */
+export interface AgentEvalHealthFailure {
+  failureType: string;
+  count: number;
+  suggestion?: string;
+}
+
+/**
+ * Agent 核心链路质量体检报告。
+ */
+export interface AgentEvalHealthReport {
+  latestRunId?: number;
+  latestRunName?: string;
+  datasetId?: number;
+  totalCount: number;
+  passCount: number;
+  failCount: number;
+  passRate: number;
+  toolAccuracy?: number;
+  paramAccuracy?: number;
+  ragHitRate?: number;
+  answerQualityAvg?: number;
+  coreCoverageRate: number;
+  weakestMetric?: string;
+  weakestMetricValue?: number;
+  coveredCoreTypes: string[];
+  missingCoreTypes: string[];
+  metricItems: AgentEvalHealthMetric[];
+  failureItems: AgentEvalHealthFailure[];
+  qualitySuggestions: string[];
 }
 
 /**

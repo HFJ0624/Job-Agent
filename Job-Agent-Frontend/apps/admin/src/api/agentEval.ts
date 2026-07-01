@@ -2,8 +2,11 @@ import { request } from "./request";
 import type {
   AgentEvalCaseInfo,
   AgentEvalCaseQuery,
+  AgentEvalCoreTemplateCreatePayload,
+  AgentEvalCoreTemplateCreateResult,
   AgentEvalDatasetInfo,
   AgentEvalDatasetQuery,
+  AgentEvalHealthReport,
   AgentEvalResultInfo,
   AgentEvalResultQuery,
   AgentEvalRunInfo,
@@ -27,6 +30,11 @@ export function pageEvalDatasets(query: AgentEvalDatasetQuery) {
 
 export function listEnabledEvalDatasets() {
   return request<AgentEvalDatasetInfo[]>("/admin/agent/eval/datasets/enabled");
+}
+
+export function getEvalHealthReport(datasetId?: number | string) {
+  const query = datasetId ? `?datasetId=${datasetId}` : "";
+  return request<AgentEvalHealthReport>(`/admin/agent/eval/health-report${query}`);
 }
 
 export function saveEvalDataset(payload: AgentEvalDatasetInfo) {
@@ -55,6 +63,13 @@ export function saveEvalCase(payload: AgentEvalCaseInfo) {
 
 export function deleteEvalCase(id: number) {
   return request<void>(`/admin/agent/eval/cases/${id}`, { method: "DELETE" });
+}
+
+export function createEvalCoreTemplates(payload: AgentEvalCoreTemplateCreatePayload) {
+  return request<AgentEvalCoreTemplateCreateResult>("/admin/agent/eval/cases/core-templates", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function runEvalCase(id: number) {
