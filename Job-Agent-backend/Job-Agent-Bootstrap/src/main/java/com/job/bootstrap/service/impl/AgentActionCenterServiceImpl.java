@@ -30,8 +30,11 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
     private static final String STATUS_DONE = "DONE";
     private static final String STATUS_IGNORED = "IGNORED";
     private static final String STATUS_SNOOZED = "SNOOZED";
+    private static final String STATUS_FAILED = "FAILED";
+    private static final String ACTION_MANUAL_CONFIRM = "MANUAL_CONFIRM";
 
     private final AgentActionItemMapper actionItemMapper;
+    private final AgentActionExecutor actionExecutor;
 
     @Override
     public List<AgentActionItemVO> listPending(Long userId, int limit) {
@@ -43,6 +46,8 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
                                 .eq(AgentActionItem::getIsDeleted, NOT_DELETED)
                                 .and(wrapper -> wrapper
                                         .eq(AgentActionItem::getActionStatus, STATUS_PENDING)
+                                        .or()
+                                        .eq(AgentActionItem::getActionStatus, STATUS_FAILED)
                                         .or(query -> query
                                                 .eq(AgentActionItem::getActionStatus, STATUS_SNOOZED)
                                                 .le(AgentActionItem::getSnoozeUntil, now)))
@@ -55,14 +60,31 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(noRollbackFor = Exception.class)
     public void markDone(Long userId, Long actionId, AgentActionItemStatusDTO dto) {
         AgentActionItem item = getUserActionRequired(userId, actionId);
-        item.setActionStatus(STATUS_DONE);
-        item.setDoneTime(new Date());
-        item.setNote(dto == null ? null : dto.getNote());
-        item.setUpdateTime(new Date());
-        actionItemMapper.updateById(item);
+
+        /*
+         * V2：可执行 actionType 先联动业务服务；旧的 MANUAL_CONFIRM 仍只标记完成。
+         */
+        try {
+            if (!ACTION_MANUAL_CONFIRM.equals(item.getActionType())) {
+                actionExecutor.execute(item);
+            }
+            item.setActionStatus(STATUS_DONE);
+            item.setExecuteError(null);
+            item.setDoneTime(new Date());
+            item.setNote(dto == null ? null : dto.getNote());
+            item.setUpdateTime(new Date());
+            actionItemMapper.updateById(item);
+        } catch (Exception exception) {
+            item.setActionStatus(STATUS_FAILED);
+            item.setExecuteError(shortText(exception.getMessage(), 1000));
+            item.setNote(dto == null ? null : dto.getNote());
+            item.setUpdateTime(new Date());
+            actionItemMapper.updateById(item);
+            throw exception;
+        }
     }
 
     @Override
@@ -111,16 +133,27 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         vo.setSourceType(item.getSourceType());
         vo.setSourceId(item.getSourceId());
         vo.setActionType(item.getActionType());
+        vo.setBizType(item.getBizType());
+        vo.setBizId(item.getBizId());
         vo.setActionTitle(item.getActionTitle());
         vo.setActionDesc(item.getActionDesc());
         vo.setPriority(item.getPriority());
         vo.setActionStatus(item.getActionStatus());
         vo.setTargetPath(item.getTargetPath());
+        vo.setExecuteError(item.getExecuteError());
         vo.setSnoozeUntil(item.getSnoozeUntil());
         vo.setNote(item.getNote());
         vo.setDoneTime(item.getDoneTime());
         vo.setCreateTime(item.getCreateTime());
         vo.setUpdateTime(item.getUpdateTime());
         return vo;
+    }
+
+    private String shortText(String value, int maxLength) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.trim();
+        return text.length() <= maxLength ? text : text.substring(0, maxLength);
     }
 }

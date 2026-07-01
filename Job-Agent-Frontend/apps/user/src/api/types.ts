@@ -480,11 +480,14 @@ export interface AgentActionItemInfo {
   sourceType: string;
   sourceId?: number;
   actionType: string;
+  bizType?: string;
+  bizId?: number;
   actionTitle: string;
   actionDesc?: string;
   priority: "HIGH" | "NORMAL" | "LOW" | string;
   actionStatus: "PENDING" | "DONE" | "IGNORED" | "SNOOZED" | "FAILED" | string;
   targetPath?: string;
+  executeError?: string;
   snoozeUntil?: string;
   note?: string;
   doneTime?: string;

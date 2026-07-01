@@ -20,6 +20,10 @@ public class AgentActionItemVO {
 
     private String actionType;
 
+    private String bizType;
+
+    private Long bizId;
+
     private String actionTitle;
 
     private String actionDesc;
@@ -29,6 +33,8 @@ public class AgentActionItemVO {
     private String actionStatus;
 
     private String targetPath;
+
+    private String executeError;
 
     private Date snoozeUntil;
 

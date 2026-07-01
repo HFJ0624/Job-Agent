@@ -46,6 +46,16 @@ public class AgentActionItem extends BaseEntity {
     private String actionType;
 
     /**
+     * 需要联动执行的业务类型，例如 REMINDER、LEARNING_PLAN_ITEM、WRONG_QUESTION。
+     */
+    private String bizType;
+
+    /**
+     * 需要联动执行的业务 ID。
+     */
+    private Long bizId;
+
+    /**
      * 行动标题。
      */
     private String actionTitle;
@@ -69,6 +79,16 @@ public class AgentActionItem extends BaseEntity {
      * 点击去处理时跳转的前端路径。
      */
     private String targetPath;
+
+    /**
+     * 执行参数 JSON。创建提醒等动作会用到更复杂的参数。
+     */
+    private String actionPayload;
+
+    /**
+     * 执行失败原因。
+     */
+    private String executeError;
 
     /**
      * 稍后处理时间。

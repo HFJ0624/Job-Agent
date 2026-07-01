@@ -542,6 +542,48 @@ export interface AgentObservationDashboard {
 }
 
 /**
+ * Agent 运营看板顶部指标卡。
+ */
+export interface AgentOperationMetric {
+  label: string;
+  value: number;
+  subText: string;
+  level: "success" | "warning" | "danger" | "info" | string;
+}
+
+/**
+ * Agent 运营看板通用统计项。
+ */
+export interface AgentOperationStat {
+  name: string;
+  count: number;
+  ratio: number;
+}
+
+/**
+ * Agent 运营看板最近失败记录。
+ */
+export interface AgentOperationFailure {
+  failureType: string;
+  userId?: number;
+  title?: string;
+  reason?: string;
+  createTime?: string;
+}
+
+/**
+ * Agent 运营看板聚合数据。
+ */
+export interface AgentOperationDashboard {
+  metrics: AgentOperationMetric[];
+  reportStats: AgentOperationStat[];
+  actionStatusStats: AgentOperationStat[];
+  actionSourceStats: AgentOperationStat[];
+  actionTypeFailureStats: AgentOperationStat[];
+  recentFailures: AgentOperationFailure[];
+}
+
+/**
  * Agent 统一观测事件查询参数。
  */
 export interface AgentObservationEventQuery {

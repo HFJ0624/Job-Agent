@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">Agent Action Center</p>
         <h1>Agent 行动确认中心</h1>
-        <p>这里集中展示 Agent 建议你确认和推进的行动。V1 只记录确认状态，不会自动修改原业务数据。</p>
+        <p>这里集中展示 Agent 建议你确认和推进的行动。可执行动作会在确认后联动业务服务，人工动作则只标记完成。</p>
       </div>
       <button class="primary-button large" type="button" :disabled="loading" @click="loadActions">
         {{ loading ? "刷新中..." : "刷新行动项" }}
@@ -28,17 +28,19 @@
           <p>{{ item.actionDesc || "暂无说明" }}</p>
           <div class="meta-line">
             <span>状态：{{ statusText(item.actionStatus) }}</span>
+            <span>动作：{{ actionTypeText(item.actionType) }}</span>
             <span v-if="item.snoozeUntil">稍后：{{ item.snoozeUntil }}</span>
             <span v-if="item.createTime">创建：{{ item.createTime }}</span>
           </div>
+          <p v-if="item.executeError" class="execute-error">执行失败：{{ item.executeError }}</p>
         </div>
 
         <div class="card-actions">
           <button class="primary-button" type="button" @click="goTarget(item)">
             去处理
           </button>
-          <button class="secondary-button" type="button" @click="markDone(item)">
-            完成
+          <button class="secondary-button" type="button" :disabled="executingId === item.id" @click="confirmAction(item)">
+            {{ executingId === item.id ? "执行中..." : confirmButtonText(item) }}
           </button>
           <button class="secondary-button" type="button" @click="openSnoozeDialog(item)">
             稍后
@@ -93,6 +95,7 @@ import type { AgentActionItemInfo } from "../api/types";
 const router = useRouter();
 const actions = ref<AgentActionItemInfo[]>([]);
 const loading = ref(false);
+const executingId = ref<number | null>(null);
 const errorMessage = ref("");
 const snoozeDialogVisible = ref(false);
 const currentAction = ref<AgentActionItemInfo | null>(null);
@@ -123,10 +126,26 @@ function goTarget(item: AgentActionItemInfo) {
   router.push(item.targetPath || "/agent-inbox");
 }
 
-async function markDone(item: AgentActionItemInfo) {
-  await markAgentActionDone(item.id);
-  ElMessage.success("已标记完成");
-  await loadActions();
+async function confirmAction(item: AgentActionItemInfo) {
+  const executable = isExecutableAction(item);
+  const message = executable
+    ? "确认后系统会真实执行该行动，例如创建提醒、更新学习计划或创建工作流任务。确认执行吗？"
+    : "该行动是人工确认类型，确认后只会标记为已完成，不会自动修改其他业务数据。确认完成吗？";
+
+  await ElMessageBox.confirm(message, "确认行动", {
+    type: executable ? "warning" : "info",
+    confirmButtonText: executable ? "确认执行" : "确认完成",
+    cancelButtonText: "取消"
+  });
+
+  executingId.value = item.id;
+  try {
+    await markAgentActionDone(item.id);
+    ElMessage.success(executable ? "行动已确认，系统已提交执行" : "已标记完成");
+    await loadActions();
+  } finally {
+    executingId.value = null;
+  }
 }
 
 async function ignoreItem(item: AgentActionItemInfo) {
@@ -195,10 +214,29 @@ function sourceText(sourceType: string) {
 }
 
 function statusText(status: string) {
+  if (status === "FAILED") return "执行失败";
   if (status === "SNOOZED") return "稍后处理";
   if (status === "DONE") return "已完成";
   if (status === "IGNORED") return "已忽略";
   return "待确认";
+}
+
+function actionTypeText(actionType: string) {
+  if (actionType === "REMINDER_CREATE") return "创建提醒";
+  if (actionType === "REMINDER_DONE") return "完成提醒";
+  if (actionType === "LEARNING_PLAN_DONE") return "完成学习任务";
+  if (actionType === "WRONG_QUESTION_REVIEWED") return "标记错题复习中";
+  if (actionType === "WRONG_QUESTION_MASTERED") return "标记错题已掌握";
+  if (actionType === "WORKFLOW_TASK_CREATE") return "创建工作流任务";
+  return "手动确认";
+}
+
+function isExecutableAction(item: AgentActionItemInfo) {
+  return item.actionType !== "MANUAL_CONFIRM";
+}
+
+function confirmButtonText(item: AgentActionItemInfo) {
+  return isExecutableAction(item) ? "确认执行" : "标记完成";
 }
 </script>
 
@@ -275,6 +313,12 @@ function statusText(status: string) {
   margin: 0;
   color: #4b5563;
   line-height: 1.6;
+}
+
+.execute-error {
+  margin-top: 10px;
+  color: #dc2626;
+  font-size: 13px;
 }
 
 .meta-line {
