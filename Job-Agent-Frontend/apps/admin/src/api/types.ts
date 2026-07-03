@@ -457,6 +457,56 @@ export interface AgentEvalResultQuery {
 }
 
 /**
+ * Agent Eval 单条结果诊断。
+ */
+export interface AgentEvalResultDiagnosis {
+  resultId: number;
+  passStatus?: number;
+  failureType?: string;
+  priority?: string;
+  summary?: string;
+  rootCauses: string[];
+  suggestions: string[];
+  evidence: string[];
+}
+
+/**
+ * Agent Eval 诊断快捷修复参数。
+ */
+export interface AgentEvalQuickFixPayload {
+  actionType: string;
+}
+
+/**
+ * Agent Eval 用例质量检查问题项。
+ */
+export interface AgentEvalCaseQualityIssue {
+  caseId?: number;
+  caseName?: string;
+  evalType?: string;
+  riskLevel: string;
+  issueType: string;
+  issueMessage: string;
+  suggestion?: string;
+  fixable?: boolean;
+  fixActionType?: string;
+  fixButtonText?: string;
+  fixConfirmText?: string;
+}
+
+/**
+ * Agent Eval 用例质量检查报告。
+ */
+export interface AgentEvalCaseQualityReport {
+  totalCaseCount: number;
+  problemCaseCount: number;
+  highRiskIssueCount: number;
+  mediumRiskIssueCount: number;
+  lowRiskIssueCount: number;
+  issues: AgentEvalCaseQualityIssue[];
+}
+
+/**
  * Agent Eval 质量体检指标项。
  */
 export interface AgentEvalHealthMetric {

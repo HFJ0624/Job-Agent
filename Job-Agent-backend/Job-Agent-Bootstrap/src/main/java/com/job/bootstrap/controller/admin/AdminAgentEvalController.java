@@ -7,14 +7,17 @@ import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
 import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
 import com.job.common.dto.agent.AgentEvalDatasetQueryDTO;
 import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
+import com.job.common.dto.agent.AgentEvalQuickFixDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
 import com.job.common.dto.agent.AgentEvalRunQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.agent.AgentEvalCaseVO;
+import com.job.common.vo.agent.AgentEvalCaseQualityReportVO;
 import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import com.job.common.vo.agent.AgentEvalDatasetVO;
 import com.job.common.vo.agent.AgentEvalHealthReportVO;
+import com.job.common.vo.agent.AgentEvalResultDiagnosisVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -57,6 +60,17 @@ public class AdminAgentEvalController {
     @GetMapping("/health-report")
     public Result<AgentEvalHealthReportVO> healthReport(@RequestParam(required = false) Long datasetId) {
         return Result.build(agentEvalService.buildHealthReport(datasetId), ResultCodeEnum.SUCCESS);
+    }
+
+    @GetMapping("/cases/quality-check")
+    public Result<AgentEvalCaseQualityReportVO> checkCaseQuality(@RequestParam(required = false) Long datasetId) {
+        return Result.build(agentEvalService.checkCaseQuality(datasetId), ResultCodeEnum.SUCCESS);
+    }
+
+    @PostMapping("/cases/{caseId}/quality-fix")
+    public Result<AgentEvalCaseVO> applyCaseQualityFix(@PathVariable Long caseId,
+                                                       @RequestBody AgentEvalQuickFixDTO request) {
+        return Result.build(agentEvalService.applyCaseQualityFix(caseId, request), ResultCodeEnum.SUCCESS);
     }
 
     @PostMapping("/datasets")
@@ -138,5 +152,16 @@ public class AdminAgentEvalController {
     @GetMapping("/results/page")
     public Result<IPage<AgentEvalResultVO>> pageResults(AgentEvalResultQueryDTO query) {
         return Result.build(agentEvalService.pageResults(query), ResultCodeEnum.SUCCESS);
+    }
+
+    @GetMapping("/results/{resultId}/diagnosis")
+    public Result<AgentEvalResultDiagnosisVO> diagnoseResult(@PathVariable Long resultId) {
+        return Result.build(agentEvalService.diagnoseResult(resultId), ResultCodeEnum.SUCCESS);
+    }
+
+    @PostMapping("/results/{resultId}/quick-fix")
+    public Result<AgentEvalCaseVO> applyQuickFix(@PathVariable Long resultId,
+                                                 @RequestBody AgentEvalQuickFixDTO request) {
+        return Result.build(agentEvalService.applyQuickFix(resultId, request), ResultCodeEnum.SUCCESS);
     }
 }

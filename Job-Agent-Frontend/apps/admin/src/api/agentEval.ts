@@ -1,12 +1,15 @@
 import { request } from "./request";
 import type {
   AgentEvalCaseInfo,
+  AgentEvalCaseQualityReport,
   AgentEvalCaseQuery,
   AgentEvalCoreTemplateCreatePayload,
   AgentEvalCoreTemplateCreateResult,
   AgentEvalDatasetInfo,
   AgentEvalDatasetQuery,
   AgentEvalHealthReport,
+  AgentEvalQuickFixPayload,
+  AgentEvalResultDiagnosis,
   AgentEvalResultInfo,
   AgentEvalResultQuery,
   AgentEvalRunInfo,
@@ -35,6 +38,18 @@ export function listEnabledEvalDatasets() {
 export function getEvalHealthReport(datasetId?: number | string) {
   const query = datasetId ? `?datasetId=${datasetId}` : "";
   return request<AgentEvalHealthReport>(`/admin/agent/eval/health-report${query}`);
+}
+
+export function checkEvalCaseQuality(datasetId?: number | string) {
+  const query = datasetId ? `?datasetId=${datasetId}` : "";
+  return request<AgentEvalCaseQualityReport>(`/admin/agent/eval/cases/quality-check${query}`);
+}
+
+export function applyEvalCaseQualityFix(caseId: number, payload: AgentEvalQuickFixPayload) {
+  return request<AgentEvalCaseInfo>(`/admin/agent/eval/cases/${caseId}/quality-fix`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function saveEvalDataset(payload: AgentEvalDatasetInfo) {
@@ -94,4 +109,15 @@ export function pageEvalRuns(query: AgentEvalRunQuery) {
 
 export function pageEvalResults(query: AgentEvalResultQuery) {
   return request<PageResult<AgentEvalResultInfo>>(`/admin/agent/eval/results/page?${toSearchParams(query)}`);
+}
+
+export function diagnoseEvalResult(resultId: number) {
+  return request<AgentEvalResultDiagnosis>(`/admin/agent/eval/results/${resultId}/diagnosis`);
+}
+
+export function applyEvalQuickFix(resultId: number, payload: AgentEvalQuickFixPayload) {
+  return request<AgentEvalCaseInfo>(`/admin/agent/eval/results/${resultId}/quick-fix`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }

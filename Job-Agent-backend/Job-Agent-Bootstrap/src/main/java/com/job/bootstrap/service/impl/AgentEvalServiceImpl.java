@@ -19,6 +19,7 @@ import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
 import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
 import com.job.common.dto.agent.AgentEvalDatasetQueryDTO;
 import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
+import com.job.common.dto.agent.AgentEvalQuickFixDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
 import com.job.common.dto.agent.AgentEvalRunQueryDTO;
 import com.job.common.entity.agent.AgentEvalCase;
@@ -28,9 +29,11 @@ import com.job.common.entity.agent.AgentEvalRun;
 import com.job.common.entity.agent.AgentTraceLog;
 import com.job.common.vo.agent.AgentChatVO;
 import com.job.common.vo.agent.AgentEvalCaseVO;
+import com.job.common.vo.agent.AgentEvalCaseQualityReportVO;
 import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import com.job.common.vo.agent.AgentEvalDatasetVO;
 import com.job.common.vo.agent.AgentEvalHealthReportVO;
+import com.job.common.vo.agent.AgentEvalResultDiagnosisVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 import com.job.common.vo.rag.RagSearchResultVO;
@@ -46,6 +49,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -76,6 +80,13 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     private static final String STATUS_FAILED = "FAILED";
     private static final String DEFAULT_EVAL_TYPE = "END_TO_END";
     private static final String AI_SCENE_EVAL_JUDGE = "EVAL_JUDGE";
+    private static final String QUICK_FIX_COPY_ACTUAL_TOOL = "COPY_ACTUAL_TOOL_TO_EXPECTED";
+    private static final String QUICK_FIX_CLEAR_EXPECTED_TOOL = "CLEAR_EXPECTED_TOOL";
+    private static final String QUICK_FIX_CLEAR_ANSWER_KEYWORDS = "CLEAR_ANSWER_KEYWORDS";
+    private static final String QUICK_FIX_CLEAR_RAG_KEYWORDS = "CLEAR_RAG_KEYWORDS";
+    private static final String QUALITY_FIX_SET_MIN_ANSWER_SCORE = "SET_MIN_ANSWER_SCORE_70";
+    private static final String QUALITY_FIX_ADD_GUARDRAIL_KEYWORDS = "ADD_GUARDRAIL_REJECT_KEYWORDS";
+    private static final String QUALITY_FIX_ADD_JSON_KEYWORDS = "ADD_JSON_FIELD_KEYWORDS";
 
     private final AgentEvalDatasetMapper agentEvalDatasetMapper;
     private final AgentEvalCaseMapper agentEvalCaseMapper;
@@ -87,6 +98,8 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     private final ObjectMapper objectMapper;
     private final AgentEvalHealthReportBuilder healthReportBuilder;
     private final AgentEvalCoreTemplateFactory coreTemplateFactory;
+    private final AgentEvalResultDiagnosisBuilder resultDiagnosisBuilder;
+    private final AgentEvalCaseQualityChecker caseQualityChecker;
 
     @Override
     public IPage<AgentEvalDatasetVO> pageDatasets(AgentEvalDatasetQueryDTO query) {
@@ -304,6 +317,101 @@ public class AgentEvalServiceImpl implements AgentEvalService {
 
         return agentEvalResultMapper.selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper)
                 .convert(AgentEvalResultVO::from);
+    }
+
+    @Override
+    public AgentEvalResultDiagnosisVO diagnoseResult(Long resultId) {
+        /*
+         * 单条结果诊断步骤:
+         * 1. 先按 ID 查询 Eval 结果，保证诊断基于真实落库数据。
+         * 2. 如果结果不存在，直接返回明确异常，避免前端展示空诊断。
+         * 3. 诊断规则交给 AgentEvalResultDiagnosisBuilder，Service 不写具体规则。
+         */
+        AgentEvalResult result = agentEvalResultMapper.selectById(resultId);
+        if (result == null) {
+            throw new IllegalArgumentException("Eval 结果不存在");
+        }
+        return resultDiagnosisBuilder.build(result);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentEvalCaseVO applyQuickFix(Long resultId, AgentEvalQuickFixDTO request) {
+        /*
+         * 快捷修复步骤:
+         * 1. 先通过 Eval 结果找到原始用例，确保修复的是测试用例而不是真实业务数据。
+         * 2. 校验 actionType 是否属于白名单，避免前端任意传字段造成越权修改。
+         * 3. 根据 actionType 修改用例断言字段，例如清空过严关键词或回填实际工具名。
+         * 4. 更新用例后返回最新 VO，前端刷新列表即可看到变化。
+         */
+        if (request == null || !StringUtils.hasText(request.getActionType())) {
+            throw new IllegalArgumentException("快捷修复类型不能为空");
+        }
+        AgentEvalResult result = getResultRequired(resultId);
+        AgentEvalCase evalCase = getCaseRequired(result.getCaseId());
+        String actionType = request.getActionType().trim();
+
+        if (QUICK_FIX_COPY_ACTUAL_TOOL.equals(actionType)) {
+            evalCase.setExpectedToolName(resolveFirstActualTool(result));
+        } else if (QUICK_FIX_CLEAR_EXPECTED_TOOL.equals(actionType)) {
+            evalCase.setExpectedToolName(null);
+            evalCase.setExpectedToolParamsJson(null);
+        } else if (QUICK_FIX_CLEAR_ANSWER_KEYWORDS.equals(actionType)) {
+            evalCase.setExpectedAnswerKeywords(null);
+        } else if (QUICK_FIX_CLEAR_RAG_KEYWORDS.equals(actionType)) {
+            evalCase.setExpectedRagKeywords(null);
+            evalCase.setExpectedRagDocumentId(null);
+            evalCase.setExpectedRagChunkId(null);
+        } else {
+            throw new IllegalArgumentException("不支持的快捷修复类型: " + actionType);
+        }
+
+        evalCase.setUpdateTime(new Date());
+        agentEvalCaseMapper.updateById(evalCase);
+        return AgentEvalCaseVO.from(evalCase);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentEvalCaseVO applyCaseQualityFix(Long caseId, AgentEvalQuickFixDTO request) {
+        /*
+         * 用例质量快捷修复步骤:
+         * 1. 只根据 caseId 查询 Eval 用例，不依赖前端传入的字段值，避免越权更新任意列。
+         * 2. actionType 必须命中后端白名单；需要人工判断的问题只允许编辑，不提供自动修复。
+         * 3. 每种修复只写入确定性默认值，例如最低分 70、拒答关键词、JSON 字段关键词。
+         * 4. 更新后返回最新用例，前端刷新质量报告和用例列表即可看到闭环结果。
+         */
+        if (request == null || !StringUtils.hasText(request.getActionType())) {
+            throw new IllegalArgumentException("质量修复类型不能为空");
+        }
+        AgentEvalCase evalCase = getCaseRequired(caseId);
+        String actionType = request.getActionType().trim();
+
+        if (QUALITY_FIX_SET_MIN_ANSWER_SCORE.equals(actionType)) {
+            evalCase.setMinAnswerScore(BigDecimal.valueOf(70));
+        } else if (QUALITY_FIX_ADD_GUARDRAIL_KEYWORDS.equals(actionType)) {
+            evalCase.setExpectedAnswerKeywords(appendKeywords(evalCase.getExpectedAnswerKeywords(), List.of("不能", "无法", "安全", "拒绝", "不可以")));
+        } else if (QUALITY_FIX_ADD_JSON_KEYWORDS.equals(actionType)) {
+            evalCase.setExpectedAnswerKeywords(appendKeywords(evalCase.getExpectedAnswerKeywords(), List.of("JSON", "title", "summary")));
+        } else {
+            throw new IllegalArgumentException("不支持的质量快捷修复类型: " + actionType);
+        }
+
+        evalCase.setUpdateTime(new Date());
+        agentEvalCaseMapper.updateById(evalCase);
+        return AgentEvalCaseVO.from(evalCase);
+    }
+
+    @Override
+    public AgentEvalCaseQualityReportVO checkCaseQuality(Long datasetId) {
+        /*
+         * 用例质量检查步骤:
+         * 1. 复用回归运行已有的启用用例查询逻辑，保证检查范围和实际运行范围一致。
+         * 2. 将规则判断交给 AgentEvalCaseQualityChecker，Service 只负责取数和编排，避免规则散落在接口层。
+         * 3. 本接口只返回问题报告，不修改用例数据，后续是否修复仍由管理员确认。
+         */
+        List<AgentEvalCase> cases = listEnabledCases(datasetId);
+        return caseQualityChecker.check(cases);
     }
 
     @Override
@@ -1070,6 +1178,37 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         return evalCase;
     }
 
+    private AgentEvalResult getResultRequired(Long id) {
+        AgentEvalResult result = agentEvalResultMapper.selectById(id);
+        if (result == null) {
+            throw new IllegalArgumentException("Eval 结果不存在");
+        }
+        return result;
+    }
+
+    private String resolveFirstActualTool(AgentEvalResult result) {
+        if (!StringUtils.hasText(result.getActualTools())) {
+            throw new IllegalArgumentException("该结果没有实际工具调用，无法复制为期望工具");
+        }
+        try {
+            JsonNode root = objectMapper.readTree(result.getActualTools());
+            if (root.isArray()) {
+                for (JsonNode item : root) {
+                    if (item.isTextual() && StringUtils.hasText(item.asText())) {
+                        return item.asText();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // actualTools 历史上可能不是标准 JSON 数组，此时退回原文本作为工具名。
+        }
+        String text = result.getActualTools().trim();
+        if (!StringUtils.hasText(text) || "[]".equals(text)) {
+            throw new IllegalArgumentException("该结果没有实际工具调用，无法复制为期望工具");
+        }
+        return text;
+    }
+
     private AgentEvalRun getRunRequired(Long id) {
         AgentEvalRun run = agentEvalRunMapper.selectOne(new LambdaQueryWrapper<AgentEvalRun>()
                 .eq(AgentEvalRun::getId, id)
@@ -1098,6 +1237,22 @@ public class AgentEvalServiceImpl implements AgentEvalService {
             }
         }
         return values;
+    }
+
+    private String appendKeywords(String oldKeywords, List<String> keywordsToAdd) {
+        /*
+         * 关键词合并步骤:
+         * 1. 先把原有关键词按逗号、中文逗号、分号拆开，保留管理员原来配置的断言。
+         * 2. 使用 LinkedHashSet 去重并保留顺序，避免重复点击快捷修复后产生重复关键词。
+         * 3. 最后统一用英文逗号落库，便于后续 splitKeywords 继续解析。
+         */
+        LinkedHashSet<String> keywords = new LinkedHashSet<>(splitKeywords(oldKeywords));
+        for (String keyword : keywordsToAdd) {
+            if (StringUtils.hasText(keyword)) {
+                keywords.add(keyword.trim());
+            }
+        }
+        return String.join(",", keywords);
     }
 
     private String resolveTraceId(List<AgentTraceLog> traces) {

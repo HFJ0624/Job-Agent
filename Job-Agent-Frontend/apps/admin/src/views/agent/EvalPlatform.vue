@@ -167,7 +167,10 @@
           <h2>评测用例</h2>
           <p>配置用户输入、期望工具、参数、RAG 命中目标和回答关键词。</p>
         </div>
-        <el-button :loading="loadingCases" @click="loadCases">刷新</el-button>
+        <div class="section-actions">
+          <el-button type="info" :loading="loadingQuality" @click="openQualityDialog">检查用例质量</el-button>
+          <el-button :loading="loadingCases" @click="loadCases">刷新</el-button>
+        </div>
       </div>
 
       <el-form :model="caseQuery" label-width="80px" class="filter-form compact-filter">
@@ -324,6 +327,7 @@
         <el-table-column prop="failReason" label="失败原因" min-width="220" />
         <el-table-column label="操作" fixed="right" width="230">
           <template #default="{ row }">
+            <el-button link type="danger" @click="openDiagnosisDialog(row)">诊断</el-button>
             <el-button link type="primary" @click="openJsonDialog('实际回答', row.actualAnswer)">回答</el-button>
             <el-button link @click="openJsonDialog('实际工具', row.actualTools)">工具</el-button>
             <el-button link type="warning" @click="openJsonDialog('RAG结果', row.ragResultsJson)">RAG</el-button>
@@ -453,6 +457,121 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="diagnosisDialogVisible" title="Eval 失败诊断" width="760px">
+      <div v-loading="loadingDiagnosis" class="diagnosis-content">
+        <template v-if="diagnosis">
+          <el-alert
+            type="warning"
+            :closable="false"
+            :title="diagnosis.summary || '暂无诊断摘要'"
+          />
+          <div class="diagnosis-meta">
+            <el-tag :type="priorityTagType(diagnosis.priority)">优先级: {{ diagnosis.priority || "-" }}</el-tag>
+            <el-tag type="info">失败分类: {{ diagnosis.failureType || "-" }}</el-tag>
+            <el-tag :type="diagnosis.passStatus === 1 ? 'success' : 'danger'">
+              {{ diagnosis.passStatus === 1 ? "已通过" : "未通过" }}
+            </el-tag>
+          </div>
+          <div class="diagnosis-section">
+            <h3>可能根因</h3>
+            <ul>
+              <li v-for="item in diagnosis.rootCauses" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+          <div class="diagnosis-section">
+            <h3>建议操作</h3>
+            <ul>
+              <li v-for="item in diagnosis.suggestions" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+          <div class="diagnosis-section">
+            <h3>快捷修复</h3>
+            <div class="quick-fix-row">
+              <el-button
+                v-for="item in availableQuickFixes"
+                :key="item.actionType"
+                size="small"
+                :type="item.buttonType"
+                :loading="applyingQuickFix === item.actionType"
+                @click="applyQuickFix(item)"
+              >
+                {{ item.label }}
+              </el-button>
+              <span v-if="!availableQuickFixes.length" class="muted-text">当前失败类型暂无安全快捷修复。</span>
+            </div>
+          </div>
+          <div class="diagnosis-section">
+            <h3>诊断依据</h3>
+            <ul>
+              <li v-for="item in diagnosis.evidence" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+        </template>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="qualityDialogVisible" title="Eval 用例质量检查" width="1080px">
+      <div v-loading="loadingQuality" class="quality-content">
+        <div v-if="qualityReport" class="quality-summary">
+          <div>
+            <span>检查用例</span>
+            <strong>{{ qualityReport.totalCaseCount }}</strong>
+          </div>
+          <div>
+            <span>问题用例</span>
+            <strong>{{ qualityReport.problemCaseCount }}</strong>
+          </div>
+          <div>
+            <span>高风险</span>
+            <strong class="risk-high">{{ qualityReport.highRiskIssueCount }}</strong>
+          </div>
+          <div>
+            <span>中风险</span>
+            <strong class="risk-medium">{{ qualityReport.mediumRiskIssueCount }}</strong>
+          </div>
+          <div>
+            <span>低风险</span>
+            <strong>{{ qualityReport.lowRiskIssueCount }}</strong>
+          </div>
+        </div>
+
+        <el-alert
+          v-if="qualityReport && !qualityReport.issues.length"
+          type="success"
+          :closable="false"
+          title="当前启用用例暂未发现明显配置问题，可以继续执行回归。"
+        />
+
+        <el-table v-if="qualityReport?.issues.length" :data="qualityReport.issues" border stripe max-height="520">
+          <el-table-column prop="caseId" label="用例ID" width="90" />
+          <el-table-column prop="caseName" label="用例名称" min-width="170" />
+          <el-table-column prop="evalType" label="类型" width="140" />
+          <el-table-column prop="riskLevel" label="风险" width="100">
+            <template #default="{ row }">
+              <el-tag :type="riskTagType(row.riskLevel)" effect="light">{{ row.riskLevel }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="issueType" label="问题编码" min-width="190" />
+          <el-table-column prop="issueMessage" label="问题说明" min-width="260" show-overflow-tooltip />
+          <el-table-column prop="suggestion" label="修复建议" min-width="260" show-overflow-tooltip />
+          <el-table-column label="操作" fixed="right" width="180">
+            <template #default="{ row }">
+              <el-button
+                v-if="row.fixable"
+                link
+                type="success"
+                :loading="fixingQualityCaseId === row.caseId"
+                @click="applyQualityFix(row)"
+              >
+                {{ row.fixButtonText || "快捷修复" }}
+              </el-button>
+              <el-button link type="primary" @click="editCaseFromQualityIssue(row)">编辑用例</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
+
     <el-dialog v-model="jsonDialogVisible" :title="jsonDialogTitle" width="860px">
       <pre class="json-preview">{{ jsonDialogContent || "-" }}</pre>
     </el-dialog>
@@ -463,9 +582,13 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
+  applyEvalCaseQualityFix,
+  applyEvalQuickFix,
+  checkEvalCaseQuality,
   createEvalCoreTemplates,
   deleteEvalCase,
   deleteEvalDataset,
+  diagnoseEvalResult,
   getEvalHealthReport,
   listEnabledEvalDatasets,
   pageEvalCases,
@@ -481,12 +604,15 @@ import {
 } from "../../api/agentEval";
 import type {
   AgentEvalCaseInfo,
+  AgentEvalCaseQualityIssue,
+  AgentEvalCaseQualityReport,
   AgentEvalCaseQuery,
   AgentEvalCoreTemplateCreatePayload,
   AgentEvalDatasetInfo,
   AgentEvalDatasetQuery,
   AgentEvalHealthMetric,
   AgentEvalHealthReport,
+  AgentEvalResultDiagnosis,
   AgentEvalResultInfo,
   AgentEvalResultQuery,
   AgentEvalRunInfo,
@@ -495,12 +621,22 @@ import type {
 
 const evalTypes = ["END_TO_END", "TOOL_CALL", "RAG_RETRIEVAL", "MEMORY_RECALL", "GUARDRAIL", "JSON_OUTPUT", "ANSWER_QUALITY"];
 
+type QuickFixItem = {
+  actionType: string;
+  label: string;
+  confirmText: string;
+  buttonType: "primary" | "success" | "warning" | "danger" | "info";
+};
+
 const datasets = ref<AgentEvalDatasetInfo[]>([]);
 const datasetOptions = ref<AgentEvalDatasetInfo[]>([]);
 const cases = ref<AgentEvalCaseInfo[]>([]);
 const runs = ref<AgentEvalRunInfo[]>([]);
 const results = ref<AgentEvalResultInfo[]>([]);
 const healthReport = ref<AgentEvalHealthReport>();
+const qualityReport = ref<AgentEvalCaseQualityReport>();
+const diagnosis = ref<AgentEvalResultDiagnosis>();
+const diagnosisResultRow = ref<AgentEvalResultInfo>();
 const caseTotal = ref(0);
 const resultTotal = ref(0);
 
@@ -509,14 +645,20 @@ const loadingCases = ref(false);
 const loadingRuns = ref(false);
 const loadingResults = ref(false);
 const loadingHealth = ref(false);
+const loadingQuality = ref(false);
+const loadingDiagnosis = ref(false);
 const running = ref(false);
 const savingDataset = ref(false);
 const savingCase = ref(false);
 const creatingTemplates = ref(false);
+const applyingQuickFix = ref("");
+const fixingQualityCaseId = ref<number>();
 
 const datasetDialogVisible = ref(false);
 const caseDialogVisible = ref(false);
 const templateDialogVisible = ref(false);
+const qualityDialogVisible = ref(false);
+const diagnosisDialogVisible = ref(false);
 const jsonDialogVisible = ref(false);
 const jsonDialogTitle = ref("");
 const jsonDialogContent = ref("");
@@ -541,6 +683,7 @@ const latestPassRate = computed(() => {
   return (run.passCount * 100) / run.totalCount;
 });
 const latestFailureStats = computed(() => parseFailureStats(latestRun.value?.failureStatsJson));
+const availableQuickFixes = computed(() => buildQuickFixes(diagnosis.value, diagnosisResultRow.value));
 const datasetEnabled = computed({
   get: () => datasetForm.enableStatus !== 0,
   set: value => {
@@ -620,6 +763,22 @@ async function loadHealthReport() {
   }
 }
 
+async function openQualityDialog() {
+  qualityDialogVisible.value = true;
+  loadingQuality.value = true;
+  try {
+    /*
+     * 用例质量检查步骤:
+     * 1. 复用当前用例筛选里的 datasetId，保证检查范围和页面正在关注的数据集一致。
+     * 2. 后端只做规则检查，不调用模型，也不会修改用例，所以这里可以直接打开弹窗展示结果。
+     * 3. 管理员看到问题后再点击“编辑用例”手动修复，避免自动改错 Eval 断言。
+     */
+    qualityReport.value = await checkEvalCaseQuality(caseQuery.datasetId);
+  } finally {
+    loadingQuality.value = false;
+  }
+}
+
 async function reloadAll() {
   await Promise.all([loadDatasets(), loadCases(), loadRuns(), loadResults(), loadHealthReport()]);
 }
@@ -632,6 +791,56 @@ function openDatasetDialog(row?: AgentEvalDatasetInfo) {
 function openCaseDialog(row?: AgentEvalCaseInfo) {
   Object.assign(caseForm, emptyCaseForm(), row || {});
   caseDialogVisible.value = true;
+}
+
+async function editCaseFromQualityIssue(issue: AgentEvalCaseQualityIssue) {
+  /*
+   * 从质量检查结果跳转编辑步骤:
+   * 1. 先在当前分页数据里按 caseId 查找，命中时直接打开编辑弹窗，体验最快。
+   * 2. 如果当前页没有这条用例，就按用例名称搜索并刷新列表，避免额外新增单条详情接口。
+   * 3. 搜索后再次尝试打开，找不到时给出明确提示，让管理员知道需要手动定位。
+   */
+  const matchedCase = cases.value.find(item => item.id === issue.caseId);
+  if (matchedCase) {
+    openCaseDialog(matchedCase);
+    return;
+  }
+
+  caseQuery.caseName = issue.caseName || "";
+  caseQuery.pageNum = 1;
+  await loadCases();
+  const searchedCase = cases.value.find(item => item.id === issue.caseId);
+  if (searchedCase) {
+    openCaseDialog(searchedCase);
+  } else {
+    ElMessage.info("已按用例名称刷新列表，请在列表中继续查看或编辑。");
+  }
+}
+
+async function applyQualityFix(issue: AgentEvalCaseQualityIssue) {
+  /*
+   * 质量快捷修复步骤:
+   * 1. 只有后端标记 fixable 的问题才显示按钮，这里再次检查 caseId 和 actionType，避免空请求。
+   * 2. 修复前弹出确认框，让管理员明确知道系统会写入默认断言值。
+   * 3. 修复完成后同时刷新用例列表和质量报告，让问题是否消失可以立即看到。
+   */
+  if (!issue.caseId || !issue.fixActionType) {
+    ElMessage.warning("该问题暂不支持快捷修复，请手动编辑用例。");
+    return;
+  }
+  await ElMessageBox.confirm(
+    issue.fixConfirmText || "确认应用该快捷修复吗？",
+    "质量快捷修复确认",
+    { type: "warning" }
+  );
+  fixingQualityCaseId.value = issue.caseId;
+  try {
+    await applyEvalCaseQualityFix(issue.caseId, { actionType: issue.fixActionType });
+    ElMessage.success("质量快捷修复已应用");
+    await Promise.all([loadCases(), openQualityDialog()]);
+  } finally {
+    fixingQualityCaseId.value = undefined;
+  }
 }
 
 function openTemplateDialog() {
@@ -779,6 +988,89 @@ function metricTagType(status?: string) {
   return "info";
 }
 
+async function openDiagnosisDialog(row: AgentEvalResultInfo) {
+  diagnosisDialogVisible.value = true;
+  diagnosisResultRow.value = row;
+  diagnosis.value = undefined;
+  loadingDiagnosis.value = true;
+  try {
+    diagnosis.value = await diagnoseEvalResult(row.id);
+  } finally {
+    loadingDiagnosis.value = false;
+  }
+}
+
+function buildQuickFixes(current?: AgentEvalResultDiagnosis, row?: AgentEvalResultInfo): QuickFixItem[] {
+  if (!current || current.passStatus === 1) return [];
+  const failureType = current.failureType || "";
+  const fixes: QuickFixItem[] = [];
+
+  if (failureType.includes("TOOL_SELECT")) {
+    if (row?.actualTools && row.actualTools !== "[]") {
+      fixes.push({
+        actionType: "COPY_ACTUAL_TOOL_TO_EXPECTED",
+        label: "复制实际工具为期望工具",
+        confirmText: "确认把该结果的第一个实际工具写入原用例的期望工具吗？",
+        buttonType: "primary"
+      });
+    }
+    fixes.push({
+      actionType: "CLEAR_EXPECTED_TOOL",
+      label: "清空期望工具",
+      confirmText: "确认清空原用例的期望工具和期望参数吗？这会让该用例不再强制检查工具调用。",
+      buttonType: "warning"
+    });
+  }
+
+  if (failureType.includes("ANSWER_KEYWORD")) {
+    fixes.push({
+      actionType: "CLEAR_ANSWER_KEYWORDS",
+      label: "清空答案关键词",
+      confirmText: "确认清空原用例的答案关键词吗？这会避免关键词过严造成误判。",
+      buttonType: "warning"
+    });
+  }
+
+  if (failureType.includes("RAG")) {
+    fixes.push({
+      actionType: "CLEAR_RAG_KEYWORDS",
+      label: "清空 RAG 期望",
+      confirmText: "确认清空原用例的 RAG 关键词、文档ID和切片ID吗？这会让该用例不再强制检查 RAG 命中。",
+      buttonType: "warning"
+    });
+  }
+
+  return fixes;
+}
+
+async function applyQuickFix(item: QuickFixItem) {
+  if (!diagnosis.value?.resultId) return;
+  await ElMessageBox.confirm(item.confirmText, "快捷修复确认", { type: "warning" });
+  applyingQuickFix.value = item.actionType;
+  try {
+    await applyEvalQuickFix(diagnosis.value.resultId, { actionType: item.actionType });
+    ElMessage.success("快捷修复已应用，已更新原 Eval 用例");
+    await Promise.all([loadCases(), loadResults(), loadHealthReport()]);
+    if (diagnosisResultRow.value) {
+      diagnosis.value = await diagnoseEvalResult(diagnosisResultRow.value.id);
+    }
+  } finally {
+    applyingQuickFix.value = "";
+  }
+}
+
+function priorityTagType(priority?: string) {
+  if (priority === "HIGH") return "danger";
+  if (priority === "MEDIUM") return "warning";
+  return "info";
+}
+
+function riskTagType(riskLevel?: string) {
+  if (riskLevel === "HIGH") return "danger";
+  if (riskLevel === "MEDIUM") return "warning";
+  return "info";
+}
+
 function openJsonDialog(title: string, content?: string) {
   jsonDialogTitle.value = title;
   jsonDialogContent.value = formatJson(content);
@@ -837,6 +1129,7 @@ onMounted(reloadAll);
 
 <style scoped>
 .header-actions,
+.section-actions,
 .section-title-row {
   display: flex;
   align-items: center;
@@ -948,6 +1241,78 @@ onMounted(reloadAll);
   margin-top: 10px;
 }
 
+.diagnosis-content {
+  min-height: 180px;
+}
+
+.diagnosis-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.diagnosis-section {
+  padding: 12px 0;
+  border-top: 1px solid #eef2f7;
+}
+
+.diagnosis-section h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.diagnosis-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #374151;
+  line-height: 1.8;
+}
+
+.quick-fix-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quality-content {
+  min-height: 180px;
+}
+
+.quality-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.quality-summary > div {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.quality-summary span {
+  display: block;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.quality-summary strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+}
+
+.risk-high {
+  color: #dc2626;
+}
+
+.risk-medium {
+  color: #d97706;
+}
+
 .metric-card {
   padding: 14px;
   border: 1px solid #e5e7eb;
@@ -987,7 +1352,8 @@ onMounted(reloadAll);
   }
 
   .health-summary,
-  .health-grid {
+  .health-grid,
+  .quality-summary {
     grid-template-columns: 1fr;
   }
 }

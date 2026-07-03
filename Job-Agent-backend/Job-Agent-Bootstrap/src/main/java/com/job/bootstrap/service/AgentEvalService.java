@@ -6,12 +6,15 @@ import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
 import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
 import com.job.common.dto.agent.AgentEvalDatasetQueryDTO;
 import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
+import com.job.common.dto.agent.AgentEvalQuickFixDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
 import com.job.common.dto.agent.AgentEvalRunQueryDTO;
 import com.job.common.vo.agent.AgentEvalCaseVO;
+import com.job.common.vo.agent.AgentEvalCaseQualityReportVO;
 import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import com.job.common.vo.agent.AgentEvalDatasetVO;
 import com.job.common.vo.agent.AgentEvalHealthReportVO;
+import com.job.common.vo.agent.AgentEvalResultDiagnosisVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 
@@ -49,6 +52,20 @@ public interface AgentEvalService {
     IPage<AgentEvalRunVO> pageRuns(AgentEvalRunQueryDTO query);
 
     IPage<AgentEvalResultVO> pageResults(AgentEvalResultQueryDTO query);
+
+    AgentEvalResultDiagnosisVO diagnoseResult(Long resultId);
+
+    AgentEvalCaseVO applyQuickFix(Long resultId, AgentEvalQuickFixDTO request);
+
+    AgentEvalCaseVO applyCaseQualityFix(Long caseId, AgentEvalQuickFixDTO request);
+
+    /**
+     * 检查 Eval 用例配置质量。
+     *
+     * @param datasetId 数据集 ID，为空时检查全部启用用例
+     * @return 用例质量检查报告
+     */
+    AgentEvalCaseQualityReportVO checkCaseQuality(Long datasetId);
 
     List<AgentEvalDatasetVO> listEnabledDatasets();
 
