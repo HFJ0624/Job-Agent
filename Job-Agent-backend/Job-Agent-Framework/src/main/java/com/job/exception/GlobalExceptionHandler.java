@@ -4,6 +4,7 @@ import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.SaTokenException;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
+import com.job.common.vo.error.BusinessErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -40,7 +41,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public Result<Object> handleBizException(BizException exception, HttpServletRequest request) {
         printError("业务异常", exception.getCode(), exception.getMessage(), exception, request, true);
-        return Result.build(null, exception.getCode(), exception.getMessage());
+        /*
+         * 1. 老业务异常没有 businessErrorCode，继续返回 data=null，避免影响已有页面。
+         * 2. 新的 AI 面试链路需要稳定错误码时，把 errorCode 放到 data。
+         * 3. 前端仍可直接展示 Result.message，同时用 data.errorCode 做精细化失败状态可视化。
+         */
+        if (exception.getBusinessErrorCode() == null || exception.getBusinessErrorCode().isBlank()) {
+            return Result.build(null, exception.getCode(), exception.getMessage());
+        }
+        return Result.build(
+                new BusinessErrorResponse(exception.getBusinessErrorCode(), exception.getMessage()),
+                exception.getCode(),
+                exception.getMessage()
+        );
     }
 
     /**

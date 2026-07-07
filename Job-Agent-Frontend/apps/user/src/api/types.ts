@@ -649,6 +649,7 @@ export interface MockInterviewQuestionInfo {
   sessionId: number;
   questionType: string;
   questionContent: string;
+  standardAnswer?: string;
   sortNo: number;
   answered: number;
 }
@@ -738,9 +739,32 @@ export interface MockInterviewReviewInfo {
 
   weakQuestions: string[];
   abilityTags: string[];
+  questionReviews?: MockInterviewQuestionReviewInfo[];
 
   source?: string;
   createTime?: string;
+}
+
+export interface MockInterviewQuestionReviewInfo {
+  questionId: number;
+  answerId?: number;
+  sortNo?: number;
+  questionType?: string;
+  questionContent?: string;
+  standardAnswer?: string;
+  userAnswer?: string;
+  score?: number;
+  level?: string;
+  correct?: boolean;
+  similarityScore?: number;
+  matchedPoints?: string[];
+  missingPoints?: string[];
+  knowledgePoints?: string[];
+  reviewConclusion?: string;
+  strengths?: string[];
+  problems?: string[];
+  suggestions?: string[];
+  wrongBook?: boolean;
 }
 
 /**

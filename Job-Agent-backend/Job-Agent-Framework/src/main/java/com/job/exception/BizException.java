@@ -17,6 +17,16 @@ public class BizException extends RuntimeException {
     private final Integer code;
 
     /**
+     * 细粒度业务错误码。
+     *
+     * 说明:
+     * 1. code 继续表示统一响应状态码，例如业务异常仍然是 201。
+     * 2. businessErrorCode 用于前端判断具体失败场景，例如 ASR_FAILED、REVIEW_JSON_PARSE_FAILED。
+     * 3. 该字段为空时保持旧接口行为，避免影响已有业务。
+     */
+    private final String businessErrorCode;
+
+    /**
      * 根据错误信息创建业务异常。
      *
      * @param message 错误提示信息
@@ -24,6 +34,7 @@ public class BizException extends RuntimeException {
     public BizException(String message) {
         super(message);
         this.code = ResultCodeEnum.BUSINESS_ERROR.getCode();
+        this.businessErrorCode = null;
     }
 
     /**
@@ -34,6 +45,7 @@ public class BizException extends RuntimeException {
     public BizException(ResultCodeEnum resultCodeEnum) {
         super(resultCodeEnum.getMessage());
         this.code = resultCodeEnum.getCode();
+        this.businessErrorCode = null;
     }
 
     /**
@@ -44,6 +56,7 @@ public class BizException extends RuntimeException {
     public BizException(ErrorCode errorCode) {
         super(errorCode.getMessage());
         this.code = errorCode.getCode();
+        this.businessErrorCode = null;
     }
 
     /**
@@ -55,6 +68,7 @@ public class BizException extends RuntimeException {
     public BizException(Integer code, String message) {
         super(message);
         this.code = code;
+        this.businessErrorCode = null;
     }
 
     /**
@@ -67,5 +81,45 @@ public class BizException extends RuntimeException {
     public BizException(Integer code, String message, Throwable cause) {
         super(message, cause);
         this.code = code;
+        this.businessErrorCode = null;
+    }
+
+    /**
+     * 根据细粒度业务错误码和提示创建业务异常。
+     *
+     * @param businessErrorCode 前端可稳定识别的业务错误码
+     * @param message 用户可读错误提示
+     */
+    public BizException(String businessErrorCode, String message) {
+        super(message);
+        this.code = ResultCodeEnum.BUSINESS_ERROR.getCode();
+        this.businessErrorCode = businessErrorCode;
+    }
+
+    /**
+     * 根据细粒度业务错误码、提示和原始异常创建业务异常。
+     *
+     * @param businessErrorCode 前端可稳定识别的业务错误码
+     * @param message 用户可读错误提示
+     * @param cause 原始异常
+     */
+    public BizException(String businessErrorCode, String message, Throwable cause) {
+        super(message, cause);
+        this.code = ResultCodeEnum.BUSINESS_ERROR.getCode();
+        this.businessErrorCode = businessErrorCode;
+    }
+
+    /**
+     * 根据统一状态码、细粒度业务错误码、提示和原始异常创建业务异常。
+     *
+     * @param code 统一响应状态码
+     * @param businessErrorCode 前端可稳定识别的业务错误码
+     * @param message 用户可读错误提示
+     * @param cause 原始异常
+     */
+    public BizException(Integer code, String businessErrorCode, String message, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+        this.businessErrorCode = businessErrorCode;
     }
 }

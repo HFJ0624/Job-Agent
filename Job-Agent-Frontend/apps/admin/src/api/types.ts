@@ -1397,6 +1397,7 @@ export interface MockInterviewQuestionInfo {
   sessionId: number;
   questionType: string;
   questionContent: string;
+  standardAnswer?: string;
   sortNo: number;
   answered: number;
 }
@@ -1411,6 +1412,13 @@ export interface MockInterviewAnswerInfo {
   strengths: string[];
   problems: string[];
   suggestions: string[];
+  correct?: boolean;
+  similarityScore?: number;
+  matchedPoints?: string[];
+  missingPoints?: string[];
+  knowledgePoints?: string[];
+  reviewConclusion?: string;
+  wrongBook?: boolean;
 }
 
 export interface MockInterviewMediaRecordInfo {
@@ -1450,6 +1458,48 @@ export interface MockInterviewSessionInfo {
   answers?: MockInterviewAnswerInfo[];
   mediaRecords?: MockInterviewMediaRecordInfo[];
   createTime?: string;
+}
+
+export interface MockInterviewReviewInfo {
+  id: number;
+  sessionId: number;
+  applicationId?: number;
+  jobId?: number;
+  jobTitle?: string;
+  companyName?: string;
+  totalScore: number;
+  reviewLevel: string;
+  answeredCount: number;
+  strengthSummary?: string;
+  weaknessSummary?: string;
+  improvementPlan?: string;
+  weakQuestions: string[];
+  abilityTags: string[];
+  questionReviews?: MockInterviewQuestionReviewInfo[];
+  source?: string;
+  createTime?: string;
+}
+
+export interface MockInterviewQuestionReviewInfo {
+  questionId: number;
+  answerId?: number;
+  sortNo?: number;
+  questionType?: string;
+  questionContent?: string;
+  standardAnswer?: string;
+  userAnswer?: string;
+  score?: number;
+  level?: string;
+  correct?: boolean;
+  similarityScore?: number;
+  matchedPoints?: string[];
+  missingPoints?: string[];
+  knowledgePoints?: string[];
+  reviewConclusion?: string;
+  strengths?: string[];
+  problems?: string[];
+  suggestions?: string[];
+  wrongBook?: boolean;
 }
 
 export interface InterviewQuestionBankQuery {

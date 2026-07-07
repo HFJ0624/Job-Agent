@@ -7,6 +7,7 @@ import com.job.common.entity.interview.MockInterviewReviewRecord;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -36,6 +37,7 @@ public class MockInterviewReviewVO {
 
     private List<String> weakQuestions;
     private List<String> abilityTags;
+    private List<QuestionReviewItem> questionReviews = new ArrayList<>();
 
     private String source;
 
@@ -83,5 +85,36 @@ public class MockInterviewReviewVO {
         } catch (Exception e) {
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * 单题复盘明细。
+     *
+     * 说明:
+     * 1. 总体复盘记录只保存一场面试的总体结论。
+     * 2. 单题复盘事实来自 mock_interview_question 和 mock_interview_answer。
+     * 3. 前端详情页直接使用该结构展示标准答案、用户答案、相似度、缺失点和错题本状态。
+     */
+    @Data
+    public static class QuestionReviewItem {
+        private Long questionId;
+        private Long answerId;
+        private Integer sortNo;
+        private String questionType;
+        private String questionContent;
+        private String standardAnswer;
+        private String userAnswer;
+        private BigDecimal score;
+        private String level;
+        private Boolean correct;
+        private BigDecimal similarityScore;
+        private List<String> matchedPoints = Collections.emptyList();
+        private List<String> missingPoints = Collections.emptyList();
+        private List<String> knowledgePoints = Collections.emptyList();
+        private String reviewConclusion;
+        private List<String> strengths = Collections.emptyList();
+        private List<String> problems = Collections.emptyList();
+        private List<String> suggestions = Collections.emptyList();
+        private Boolean wrongBook;
     }
 }

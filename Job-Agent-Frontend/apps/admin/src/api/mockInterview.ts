@@ -1,5 +1,5 @@
 import { request } from "./request";
-import type { MockInterviewMediaRecordInfo, MockInterviewSessionInfo, MockInterviewSessionQuery, PageResult } from "./types";
+import type { MockInterviewMediaRecordInfo, MockInterviewReviewInfo, MockInterviewSessionInfo, MockInterviewSessionQuery, PageResult } from "./types";
 
 function toQueryString(query: object) {
   const params = new URLSearchParams();
@@ -30,4 +30,20 @@ export function getMockInterviewSessionDetail(sessionId: number | string) {
  */
 export function listMockInterviewMediaRecords(sessionId: number | string) {
   return request<MockInterviewMediaRecordInfo[]>(`/admin/mock-interviews/sessions/${sessionId}/media`);
+}
+
+/**
+ * 查询某场模拟面试最近一次 AI 复盘。
+ */
+export function getMockInterviewReviewLatest(sessionId: number | string) {
+  return request<MockInterviewReviewInfo | null>(`/admin/mock-interviews/sessions/${sessionId}/review/latest`);
+}
+
+/**
+ * 后台生成或重新生成某场模拟面试 AI 复盘。
+ */
+export function generateMockInterviewReviewAdmin(sessionId: number | string) {
+  return request<MockInterviewReviewInfo>(`/admin/mock-interviews/sessions/${sessionId}/review/generate`, {
+    method: "POST"
+  });
 }

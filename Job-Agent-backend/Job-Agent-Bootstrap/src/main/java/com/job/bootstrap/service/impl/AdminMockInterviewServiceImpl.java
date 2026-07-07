@@ -8,6 +8,7 @@ import com.job.bootstrap.mapper.MockInterviewMediaRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.service.AdminMockInterviewService;
+import com.job.bootstrap.service.MockInterviewReviewService;
 import com.job.common.dto.interview.MockInterviewSessionQueryDTO;
 import com.job.common.entity.base.PageResult;
 import com.job.common.entity.interview.MockInterviewAnswer;
@@ -17,6 +18,7 @@ import com.job.common.entity.interview.MockInterviewSession;
 import com.job.common.vo.interview.MockInterviewAnswerVO;
 import com.job.common.vo.interview.MockInterviewMediaRecordVO;
 import com.job.common.vo.interview.MockInterviewQuestionVO;
+import com.job.common.vo.interview.MockInterviewReviewVO;
 import com.job.common.vo.interview.MockInterviewSessionVO;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +40,7 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
     private final MockInterviewQuestionMapper questionMapper;
     private final MockInterviewAnswerMapper answerMapper;
     private final MockInterviewMediaRecordMapper mediaRecordMapper;
+    private final MockInterviewReviewService mockInterviewReviewService;
 
     @Override
     public PageResult<MockInterviewSessionVO> pageSessions(MockInterviewSessionQueryDTO query) {
@@ -66,10 +69,7 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
 
     @Override
     public MockInterviewSessionVO getDetail(Long sessionId) {
-        MockInterviewSession session = sessionMapper.selectById(sessionId);
-        if (session == null || (session.getIsDeleted() != null && session.getIsDeleted() == 1)) {
-            throw new BizException("模拟面试会话不存在");
-        }
+        MockInterviewSession session = getExistingSession(sessionId);
 
         List<MockInterviewQuestion> questions = questionMapper.selectList(new LambdaQueryWrapper<MockInterviewQuestion>()
                 .eq(MockInterviewQuestion::getSessionId, sessionId)
@@ -96,5 +96,43 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
                 .stream()
                 .map(MockInterviewMediaRecordVO::from)
                 .toList();
+    }
+
+    @Override
+    public MockInterviewReviewVO getLatestReview(Long sessionId) {
+        /*
+         * 1. 后台入口只有 sessionId，所以先读取会话拿到 userId。
+         * 2. 复盘服务内部仍会用 userId + sessionId 做数据范围校验。
+         * 3. 前后台共用同一个复盘聚合服务，避免展示字段和计算口径分叉。
+         */
+        MockInterviewSession session = getExistingSession(sessionId);
+        return mockInterviewReviewService.getLatestReview(session.getUserId(), sessionId);
+    }
+
+    @Override
+    public MockInterviewReviewVO generateReview(Long sessionId) {
+        /*
+         * 1. 先确认会话有效，避免后台对已删除会话触发模型调用。
+         * 2. 真实模型调用、JSON 解析、复盘记录入库都复用用户端服务。
+         * 3. 返回值直接包含结构化单题复盘，admin 页面可以立即刷新展示。
+         */
+        MockInterviewSession session = getExistingSession(sessionId);
+        return mockInterviewReviewService.generateReview(session.getUserId(), sessionId);
+    }
+
+    /**
+     * 查询有效面试会话。
+     *
+     * 步骤:
+     * 1. 根据主键读取 mock_interview_session。
+     * 2. 统一过滤不存在或已逻辑删除的会话。
+     * 3. 供详情、复盘查询、复盘生成共用，避免多个入口各写一遍校验。
+     */
+    private MockInterviewSession getExistingSession(Long sessionId) {
+        MockInterviewSession session = sessionMapper.selectById(sessionId);
+        if (session == null || (session.getIsDeleted() != null && session.getIsDeleted() == 1)) {
+            throw new BizException("模拟面试会话不存在");
+        }
+        return session;
     }
 }

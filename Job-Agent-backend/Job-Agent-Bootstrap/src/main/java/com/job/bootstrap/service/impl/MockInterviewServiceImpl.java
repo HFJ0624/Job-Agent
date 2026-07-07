@@ -20,7 +20,7 @@ import com.job.bootstrap.service.SpeechRecognitionService;
 import com.job.common.dto.interview.AiInterviewStartDTO;
 import com.job.common.dto.interview.MockInterviewAnswerDTO;
 import com.job.common.dto.interview.MockInterviewStartDTO;
-import com.job.common.entity.base.ResultCodeEnum;
+import com.job.common.enums.MockInterviewErrorCode;
 import com.job.common.entity.application.JobApplicationRecord;
 import com.job.common.entity.interview.InterviewQuestionBank;
 import com.job.common.entity.interview.MockInterviewAnswer;
@@ -104,7 +104,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     public MockInterviewSessionVO startSession(Long userId, MockInterviewStartDTO dto) {
         JobApplicationRecord application = applicationMapper.selectById(dto.getApplicationId());
         if (application == null || !userId.equals(application.getUserId())) {
-            throw new BizException("求职记录不存在或无权限访问");
+            throw mockInterviewException(MockInterviewErrorCode.SESSION_NOT_FOUND, "求职记录不存在或无权限访问");
         }
 
         // 1. 旧流程优先复用面试准备记录；没有时自动生成一份，保证原页面不受影响。
@@ -140,7 +140,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         // 2. 岗位必须存在且未删除；用户端练习只允许面向已发布岗位。
         JobPosition job = jobPositionService.getPositionRequired(dto.getJobId());
         if (job.getStatus() == null || job.getStatus() != PUBLISHED) {
-            throw new BizException("岗位未发布，不能用于 AI 面试");
+            throw mockInterviewException(MockInterviewErrorCode.JOB_NOT_AVAILABLE, "岗位未发布，不能用于 AI 面试");
         }
 
         // 3. 根据岗位 JD、技能关键词和简历文本生成第一版问题，不依赖用户先创建求职记录。
@@ -263,7 +263,10 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 mediaRecord.setAsrStatus(ASR_FAILED);
                 mediaRecord.setAsrError(asrResult.errorMessage());
                 mediaRecordMapper.updateById(mediaRecord);
-                throw new BizException("语音识别失败: " + asrResult.errorMessage());
+                throw mockInterviewException(
+                        MockInterviewErrorCode.ASR_FAILED,
+                        "语音识别失败: " + defaultIfBlank(asrResult.errorMessage(), "未识别到有效语音")
+                );
             }
 
             // 3. ASR 成功后复用文本答题评分链路，并把 answerId 回填到媒体记录。
@@ -280,7 +283,11 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             mediaRecord.setAsrStatus(ASR_FAILED);
             mediaRecord.setAsrError(exception.getMessage());
             mediaRecordMapper.updateById(mediaRecord);
-            throw new BizException(ResultCodeEnum.SYSTEM_ERROR.getCode(), "语音回答提交失败: " + exception.getMessage(), exception);
+            throw new BizException(
+                    MockInterviewErrorCode.AUDIO_SUBMIT_FAILED.getCode(),
+                    "语音回答提交失败: " + exception.getMessage(),
+                    exception
+            );
         }
     }
 
@@ -294,7 +301,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
 
     private void createSessionAndQuestions(MockInterviewSession session, List<QuestionSeed> seeds) {
         if (seeds.isEmpty()) {
-            throw new BizException("没有可用的面试题，请检查岗位或简历内容");
+            throw mockInterviewException(MockInterviewErrorCode.NO_AVAILABLE_QUESTION, "没有可用的面试题，请检查岗位或简历内容");
         }
         session.setStatus(STATUS_IN_PROGRESS);
         session.setCurrentIndex(0);
@@ -321,15 +328,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
 
     private MockInterviewQuestion getQuestionForAnswer(Long userId, Long sessionId, Long questionId, MockInterviewSession session) {
         if (STATUS_FINISHED.equals(session.getStatus())) {
-            throw new BizException("本轮模拟面试已经结束");
+            throw mockInterviewException(MockInterviewErrorCode.QUESTION_NOT_AVAILABLE, "本轮模拟面试已经结束");
         }
 
         MockInterviewQuestion question = questionMapper.selectById(questionId);
         if (question == null || !sessionId.equals(question.getSessionId()) || !userId.equals(question.getUserId())) {
-            throw new BizException("题目不存在或无权限回答");
+            throw mockInterviewException(MockInterviewErrorCode.QUESTION_NOT_AVAILABLE, "题目不存在或无权限回答");
         }
         if (question.getAnswered() != null && question.getAnswered() == 1) {
-            throw new BizException("该题已经回答过");
+            throw mockInterviewException(MockInterviewErrorCode.QUESTION_ALREADY_ANSWERED, "该题已经回答过");
         }
         return question;
     }
@@ -831,9 +838,21 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private MockInterviewSession getUserSessionRequired(Long userId, Long sessionId) {
         MockInterviewSession session = sessionMapper.selectById(sessionId);
         if (session == null || !userId.equals(session.getUserId()) || (session.getIsDeleted() != null && session.getIsDeleted() == 1)) {
-            throw new BizException("模拟面试会话不存在或无权限访问");
+            throw mockInterviewException(MockInterviewErrorCode.SESSION_NOT_FOUND, "模拟面试会话不存在或无权限访问");
         }
         return session;
+    }
+
+    /**
+     * 创建 AI 面试标准业务异常。
+     *
+     * 步骤:
+     * 1. 使用枚举里的稳定 errorCode，前端可据此展示具体失败步骤。
+     * 2. message 仍然保留用户可读提示，兼容旧的通用错误展示。
+     * 3. 所有 AI 面试链路错误统一从这里创建，避免硬编码字符串分散。
+     */
+    private BizException mockInterviewException(MockInterviewErrorCode errorCode, String message) {
+        return new BizException(errorCode.getCode(), defaultIfBlank(message, errorCode.getDefaultMessage()));
     }
 
     private int normalizeQuestionCount(Integer questionCount) {

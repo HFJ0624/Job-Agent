@@ -9,6 +9,7 @@ import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.bootstrap.service.MockInterviewReviewService;
+import com.job.common.enums.MockInterviewErrorCode;
 import com.job.common.entity.interview.MockInterviewAnswer;
 import com.job.common.entity.interview.MockInterviewQuestion;
 import com.job.common.entity.interview.MockInterviewReviewRecord;
@@ -61,31 +62,22 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         MockInterviewSession session = sessionMapper.selectById(sessionId);
 
         if (session == null || !userId.equals(session.getUserId())) {
-            throw new BizException("模拟面试会话不存在或无权限访问");
+            throw mockInterviewException(MockInterviewErrorCode.SESSION_NOT_FOUND, "模拟面试会话不存在或无权限访问");
         }
 
         /*
          * 2. 查询本轮所有回答。
          */
-        List<MockInterviewAnswer> answers = answerMapper.selectList(
-                new LambdaQueryWrapper<MockInterviewAnswer>()
-                        .eq(MockInterviewAnswer::getSessionId, sessionId)
-                        .eq(MockInterviewAnswer::getUserId, userId)
-                        .orderByAsc(MockInterviewAnswer::getCreateTime)
-        );
+        List<MockInterviewAnswer> answers = queryReviewAnswers(sessionId, userId);
 
         if (answers.isEmpty()) {
-            throw new BizException("当前模拟面试还没有回答记录，无法生成复盘");
+            throw mockInterviewException(MockInterviewErrorCode.REVIEW_NO_ANSWER, "当前模拟面试还没有回答记录，无法生成复盘");
         }
 
         /*
          * 3. 查询题目，方便生成薄弱题目列表。
          */
-        List<MockInterviewQuestion> questions = questionMapper.selectList(
-                new LambdaQueryWrapper<MockInterviewQuestion>()
-                        .eq(MockInterviewQuestion::getSessionId, sessionId)
-                        .eq(MockInterviewQuestion::getUserId, userId)
-        );
+        List<MockInterviewQuestion> questions = queryReviewQuestions(sessionId, userId);
 
         Map<Long, MockInterviewQuestion> questionMap = new HashMap<>();
 
@@ -123,14 +115,14 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
 
         reviewMapper.insert(record);
 
-        return MockInterviewReviewVO.from(record, objectMapper);
+        return toReviewVO(record, questions, answers);
     }
 
     @Override
     public MockInterviewStudyPlanVO buildStudyPlan(Long userId, Long sessionId) {
         MockInterviewSession session = sessionMapper.selectById(sessionId);
         if (session == null || !userId.equals(session.getUserId())) {
-            throw new BizException("模拟面试会话不存在或无权限访问");
+            throw mockInterviewException(MockInterviewErrorCode.SESSION_NOT_FOUND, "模拟面试会话不存在或无权限访问");
         }
 
         MockInterviewReviewRecord review = reviewMapper.selectOne(
@@ -142,7 +134,7 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
                         .last("limit 1")
         );
         if (review == null) {
-            throw new BizException("请先生成 AI 面试总结，再查看补课清单");
+            throw mockInterviewException(MockInterviewErrorCode.STUDY_PLAN_REVIEW_REQUIRED, "请先生成 AI 面试总结，再查看补课清单");
         }
 
         List<String> knowledgePoints = buildStudyKnowledgePoints(review);
@@ -188,7 +180,16 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
             String knowledgePoint
     ) {
         String query = safe(session.getJobTitle()) + " " + knowledgePoint + " 面试 标准答案 知识点";
-        List<RagSearchResultVO> results = ragRetrievalService.search(userId, query, 3);
+        List<RagSearchResultVO> results;
+        try {
+            results = ragRetrievalService.search(userId, query, 3);
+        } catch (Exception exception) {
+            throw new BizException(
+                    MockInterviewErrorCode.STUDY_MATERIAL_FAILED.getCode(),
+                    "补课材料加载失败: " + exception.getMessage(),
+                    exception
+            );
+        }
         if (results == null || results.isEmpty()) {
             return Collections.emptyList();
         }
@@ -219,18 +220,149 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         MockInterviewSession session = sessionMapper.selectById(sessionId);
 
         if (session == null || !userId.equals(session.getUserId())) {
-            throw new BizException("模拟面试会话不存在或无权限访问");
+            throw mockInterviewException(MockInterviewErrorCode.SESSION_NOT_FOUND, "模拟面试会话不存在或无权限访问");
         }
 
         MockInterviewReviewRecord record = reviewMapper.selectOne(
                 new LambdaQueryWrapper<MockInterviewReviewRecord>()
                         .eq(MockInterviewReviewRecord::getUserId, userId)
                         .eq(MockInterviewReviewRecord::getSessionId, sessionId)
+                        .eq(MockInterviewReviewRecord::getIsDeleted, NOT_DELETED)
                         .orderByDesc(MockInterviewReviewRecord::getCreateTime)
                         .last("limit 1")
         );
 
-        return MockInterviewReviewVO.from(record, objectMapper);
+        if (record == null) {
+            return null;
+        }
+
+        List<MockInterviewQuestion> questions = queryReviewQuestions(sessionId, userId);
+        List<MockInterviewAnswer> answers = queryReviewAnswers(sessionId, userId);
+        return toReviewVO(record, questions, answers);
+    }
+
+    /**
+     * 组装复盘详情 VO。
+     *
+     * 步骤:
+     * 1. 先把 mock_interview_review_record 转成总体复盘信息。
+     * 2. 再按 questionId 把用户回答整理成 Map，方便和题目一一匹配。
+     * 3. 最后按题目顺序生成单题复盘列表，保证用户端和 admin 端展示口径一致。
+     */
+    private MockInterviewReviewVO toReviewVO(
+            MockInterviewReviewRecord record,
+            List<MockInterviewQuestion> questions,
+            List<MockInterviewAnswer> answers
+    ) {
+        MockInterviewReviewVO vo = MockInterviewReviewVO.from(record, objectMapper);
+        if (vo == null) {
+            return null;
+        }
+
+        Map<Long, MockInterviewAnswer> answerMap = new HashMap<>();
+        for (MockInterviewAnswer answer : answers) {
+            answerMap.put(answer.getQuestionId(), answer);
+        }
+
+        List<MockInterviewReviewVO.QuestionReviewItem> questionReviews = new ArrayList<>();
+        for (MockInterviewQuestion question : questions) {
+            MockInterviewAnswer answer = answerMap.get(question.getId());
+            questionReviews.add(toQuestionReviewItem(question, answer));
+        }
+        vo.setQuestionReviews(questionReviews);
+        return vo;
+    }
+
+    /**
+     * 组装单题复盘明细。
+     *
+     * 步骤:
+     * 1. 题目基础信息来自 mock_interview_question，保留面试当时的标准答案快照。
+     * 2. 用户回答和评分字段来自 mock_interview_answer，复用提交答案时已经生成的单题评价。
+     * 3. 多行文本字段统一拆成列表，前端可以直接渲染标签和要点。
+     */
+    private MockInterviewReviewVO.QuestionReviewItem toQuestionReviewItem(
+            MockInterviewQuestion question,
+            MockInterviewAnswer answer
+    ) {
+        MockInterviewReviewVO.QuestionReviewItem item = new MockInterviewReviewVO.QuestionReviewItem();
+        item.setQuestionId(question.getId());
+        item.setSortNo(question.getSortNo());
+        item.setQuestionType(question.getQuestionType());
+        item.setQuestionContent(question.getQuestionContent());
+        item.setStandardAnswer(question.getStandardAnswer());
+
+        if (answer != null) {
+            item.setAnswerId(answer.getId());
+            item.setUserAnswer(answer.getAnswerContent());
+            item.setScore(answer.getScore());
+            item.setLevel(answer.getLevel());
+            item.setCorrect(answer.getCorrectFlag() != null && answer.getCorrectFlag() == 1);
+            item.setSimilarityScore(answer.getSimilarityScore());
+            item.setMatchedPoints(splitLines(answer.getMatchedPoints()));
+            item.setMissingPoints(splitLines(answer.getMissingPoints()));
+            item.setKnowledgePoints(splitLines(answer.getKnowledgePoints()));
+            item.setReviewConclusion(answer.getReviewConclusion());
+            item.setStrengths(splitLines(answer.getStrengths()));
+            item.setProblems(splitLines(answer.getProblems()));
+            item.setSuggestions(splitLines(answer.getSuggestions()));
+            item.setWrongBook(answer.getWrongBookFlag() != null && answer.getWrongBookFlag() == 1);
+        }
+        return item;
+    }
+
+    /**
+     * 查询复盘需要展示的题目列表。
+     *
+     * 步骤:
+     * 1. 只查询当前用户、当前会话的数据，避免后台或接口误串用户数据。
+     * 2. 排除逻辑删除数据。
+     * 3. 按 sortNo 升序返回，保证复盘顺序和面试顺序一致。
+     */
+    private List<MockInterviewQuestion> queryReviewQuestions(Long sessionId, Long userId) {
+        return questionMapper.selectList(
+                new LambdaQueryWrapper<MockInterviewQuestion>()
+                        .eq(MockInterviewQuestion::getSessionId, sessionId)
+                        .eq(MockInterviewQuestion::getUserId, userId)
+                        .eq(MockInterviewQuestion::getIsDeleted, NOT_DELETED)
+                        .orderByAsc(MockInterviewQuestion::getSortNo)
+        );
+    }
+
+    /**
+     * 查询复盘需要展示的回答列表。
+     *
+     * 步骤:
+     * 1. 只查询当前用户、当前会话的回答。
+     * 2. 排除逻辑删除数据。
+     * 3. 按创建时间升序返回，便于后续排查回答提交顺序。
+     */
+    private List<MockInterviewAnswer> queryReviewAnswers(Long sessionId, Long userId) {
+        return answerMapper.selectList(
+                new LambdaQueryWrapper<MockInterviewAnswer>()
+                        .eq(MockInterviewAnswer::getSessionId, sessionId)
+                        .eq(MockInterviewAnswer::getUserId, userId)
+                        .eq(MockInterviewAnswer::getIsDeleted, NOT_DELETED)
+                        .orderByAsc(MockInterviewAnswer::getCreateTime)
+        );
+    }
+
+    /**
+     * 多行文本转列表。
+     *
+     * 说明:
+     * 单题评价中的命中点、缺失点、知识点早期按多行文本保存。
+     * 这里集中拆分，避免用户端和 admin 端重复写解析逻辑。
+     */
+    private List<String> splitLines(String value) {
+        if (!StringUtils.hasText(value)) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(value.split("\\R+"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .toList();
     }
 
     private LlmReviewResult generateLlmReview(
@@ -239,24 +371,32 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
             List<MockInterviewAnswer> answers,
             Map<Long, MockInterviewQuestion> questionMap
     ) {
-        Map<String, Object> variables = buildReviewVariables(session, answers, questionMap);
-        String prompt = buildReviewPrompt(session, answers, questionMap);
-        String response = aiModelGatewayService.chat(
-                AI_SCENE_MOCK_INTERVIEW_REVIEW_GENERATE,
-                variables,
-                prompt,
-                userId,
-                buildReviewTraceId(userId, session.getId())
-        );
-
         try {
+            /*
+             * 1. 模型调用和 JSON 解析放在同一个 try 内，确保复盘阶段所有失败都能返回稳定错误码。
+             * 2. JSON 格式错误单独标记 REVIEW_JSON_PARSE_FAILED，方便前端提示检查 Prompt 输出。
+             * 3. 其他模型调用异常统一标记 REVIEW_GENERATE_FAILED，方便和 ASR/评分失败区分。
+             */
+            Map<String, Object> variables = buildReviewVariables(session, answers, questionMap);
+            String prompt = buildReviewPrompt(session, answers, questionMap);
+            String response = aiModelGatewayService.chat(
+                    AI_SCENE_MOCK_INTERVIEW_REVIEW_GENERATE,
+                    variables,
+                    prompt,
+                    userId,
+                    buildReviewTraceId(userId, session.getId())
+            );
             LlmReviewResult result = objectMapper.readValue(extractJson(response), LlmReviewResult.class);
             validateLlmReviewResult(result);
             return result;
         } catch (BizException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BizException("AI复盘结果解析失败，请稍后重试");
+            throw new BizException(
+                    MockInterviewErrorCode.REVIEW_GENERATE_FAILED.getCode(),
+                    "AI复盘生成失败，请稍后重试",
+                    exception
+            );
         }
     }
 
@@ -362,14 +502,14 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
 
     private String extractJson(String response) {
         if (!StringUtils.hasText(response)) {
-            throw new BizException("AI复盘结果解析失败，请稍后重试");
+            throw mockInterviewException(MockInterviewErrorCode.REVIEW_JSON_PARSE_FAILED, "AI复盘结果解析失败，请稍后重试");
         }
 
         String cleaned = response.trim();
         int start = cleaned.indexOf('{');
         int end = cleaned.lastIndexOf('}');
         if (start < 0 || end <= start) {
-            throw new BizException("AI复盘结果解析失败，请稍后重试");
+            throw mockInterviewException(MockInterviewErrorCode.REVIEW_JSON_PARSE_FAILED, "AI复盘结果解析失败，请稍后重试");
         }
         return cleaned.substring(start, end + 1);
     }
@@ -381,8 +521,20 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
                 || !StringUtils.hasText(result.strengthSummary())
                 || !StringUtils.hasText(result.weaknessSummary())
                 || !StringUtils.hasText(result.improvementPlan())) {
-            throw new BizException("AI复盘结果解析失败，请稍后重试");
+            throw mockInterviewException(MockInterviewErrorCode.REVIEW_JSON_PARSE_FAILED, "AI复盘结果解析失败，请稍后重试");
         }
+    }
+
+    /**
+     * 创建 AI 面试复盘标准业务异常。
+     *
+     * 步骤:
+     * 1. 使用 MockInterviewErrorCode 中的稳定错误码。
+     * 2. message 保留用户可读提示，兼容旧的通用错误弹窗。
+     * 3. 前端可以通过 data.errorCode 精准判断复盘、RAG 补课材料等失败场景。
+     */
+    private BizException mockInterviewException(MockInterviewErrorCode errorCode, String message) {
+        return new BizException(errorCode.getCode(), trimOrDefault(message, errorCode.getDefaultMessage()));
     }
 
     private BigDecimal toScore(Double score) {

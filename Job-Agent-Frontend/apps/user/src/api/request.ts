@@ -3,6 +3,25 @@ import type { ApiResult } from "./types";
 const TOKEN_NAME_KEY = "job-agent-token-name";
 const TOKEN_VALUE_KEY = "job-agent-token-value";
 
+interface BusinessErrorData {
+  errorCode?: string;
+  message?: string;
+}
+
+export class ApiRequestError extends Error {
+  code?: number;
+  errorCode?: string;
+  data?: unknown;
+
+  constructor(message: string, code?: number, errorCode?: string, data?: unknown) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.code = code;
+    this.errorCode = errorCode;
+    this.data = data;
+  }
+}
+
 export function saveToken(tokenName: string, tokenValue: string) {
   localStorage.setItem(TOKEN_NAME_KEY, tokenName);
   localStorage.setItem(TOKEN_VALUE_KEY, tokenValue);
@@ -52,6 +71,13 @@ function printApiError<T>(title: string, url: string, method: string, response: 
   });
 }
 
+function extractBusinessErrorCode(data: unknown) {
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+  return (data as BusinessErrorData).errorCode;
+}
+
 export async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const { tokenName, tokenValue } = getToken();
   const headers = new Headers(options.headers);
@@ -76,7 +102,12 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
 
     if (!response.ok) {
       printApiError("HTTP 请求失败", url, method, response, result);
-      throw new Error(result?.message || `HTTP ${response.status}`);
+      throw new ApiRequestError(
+        result?.message || `HTTP ${response.status}`,
+        result?.code,
+        extractBusinessErrorCode(result?.data),
+        result?.data
+      );
     }
 
     if (!result) {
@@ -87,7 +118,12 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
     // 后端 ResultCodeEnum.SUCCESS 是 200。非 200 统一抛错给页面处理，并输出到浏览器控制台。
     if (result.code !== 200) {
       printApiError("业务请求失败", url, method, response, result);
-      throw new Error(result.message || "请求失败");
+      throw new ApiRequestError(
+        result.message || "请求失败",
+        result.code,
+        extractBusinessErrorCode(result.data),
+        result.data
+      );
     }
 
     return result.data;

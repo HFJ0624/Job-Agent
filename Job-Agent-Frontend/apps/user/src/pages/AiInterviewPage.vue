@@ -11,6 +11,23 @@
       </el-tag>
     </section>
 
+    <el-alert
+      v-if="interviewError && !session"
+      class="interview-error-alert global-error-alert"
+      type="error"
+      show-icon
+      :closable="true"
+      @close="clearInterviewError"
+    >
+      <template #title>
+        <span>{{ interviewError.title }}</span>
+      </template>
+      <div class="interview-error-body">
+        <p>{{ interviewError.message }}</p>
+        <p>{{ interviewError.suggestion }}</p>
+      </div>
+    </el-alert>
+
     <section class="start-layout" v-if="!session">
       <div class="table-card ai-start-panel">
         <div class="card-title">
@@ -98,6 +115,24 @@
 
     <section class="interview-layout" v-else>
       <div class="camera-panel">
+        <div class="interview-status-card">
+          <div class="status-head">
+            <div>
+              <span>当前进度</span>
+              <strong>{{ answeredCount }} / {{ session.totalQuestionCount }}</strong>
+            </div>
+            <el-tag :type="currentQuestion ? 'warning' : 'success'">
+              {{ interviewStageText }}
+            </el-tag>
+          </div>
+          <el-progress :percentage="progressPercent" :stroke-width="10" />
+          <div class="status-steps">
+            <span :class="{ done: answeredCount > 0 }">已提交 {{ answeredCount }} 题</span>
+            <span :class="{ active: recording }">录音中</span>
+            <span :class="{ active: submitting }">识别与评分中</span>
+            <span :class="{ done: !currentQuestion }">复盘阶段</span>
+          </div>
+        </div>
         <video ref="videoRef" autoplay playsinline muted></video>
         <div class="camera-actions">
           <el-button @click="openCamera">打开摄像头和麦克风</el-button>
@@ -107,6 +142,78 @@
       </div>
 
       <div class="question-panel">
+        <el-alert
+          v-if="interviewError"
+          class="interview-error-alert"
+          type="error"
+          show-icon
+          :closable="true"
+          @close="clearInterviewError"
+        >
+          <template #title>
+            <span>{{ interviewError.title }}</span>
+          </template>
+          <div class="interview-error-body">
+            <p>{{ interviewError.message }}</p>
+            <p>{{ interviewError.suggestion }}</p>
+            <div class="interview-error-actions">
+              <el-button
+                v-if="interviewError.action === 'OPEN_CAMERA'"
+                size="small"
+                type="primary"
+                @click="openCamera"
+              >
+                重新打开设备
+              </el-button>
+              <el-button
+                v-if="interviewError.action === 'RECORD_AGAIN'"
+                size="small"
+                type="primary"
+                @click="startRecording"
+              >
+                重新录音
+              </el-button>
+              <el-button
+                v-if="interviewError.action === 'RETRY_SUBMIT'"
+                size="small"
+                type="primary"
+                :loading="submitting"
+                @click="submitCurrentAudio"
+              >
+                重试提交
+              </el-button>
+              <el-button
+                v-if="interviewError.action === 'RETRY_REVIEW'"
+                size="small"
+                type="primary"
+                :loading="reviewLoading"
+                @click="generateReview"
+              >
+                重新生成复盘
+              </el-button>
+              <el-button
+                v-if="interviewError.action === 'RETRY_STUDY_PLAN'"
+                size="small"
+                type="primary"
+                :loading="learningPlanGenerating"
+                @click="generateLearningPlanFromReview"
+              >
+                重新生成学习计划
+              </el-button>
+              <el-button
+                v-if="interviewError.action === 'RETRY_STUDY_MATERIAL'"
+                size="small"
+                type="primary"
+                :loading="studyPlanLoading"
+                @click="loadStudyPlan"
+              >
+                重新加载补课清单
+              </el-button>
+              <el-button size="small" @click="clearInterviewError">我知道了</el-button>
+            </div>
+          </div>
+        </el-alert>
+
         <div v-if="currentQuestion">
           <p class="eyebrow">第 {{ session.currentIndex + 1 }} / {{ session.totalQuestionCount }} 题</p>
           <h2>{{ currentQuestion.questionContent }}</h2>
@@ -115,6 +222,12 @@
           <div class="record-actions">
             <el-button v-if="!recording" type="danger" :disabled="submitting" @click="startRecording">开始录音</el-button>
             <el-button v-else type="warning" @click="stopRecording">停止并提交</el-button>
+          </div>
+          <div class="answer-flow">
+            <span :class="{ active: recording, done: submitting }">1. 语音回答</span>
+            <span :class="{ active: submitting }">2. ASR 识别</span>
+            <span :class="{ active: submitting }">3. AI 单题评分</span>
+            <span>4. 自动进入下一题</span>
           </div>
           <p class="muted" v-if="recording">录音中 {{ recordingSeconds }} 秒，请自然回答。</p>
           <p class="muted" v-if="submitting">正在上传音频并等待火山 ASR 识别...</p>
@@ -151,6 +264,24 @@
           <small>已回答 {{ review.answeredCount }} 题</small>
         </div>
 
+        <div class="review-action-strip">
+          <section>
+            <strong>{{ weakQuestionCount }}</strong>
+            <span>道题需要重点复盘</span>
+          </section>
+          <section>
+            <strong>{{ review.weakQuestions?.length || 0 }}</strong>
+            <span>个薄弱知识点</span>
+          </section>
+          <div class="review-next-actions">
+            <el-button type="warning" @click="goWrongQuestions">查看错题本</el-button>
+            <el-button type="success" :loading="learningPlanGenerating" @click="generateLearningPlanFromReview">
+              生成学习计划
+            </el-button>
+            <el-button @click="goLearningPlan">进入学习计划</el-button>
+          </div>
+        </div>
+
         <div class="review-grid">
           <section class="review-block">
             <h3>优势总结</h3>
@@ -184,13 +315,88 @@
           <pre>{{ review.improvementPlan }}</pre>
         </section>
 
+        <section class="review-block question-review-section">
+          <h3>逐题复盘详情</h3>
+          <el-empty v-if="!review.questionReviews?.length" description="暂无逐题复盘明细" />
+          <div v-else class="question-review-list">
+            <article v-for="item in review.questionReviews" :key="item.questionId" class="question-review-card">
+              <div class="question-review-head">
+                <div>
+                  <small>第 {{ item.sortNo || "-" }} 题 · {{ item.questionType || "未分类" }}</small>
+                  <h4>{{ item.questionContent || "-" }}</h4>
+                </div>
+                <div class="question-review-tags">
+                  <el-tag type="primary" size="small">{{ item.score ?? "-" }} 分</el-tag>
+                  <el-tag size="small">{{ item.level || "未评分" }}</el-tag>
+                  <el-tag :type="item.correct ? 'success' : 'danger'" size="small">
+                    {{ item.correct ? "基本正确" : "需要复习" }}
+                  </el-tag>
+                  <el-tag v-if="item.wrongBook" type="warning" size="small">已入错题本</el-tag>
+                </div>
+              </div>
+
+              <div class="question-answer-grid">
+                <section>
+                  <strong>标准答案</strong>
+                  <p>{{ item.standardAnswer || "暂无标准答案" }}</p>
+                </section>
+                <section>
+                  <strong>你的回答</strong>
+                  <p>{{ item.userAnswer || "暂无回答" }}</p>
+                </section>
+              </div>
+
+              <p class="question-review-conclusion">
+                复盘结论：{{ item.reviewConclusion || "暂无单题复盘结论" }}
+              </p>
+              <p v-if="item.similarityScore !== undefined" class="muted">
+                与标准答案相似度：{{ item.similarityScore }}%
+              </p>
+
+              <div class="point-grid">
+                <section>
+                  <strong>命中要点</strong>
+                  <el-tag v-for="point in item.matchedPoints || []" :key="point" size="small" type="success">
+                    {{ point }}
+                  </el-tag>
+                  <span v-if="!item.matchedPoints?.length" class="muted">暂无</span>
+                </section>
+                <section>
+                  <strong>缺失要点</strong>
+                  <el-tag v-for="point in item.missingPoints || []" :key="point" size="small" type="danger">
+                    {{ point }}
+                  </el-tag>
+                  <span v-if="!item.missingPoints?.length" class="muted">暂无</span>
+                </section>
+                <section>
+                  <strong>薄弱知识点</strong>
+                  <el-tag v-for="point in item.knowledgePoints || []" :key="point" size="small" type="warning">
+                    {{ point }}
+                  </el-tag>
+                  <span v-if="!item.knowledgePoints?.length" class="muted">暂无</span>
+                </section>
+                <section>
+                  <strong>优化建议</strong>
+                  <ul v-if="item.suggestions?.length">
+                    <li v-for="suggestion in item.suggestions" :key="suggestion">{{ suggestion }}</li>
+                  </ul>
+                  <span v-else class="muted">暂无</span>
+                </section>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section class="review-block study-plan">
           <div class="study-plan-title">
             <div>
               <h3>薄弱知识点补课清单</h3>
               <p>根据 AI 总结里的薄弱点，从 RAG 知识库召回学习材料。</p>
             </div>
-            <el-button size="small" :loading="studyPlanLoading" @click="loadStudyPlan">刷新清单</el-button>
+            <div class="study-plan-actions">
+              <el-button size="small" :loading="studyPlanLoading" @click="loadStudyPlan">刷新清单</el-button>
+              <el-button size="small" type="primary" @click="goLearningPlan">完整学习计划</el-button>
+            </div>
           </div>
 
           <el-empty v-if="!studyPlan?.items?.length" description="暂无补课材料，请确认 RAG 知识库已有相关内容。" />
@@ -257,14 +463,33 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { pageFrontPositions } from "../api/job";
 import { listResumes } from "../api/resume";
+import { ApiRequestError } from "../api/request";
 import { getCurrentMockQuestion, getMockInterviewDetail, startAiInterview, submitMockAudioAnswer } from "../api/mockInterview";
 import { generateMockInterviewReview, getLatestMockInterviewReview, getMockInterviewStudyPlan } from "../api/mockInterviewReview";
+import { generateMockInterviewLearningPlan } from "../api/mockInterviewLearningPlan";
 import type { MockInterviewAnswerInfo, MockInterviewQuestionInfo, MockInterviewReviewInfo, MockInterviewSessionInfo, MockInterviewStudyPlanInfo, PositionInfo, ResumeInfo } from "../api/types";
 
+type InterviewErrorAction =
+  | "OPEN_CAMERA"
+  | "RECORD_AGAIN"
+  | "RETRY_SUBMIT"
+  | "RETRY_REVIEW"
+  | "RETRY_STUDY_MATERIAL"
+  | "RETRY_STUDY_PLAN";
+
+interface InterviewErrorState {
+  step: string;
+  title: string;
+  message: string;
+  suggestion: string;
+  action?: InterviewErrorAction;
+}
+
 const route = useRoute();
+const router = useRouter();
 const resumes = ref<ResumeInfo[]>([]);
 const jobs = ref<PositionInfo[]>([]);
 const session = ref<MockInterviewSessionInfo | null>(null);
@@ -287,8 +512,38 @@ const reviewLoading = ref(false);
 const review = ref<MockInterviewReviewInfo | null>(null);
 const studyPlanLoading = ref(false);
 const studyPlan = ref<MockInterviewStudyPlanInfo | null>(null);
+const learningPlanGenerating = ref(false);
+const interviewError = ref<InterviewErrorState | null>(null);
 
 const form = reactive({ resumeId: "", jobId: "", questionCount: 6, excludeRecentHours: 72 });
+
+const answeredCount = computed(() => session.value?.answers?.length || 0);
+
+const progressPercent = computed(() => {
+  if (!session.value?.totalQuestionCount) {
+    return 0;
+  }
+  return Math.min(100, Math.round((answeredCount.value / session.value.totalQuestionCount) * 100));
+});
+
+const interviewStageText = computed(() => {
+  if (submitting.value) {
+    return "识别与评分中";
+  }
+  if (recording.value) {
+    return "录音回答中";
+  }
+  if (!currentQuestion.value) {
+    return "等待复盘";
+  }
+  return "答题中";
+});
+
+const weakQuestionCount = computed(() => {
+  return (review.value?.questionReviews || []).filter(item => {
+    return item.wrongBook || item.correct === false || Boolean(item.missingPoints?.length);
+  }).length;
+});
 
 const answersWithQuestion = computed(() => {
   const questionMap = new Map<number, MockInterviewQuestionInfo>();
@@ -298,6 +553,121 @@ const answersWithQuestion = computed(() => {
     questionContent: questionMap.get(answer.questionId)?.questionContent || "-"
   }));
 });
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function getBusinessErrorCode(error: unknown) {
+  return error instanceof ApiRequestError ? error.errorCode : undefined;
+}
+
+function setInterviewError(error: InterviewErrorState) {
+  interviewError.value = error;
+}
+
+function clearInterviewError() {
+  interviewError.value = null;
+}
+
+function buildSubmitError(error: unknown): InterviewErrorState {
+  const errorCode = getBusinessErrorCode(error);
+  const message = getErrorMessage(error, "音频已经提交，但处理没有成功。");
+
+  if (errorCode === "MOCK_INTERVIEW_ASR_FAILED") {
+    return {
+      step: "ASR",
+      title: "语音识别失败",
+      message,
+      suggestion: "请重新录音，尽量靠近麦克风、保持环境安静，并确认回答音频里有清晰人声。",
+      action: "RECORD_AGAIN"
+    };
+  }
+
+  if (errorCode === "MOCK_INTERVIEW_AUDIO_SUBMIT_FAILED") {
+    return {
+      step: "AUDIO_SUBMIT",
+      title: "音频提交失败",
+      message,
+      suggestion: "可以先重试提交当前录音；如果仍失败，请检查网络后重新录音。",
+      action: chunks.value.length ? "RETRY_SUBMIT" : "RECORD_AGAIN"
+    };
+  }
+
+  if (errorCode === "MOCK_INTERVIEW_QUESTION_ALREADY_ANSWERED") {
+    return {
+      step: "QUESTION_ALREADY_ANSWERED",
+      title: "这道题已经提交过",
+      message,
+      suggestion: "请刷新当前面试进度，系统会进入下一道未回答题目。",
+      action: "RECORD_AGAIN"
+    };
+  }
+
+  return {
+    step: "ASR_AND_SCORE",
+    title: "语音识别或单题评分失败",
+    message,
+    suggestion: "可以先重试提交当前录音；如果仍失败，请重新录音，尽量靠近麦克风并保持环境安静。",
+    action: chunks.value.length ? "RETRY_SUBMIT" : "RECORD_AGAIN"
+  };
+}
+
+function buildReviewError(error: unknown): InterviewErrorState {
+  const errorCode = getBusinessErrorCode(error);
+  const message = getErrorMessage(error, "模型没有成功生成本场面试复盘。");
+
+  if (errorCode === "MOCK_INTERVIEW_REVIEW_NO_ANSWER") {
+    return {
+      step: "REVIEW_NO_ANSWER",
+      title: "还没有可复盘的回答",
+      message,
+      suggestion: "请至少完成一道题并提交回答后，再生成 AI 面试复盘。",
+      action: "RECORD_AGAIN"
+    };
+  }
+
+  if (errorCode === "MOCK_INTERVIEW_REVIEW_JSON_PARSE_FAILED") {
+    return {
+      step: "REVIEW_JSON_PARSE",
+      title: "AI 复盘格式解析失败",
+      message,
+      suggestion: "请重新生成复盘；如果多次失败，需要检查该场景 Prompt 是否要求模型只输出 JSON。",
+      action: "RETRY_REVIEW"
+    };
+  }
+
+  return {
+    step: "REVIEW_GENERATE",
+    title: "AI 总复盘生成失败",
+    message,
+    suggestion: "请稍后重新生成复盘；如果多次失败，需要检查模型路由或模型调用日志。",
+    action: "RETRY_REVIEW"
+  };
+}
+
+function buildStudyMaterialError(error: unknown): InterviewErrorState {
+  const errorCode = getBusinessErrorCode(error);
+  const message = getErrorMessage(error, "RAG 补课材料暂时没有加载成功。");
+
+  if (errorCode === "MOCK_INTERVIEW_STUDY_PLAN_REVIEW_REQUIRED") {
+    return {
+      step: "STUDY_PLAN_REVIEW_REQUIRED",
+      title: "请先生成 AI 面试总结",
+      message,
+      suggestion: "补课清单依赖复盘里的薄弱点，请先生成本场 AI 面试总结。",
+      action: "RETRY_REVIEW"
+    };
+  }
+
+  return {
+    step: "STUDY_MATERIAL",
+    title: "补课清单加载失败",
+    message,
+    suggestion: "可以重新刷新清单；如果仍失败，请检查 RAG 知识库是否已索引相关面试题材料。",
+    action: "RETRY_STUDY_MATERIAL"
+  };
+}
 
 async function loadInitialData() {
   resumes.value = await listResumes();
@@ -322,11 +692,22 @@ async function startInterview() {
   }
   starting.value = true;
   try {
+    clearInterviewError();
     session.value = await startAiInterview(form);
     currentQuestion.value = await getCurrentMockQuestion(session.value.id);
     review.value = null;
     studyPlan.value = null;
     await openCamera();
+  } catch (error) {
+    if (!interviewError.value) {
+      setInterviewError({
+        step: "START_INTERVIEW",
+        title: "面试创建失败",
+        message: getErrorMessage(error, "系统暂时无法创建 AI 模拟面试。"),
+        suggestion: "请确认简历和岗位仍然有效，稍后重新点击开始面试。"
+      });
+    }
+    ElMessage.error(getErrorMessage(error, "AI 模拟面试创建失败"));
   } finally {
     starting.value = false;
   }
@@ -334,10 +715,22 @@ async function startInterview() {
 
 async function openCamera() {
   if (mediaStream.value) return;
-  // 浏览器要求 HTTPS 或 localhost 才能使用摄像头和麦克风。
-  mediaStream.value = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  if (videoRef.value) {
-    videoRef.value.srcObject = mediaStream.value;
+  try {
+    clearInterviewError();
+    // 浏览器要求 HTTPS 或 localhost 才能使用摄像头和麦克风。
+    mediaStream.value = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    if (videoRef.value) {
+      videoRef.value.srcObject = mediaStream.value;
+    }
+  } catch (error) {
+    setInterviewError({
+      step: "DEVICE_PERMISSION",
+      title: "摄像头或麦克风打开失败",
+      message: getErrorMessage(error, "浏览器没有拿到摄像头或麦克风权限。"),
+      suggestion: "请检查浏览器权限、设备是否被其他软件占用，然后点击重新打开设备。",
+      action: "OPEN_CAMERA"
+    });
+    throw error;
   }
 }
 
@@ -351,25 +744,38 @@ function closeCamera() {
 
 async function startRecording() {
   if (!session.value || !currentQuestion.value) return;
-  await openCamera();
-  if (!mediaStream.value) return;
+  try {
+    clearInterviewError();
+    await openCamera();
+    if (!mediaStream.value) return;
 
-  chunks.value = [];
-  recordingStartedAt.value = Date.now();
-  recordingSeconds.value = 0;
+    chunks.value = [];
+    recordingStartedAt.value = Date.now();
+    recordingSeconds.value = 0;
 
-  // 只录音频轨道，避免第一版上传大体积视频文件。
-  const audioStream = new MediaStream(mediaStream.value.getAudioTracks());
-  mediaRecorder.value = new MediaRecorder(audioStream, { mimeType: "audio/webm" });
-  mediaRecorder.value.ondataavailable = event => {
-    if (event.data.size > 0) chunks.value.push(event.data);
-  };
-  mediaRecorder.value.onstop = submitCurrentAudio;
-  mediaRecorder.value.start();
-  recording.value = true;
-  recordingTimer.value = window.setInterval(() => {
-    recordingSeconds.value = Math.floor((Date.now() - recordingStartedAt.value) / 1000);
-  }, 1000);
+    // 只录音频轨道，避免第一版上传大体积视频文件。
+    const audioStream = new MediaStream(mediaStream.value.getAudioTracks());
+    mediaRecorder.value = new MediaRecorder(audioStream, { mimeType: "audio/webm" });
+    mediaRecorder.value.ondataavailable = event => {
+      if (event.data.size > 0) chunks.value.push(event.data);
+    };
+    mediaRecorder.value.onstop = submitCurrentAudio;
+    mediaRecorder.value.start();
+    recording.value = true;
+    recordingTimer.value = window.setInterval(() => {
+      recordingSeconds.value = Math.floor((Date.now() - recordingStartedAt.value) / 1000);
+    }, 1000);
+  } catch (error) {
+    if (!interviewError.value) {
+      setInterviewError({
+        step: "RECORD_AUDIO",
+        title: "录音启动失败",
+        message: getErrorMessage(error, "浏览器无法启动录音。"),
+        suggestion: "请重新授权麦克风，或刷新页面后重新进入这场面试。",
+        action: "OPEN_CAMERA"
+      });
+    }
+  }
 }
 
 function stopRecording() {
@@ -386,12 +792,20 @@ async function submitCurrentAudio() {
   if (!session.value || !currentQuestion.value) return;
   const audio = new Blob(chunks.value, { type: "audio/webm" });
   if (!audio.size) {
+    setInterviewError({
+      step: "EMPTY_AUDIO",
+      title: "没有录到有效音频",
+      message: "本次录音文件为空，系统无法提交给 ASR 识别。",
+      suggestion: "请确认麦克风可用，然后重新录音并提交。",
+      action: "RECORD_AGAIN"
+    });
     ElMessage.warning("没有录到音频，请重新录制");
     return;
   }
 
   submitting.value = true;
   try {
+    clearInterviewError();
     await submitMockAudioAnswer(session.value.id, currentQuestion.value.id, audio, recordingSeconds.value);
     await reloadSession();
     currentQuestion.value = await getCurrentMockQuestion(session.value.id);
@@ -399,6 +813,9 @@ async function submitCurrentAudio() {
       closeCamera();
       await loadLatestReview();
     }
+  } catch (error) {
+    setInterviewError(buildSubmitError(error));
+    ElMessage.error(getErrorMessage(error, "语音识别或单题评分失败"));
   } finally {
     submitting.value = false;
   }
@@ -465,11 +882,13 @@ async function generateReview() {
   if (!session.value) return;
   reviewLoading.value = true;
   try {
+    clearInterviewError();
     review.value = await generateMockInterviewReview(session.value.id);
     await loadStudyPlan();
     ElMessage.success("AI 面试总结已生成");
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "AI 面试总结生成失败");
+    setInterviewError(buildReviewError(error));
+    ElMessage.error(getErrorMessage(error, "AI 面试总结生成失败"));
   } finally {
     reviewLoading.value = false;
   }
@@ -482,10 +901,49 @@ async function loadStudyPlan() {
     studyPlan.value = await getMockInterviewStudyPlan(session.value.id);
   } catch (error) {
     studyPlan.value = null;
-    ElMessage.error(error instanceof Error ? error.message : "补课清单加载失败");
+    setInterviewError(buildStudyMaterialError(error));
+    ElMessage.error(getErrorMessage(error, "补课清单加载失败"));
   } finally {
     studyPlanLoading.value = false;
   }
+}
+
+async function generateLearningPlanFromReview() {
+  if (!review.value) {
+    ElMessage.warning("请先生成 AI 面试总结");
+    return;
+  }
+  learningPlanGenerating.value = true;
+  try {
+    clearInterviewError();
+    /*
+     * 1. 学习计划接口本身会基于错题本和薄弱知识点生成计划。
+     * 2. 面试复盘页只负责提供明确入口，不在前端重复拼接学习计划内容。
+     * 3. 生成成功后直接跳转完整学习计划页，让用户继续补课和复测。
+     */
+    await generateMockInterviewLearningPlan(7);
+    ElMessage.success("学习计划已生成");
+    await goLearningPlan();
+  } catch (error) {
+    setInterviewError({
+      step: "LEARNING_PLAN",
+      title: "学习计划生成失败",
+      message: getErrorMessage(error, "系统没有成功生成学习计划。"),
+      suggestion: "请确认本场面试已有错题或薄弱知识点，再点击重新生成学习计划。",
+      action: "RETRY_STUDY_PLAN"
+    });
+    ElMessage.error(getErrorMessage(error, "学习计划生成失败"));
+  } finally {
+    learningPlanGenerating.value = false;
+  }
+}
+
+function goWrongQuestions() {
+  router.push("/wrong-questions");
+}
+
+async function goLearningPlan() {
+  await router.push("/learning-plan");
 }
 
 function resetInterview() {
@@ -493,6 +951,7 @@ function resetInterview() {
   currentQuestion.value = null;
   review.value = null;
   studyPlan.value = null;
+  clearInterviewError();
 }
 
 onMounted(loadInitialData);
@@ -669,9 +1128,37 @@ watch(
   margin-bottom: 18px;
 }
 
+.global-error-alert {
+  margin-bottom: 18px;
+}
+
 .camera-panel,
 .question-panel {
   padding: 18px;
+}
+
+.interview-error-alert {
+  margin-bottom: 16px;
+  border-radius: 8px;
+}
+
+.interview-error-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.interview-error-body p {
+  margin: 0;
+  color: #7f1d1d;
+  line-height: 1.6;
+}
+
+.interview-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .camera-panel video {
@@ -682,9 +1169,70 @@ watch(
   object-fit: cover;
 }
 
+.interview-status-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.status-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-head span,
+.status-steps span,
+.answer-flow span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.status-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 22px;
+}
+
+.status-steps,
+.answer-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-steps span,
+.answer-flow span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.status-steps span.active,
+.answer-flow span.active {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.status-steps span.done,
+.answer-flow span.done {
+  color: #047857;
+  background: #d1fae5;
+}
+
 .camera-actions,
 .record-actions {
   margin-top: 14px;
+}
+
+.answer-flow {
+  margin-top: 12px;
 }
 
 .question-panel h2 {
@@ -730,6 +1278,39 @@ watch(
   color: #64748b;
 }
 
+.review-action-strip {
+  display: grid;
+  grid-template-columns: 160px 160px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.review-action-strip section,
+.review-next-actions {
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.review-action-strip section strong {
+  display: block;
+  color: #0f766e;
+  font-size: 26px;
+}
+
+.review-action-strip section span {
+  color: #64748b;
+}
+
+.review-next-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .review-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -754,6 +1335,81 @@ watch(
 
 .review-block.study-plan {
   background: #f8fafc;
+}
+
+.question-review-section {
+  background: #f8fafc;
+}
+
+.question-review-list {
+  display: grid;
+  gap: 14px;
+}
+
+.question-review-card {
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.question-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.question-review-head small {
+  color: #64748b;
+}
+
+.question-review-head h4 {
+  margin: 6px 0 0;
+  color: #0f172a;
+  line-height: 1.6;
+}
+
+.question-review-tags,
+.point-grid section {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.question-answer-grid,
+.point-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.question-answer-grid section,
+.point-grid section {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.question-answer-grid strong,
+.point-grid strong {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  color: #0f172a;
+}
+
+.question-answer-grid p,
+.question-review-conclusion {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.question-review-conclusion {
+  margin-top: 12px;
 }
 
 .review-block h3 {
@@ -792,6 +1448,12 @@ watch(
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.study-plan-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .study-plan-title p {
@@ -917,6 +1579,24 @@ watch(
 
   .review-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-action-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .review-next-actions {
+    justify-content: flex-start;
+  }
+
+  .question-review-head,
+  .question-answer-grid,
+  .point-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .question-review-head {
+    flex-direction: column;
   }
 
   .study-plan-title {

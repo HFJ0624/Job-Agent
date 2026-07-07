@@ -6,10 +6,12 @@ import com.job.common.entity.base.PageResult;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.interview.MockInterviewMediaRecordVO;
+import com.job.common.vo.interview.MockInterviewReviewVO;
 import com.job.common.vo.interview.MockInterviewSessionVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -47,5 +49,21 @@ public class AdminMockInterviewController {
     @GetMapping("/sessions/{sessionId}/media")
     public Result<List<MockInterviewMediaRecordVO>> mediaRecords(@PathVariable Long sessionId) {
         return Result.build(adminMockInterviewService.listMediaRecords(sessionId), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 查询单场模拟面试最近一次 AI 复盘。
+     */
+    @GetMapping("/sessions/{sessionId}/review/latest")
+    public Result<MockInterviewReviewVO> latestReview(@PathVariable Long sessionId) {
+        return Result.build(adminMockInterviewService.getLatestReview(sessionId), ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 后台生成或重新生成单场模拟面试 AI 复盘。
+     */
+    @PostMapping("/sessions/{sessionId}/review/generate")
+    public Result<MockInterviewReviewVO> generateReview(@PathVariable Long sessionId) {
+        return Result.build(adminMockInterviewService.generateReview(sessionId), ResultCodeEnum.SUCCESS);
     }
 }

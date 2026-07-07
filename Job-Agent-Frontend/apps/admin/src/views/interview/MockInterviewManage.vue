@@ -91,6 +91,70 @@
         </el-descriptions>
 
         <section class="detail-section">
+          <div class="section-title-row">
+            <h2>AI 复盘报告</h2>
+            <div>
+              <el-button :loading="reviewLoading" @click="loadReview">查看最新复盘</el-button>
+              <el-button type="primary" :loading="reviewGenerating" @click="generateReview">生成/重新生成</el-button>
+            </div>
+          </div>
+
+          <el-empty v-if="!review" description="暂无 AI 复盘，点击生成后可查看总体评分和逐题复盘" />
+
+          <div v-else class="review-detail">
+            <div class="review-summary">
+              <div>
+                <strong>{{ review.totalScore }} 分</strong>
+                <span>{{ review.reviewLevel }}</span>
+                <small>已回答 {{ review.answeredCount }} 题</small>
+              </div>
+              <el-tag>{{ review.source || "AI" }}</el-tag>
+            </div>
+
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="优势总结">{{ review.strengthSummary || "-" }}</el-descriptions-item>
+              <el-descriptions-item label="短板总结">{{ review.weaknessSummary || "-" }}</el-descriptions-item>
+              <el-descriptions-item label="能力标签">
+                <el-tag v-for="tag in review.abilityTags" :key="tag" size="small">{{ tag }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="需要补充">
+                <el-tag v-for="item in review.weakQuestions" :key="item" size="small" type="warning">{{ item }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="提升计划" :span="2">
+                <pre>{{ review.improvementPlan || "-" }}</pre>
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <el-table :data="review.questionReviews || []" border stripe class="question-review-table">
+              <el-table-column prop="sortNo" label="序号" width="70" />
+              <el-table-column prop="questionType" label="类型" width="100" />
+              <el-table-column prop="questionContent" label="题目" min-width="220" />
+              <el-table-column prop="standardAnswer" label="标准答案" min-width="240" show-overflow-tooltip />
+              <el-table-column prop="userAnswer" label="用户回答" min-width="240" show-overflow-tooltip />
+              <el-table-column prop="score" label="得分" width="80" />
+              <el-table-column prop="similarityScore" label="相似度" width="90" />
+              <el-table-column label="状态" width="150">
+                <template #default="{ row }">
+                  <el-tag :type="row.correct ? 'success' : 'danger'" size="small">
+                    {{ row.correct ? "正确" : "待提升" }}
+                  </el-tag>
+                  <el-tag v-if="row.wrongBook" type="warning" size="small">错题</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="薄弱点/建议" min-width="260">
+                <template #default="{ row }">
+                  <div class="review-points">
+                    <span v-for="item in row.missingPoints || []" :key="`missing-${item}`">缺失：{{ item }}</span>
+                    <span v-for="item in row.knowledgePoints || []" :key="`knowledge-${item}`">知识点：{{ item }}</span>
+                    <span v-for="item in row.suggestions || []" :key="`suggestion-${item}`">建议：{{ item }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+
+        <section class="detail-section">
           <h2>题目与回答</h2>
           <el-table :data="questionRows" border stripe>
             <el-table-column prop="sortNo" label="序号" width="80" />
@@ -131,14 +195,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { getMockInterviewSessionDetail, pageMockInterviewSessions } from "../../api/mockInterview";
-import type { MockInterviewAnswerInfo, MockInterviewQuestionInfo, MockInterviewSessionInfo, MockInterviewSessionQuery } from "../../api/types";
+import { ElMessage } from "element-plus";
+import { generateMockInterviewReviewAdmin, getMockInterviewReviewLatest, getMockInterviewSessionDetail, pageMockInterviewSessions } from "../../api/mockInterview";
+import type { MockInterviewAnswerInfo, MockInterviewQuestionInfo, MockInterviewReviewInfo, MockInterviewSessionInfo, MockInterviewSessionQuery } from "../../api/types";
 
 const loading = ref(false);
 const sessions = ref<MockInterviewSessionInfo[]>([]);
 const total = ref(0);
 const detailVisible = ref(false);
 const detail = ref<MockInterviewSessionInfo | null>(null);
+const review = ref<MockInterviewReviewInfo | null>(null);
+const reviewLoading = ref(false);
+const reviewGenerating = ref(false);
 
 const query = reactive<MockInterviewSessionQuery>({
   pageNum: 1,
@@ -177,7 +245,34 @@ function search() {
 
 async function openDetail(row: MockInterviewSessionInfo) {
   detail.value = await getMockInterviewSessionDetail(row.id);
+  review.value = null;
   detailVisible.value = true;
+  await loadReview();
+}
+
+async function loadReview() {
+  if (!detail.value) return;
+  reviewLoading.value = true;
+  try {
+    review.value = await getMockInterviewReviewLatest(detail.value.id);
+  } catch {
+    review.value = null;
+  } finally {
+    reviewLoading.value = false;
+  }
+}
+
+async function generateReview() {
+  if (!detail.value) return;
+  reviewGenerating.value = true;
+  try {
+    review.value = await generateMockInterviewReviewAdmin(detail.value.id);
+    ElMessage.success("AI 复盘已生成");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "AI 复盘生成失败");
+  } finally {
+    reviewGenerating.value = false;
+  }
 }
 
 onMounted(loadSessions);
@@ -195,6 +290,70 @@ onMounted(loadSessions);
 .detail-section h2 {
   margin: 0 0 12px;
   font-size: 18px;
+}
+
+.section-title-row,
+.review-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title-row h2 {
+  margin: 0;
+}
+
+.review-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.review-summary {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.review-summary strong {
+  margin-right: 10px;
+  color: #0f766e;
+  font-size: 28px;
+}
+
+.review-summary span {
+  margin-right: 10px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.review-summary small {
+  color: #64748b;
+}
+
+.review-detail :deep(.el-tag) {
+  margin: 2px 4px 2px 0;
+}
+
+.review-detail pre {
+  margin: 0;
+  color: #475569;
+  font-family: inherit;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.question-review-table {
+  margin-top: 4px;
+}
+
+.review-points {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 audio {
