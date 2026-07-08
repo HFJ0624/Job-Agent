@@ -43,11 +43,37 @@ import java.util.stream.Stream;
 /**
  * AI 模拟面试题库后台服务实现。
  *
- * 核心链路:
- * 1. 从本地 markdown 目录读取题目文件。
- * 2. 解析出“题目 + 标准答案 + 分类”等结构化数据。
- * 3. 写入 interview_question_bank，作为 admin 可管理的题库主表。
- * 4. 同步写入 rag_document/rag_chunk 和 pgvector，让后续模拟面试可以按 RAG 抽题和对答案。
+ * <p>核心职责：管理面试题库的生命周期，包括从本地 markdown 导入题目、分页查询、状态管理，以及将题目构建为 RAG 文档并写入向量数据库，支撑后续模拟面试的抽题与答案对照。</p>
+ *
+ * <p>所属业务模块：面试辅导模块（interview）/ 后台管理模块（admin）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>管理员调用 {@link #importLocalMarkdown} 从本地 markdown 目录批量导入题目；</li>
+ *   <li>题目经 {@link InterviewQuestionMarkdownParser} 解析后入库 interview_question_bank；</li>
+ *   <li>管理员调用 {@link #indexQuestion} 或 {@link #indexAllActive} 重建 RAG 索引；</li>
+ *   <li>模拟面试模块通过 {@link RagVectorStoreService} 检索已索引题目。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link InterviewQuestionMarkdownParser} 解析 markdown 格式题目；</li>
+ *   <li>依赖 {@link RagKnowledgeService} 管理 RAG 文档和切片元数据；</li>
+ *   <li>依赖 {@link RagEmbeddingService} 生成文本 embedding；</li>
+ *   <li>依赖 {@link RagVectorStoreService} 写入和删除 pgvector 向量数据；</li>
+ *   <li>依赖 {@link InterviewQuestionBankMapper} 进行题库数据持久化。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>题库主表与 RAG 索引解耦，导入和索引分两步执行，便于管理员审阅后再上线；</li>
+ *   <li>基于题目+答案计算 SHA-256 哈希，实现幂等导入，重复内容自动更新而非重复插入；</li>
+ *   <li>单道题和全量索引均支持重建，方便后续答案迭代后刷新向量库；</li>
+ *   <li>第一版采用同步执行，适合管理员手工触发，后续题库量增大可接入工作流异步执行。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -135,6 +161,12 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return questionBankMapper.selectPage(page, wrapper).convert(InterviewQuestionBankVO::from);
     }
 
+    /**
+     * 查询单道面试题详情。
+     *
+     * @param id 题目主键
+     * @return 题目详情 VO
+     */
     @Override
     public InterviewQuestionBankVO getDetail(Long id) {
         return InterviewQuestionBankVO.from(loadQuestion(id));
@@ -199,6 +231,15 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return result;
     }
 
+    /**
+     * 导入单个 markdown 文件。
+     *
+     * <p>步骤：读取文件文本 -> 解析题目 -> 保存或更新题库记录 -> 按需立即建索引。</p>
+     *
+     * @param file             文件路径
+     * @param indexAfterImport 导入后是否立即重建 RAG 索引
+     * @param result           导入结果统计
+     */
     private void importSingleFile(Path file, boolean indexAfterImport, InterviewQuestionImportResultVO result) {
         try {
             String markdown = Files.readString(file, StandardCharsets.UTF_8);
@@ -220,6 +261,15 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         }
     }
 
+    /**
+     * 保存或更新单道导入题目。
+     *
+     * <p>基于题目+答案的 SHA-256 哈希判断是新增还是更新，实现幂等导入。</p>
+     *
+     * @param item   解析后的导入项
+     * @param result 导入结果统计
+     * @return 保存后的题库实体
+     */
     private InterviewQuestionBank saveImportItem(InterviewQuestionImportItem item, InterviewQuestionImportResultVO result) {
         String sourceHash = sha256(item.getQuestionTitle() + "\n" + item.getStandardAnswer());
         InterviewQuestionBank question = questionBankMapper.selectOne(new LambdaQueryWrapper<InterviewQuestionBank>()
@@ -256,6 +306,14 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return question;
     }
 
+    /**
+     * 对单道题目执行 RAG 索引重建。
+     *
+     * <p>步骤：构建 RAG 文档 -> 文本切片 -> 删除旧向量 -> 生成 embedding -> 写入 pgvector -> 标记已索引 -> 回写 ID。</p>
+     *
+     * @param question 题库实体
+     * @param result   索引结果统计
+     */
     private void indexQuestion(InterviewQuestionBank question, RagIndexResultVO result) {
         if (question == null || !StringUtils.hasText(question.getStandardAnswer())) {
             result.addSkippedDocument();
@@ -299,6 +357,14 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         }
     }
 
+    /**
+     * 将题库实体转换为 RAG 文档源对象。
+     *
+     * <p>拼装包含题目、类型、分类、难度、标签和标准答案的完整文本，用于 embedding 和向量检索。</p>
+     *
+     * @param question 题库实体
+     * @return RAG 文档源对象
+     */
     private RagDocumentSource toRagDocument(InterviewQuestionBank question) {
         StringBuilder content = new StringBuilder();
         appendLine(content, "知识类型", "面试题");
@@ -328,6 +394,12 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
                 .build();
     }
 
+    /**
+     * 将 RAG 文档 ID 和切片 ID 回写到题库主表，建立题库与 RAG 索引的关联。
+     *
+     * @param question     题库实体
+     * @param storedChunks 已持久化的 RAG 切片列表
+     */
     private void writeBackRagIds(InterviewQuestionBank question, List<RagChunk> storedChunks) {
         if (CollectionUtils.isEmpty(storedChunks)) {
             return;
@@ -340,6 +412,13 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         questionBankMapper.updateById(question);
     }
 
+    /**
+     * 加载并校验题库实体。
+     *
+     * @param id 题目主键
+     * @return 非空且未删除的题库实体
+     * @throws BizException 题目不存在或 ID 非法时抛出
+     */
     private InterviewQuestionBank loadQuestion(Long id) {
         if (id == null || id <= 0) {
             throw new BizException("题目 ID 不能为空");
@@ -352,11 +431,24 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return question;
     }
 
+    /**
+     * 解析导入目录参数，未传则使用默认目录。
+     *
+     * @param dto 导入请求 DTO
+     * @return 目录路径
+     */
     private Path resolveDirectory(InterviewQuestionImportDTO dto) {
         String directoryPath = dto == null ? null : dto.getDirectoryPath();
         return Path.of(StringUtils.hasText(directoryPath) ? directoryPath.trim() : DEFAULT_DIRECTORY);
     }
 
+    /**
+     * 扫描目录下所有 markdown 文件并按文件名排序。
+     *
+     * @param directory 目录路径
+     * @return markdown 文件路径列表
+     * @throws BizException 扫描失败时抛出
+     */
     private List<Path> listMarkdownFiles(Path directory) {
         try (Stream<Path> stream = Files.list(directory)) {
             return stream
@@ -369,6 +461,13 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         }
     }
 
+    /**
+     * 构建切片级元数据，合并文档元数据和切片维度信息。
+     *
+     * @param document RAG 文档源对象
+     * @param chunk    RAG 切片实体
+     * @return 元数据 Map
+     */
     private Map<String, Object> buildChunkMetadata(RagDocumentSource document, RagChunk chunk) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (document.getMetadata() != null) {
@@ -381,6 +480,12 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return metadata;
     }
 
+    /**
+     * 构建键值对元数据，自动跳过 null 和空字符串值。
+     *
+     * @param keyValues 成对的键值参数
+     * @return 元数据 Map
+     */
     private Map<String, Object> metadata(Object... keyValues) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         for (int i = 0; i + 1 < keyValues.length; i += 2) {
@@ -396,6 +501,13 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return metadata;
     }
 
+    /**
+     * 向 StringBuilder 追加一行 "label: value"，value 为空时跳过。
+     *
+     * @param builder 字符串构建器
+     * @param label   标签
+     * @param value   值
+     */
     private void appendLine(StringBuilder builder, String label, Object value) {
         if (value == null) {
             return;
@@ -406,10 +518,22 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         }
     }
 
+    /**
+     * 规范化页码，非法值返回默认值。
+     *
+     * @param pageNum 原始页码
+     * @return 安全页码
+     */
     private long normalizePageNum(Long pageNum) {
         return pageNum == null || pageNum <= 0 ? DEFAULT_PAGE_NUM : pageNum;
     }
 
+    /**
+     * 规范化页大小，非法值返回默认值，超过上限则截断。
+     *
+     * @param pageSize 原始页大小
+     * @return 安全页大小
+     */
     private long normalizePageSize(Long pageSize) {
         if (pageSize == null || pageSize <= 0) {
             return DEFAULT_PAGE_SIZE;
@@ -417,14 +541,34 @@ public class InterviewQuestionBankServiceImpl implements InterviewQuestionBankSe
         return Math.min(pageSize, MAX_PAGE_SIZE);
     }
 
+    /**
+     * 字符串空值兜底，无有效内容时返回默认值。
+     *
+     * @param value        原始字符串
+     * @param defaultValue 默认值
+     * @return 有效字符串或默认值
+     */
     private String defaultIfBlank(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value.trim() : defaultValue;
     }
 
+    /**
+     * 字符串去首尾空白，null 原样返回。
+     *
+     * @param value 原始字符串
+     * @return 去空白后的字符串或 null
+     */
     private String trim(String value) {
         return StringUtils.hasText(value) ? value.trim() : value;
     }
 
+    /**
+     * 计算文本的 SHA-256 哈希值。
+     *
+     * @param text 原始文本
+     * @return 十六进制哈希字符串
+     * @throws IllegalStateException 算法初始化失败时抛出
+     */
     private String sha256(String text) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

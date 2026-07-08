@@ -8,8 +8,14 @@ import com.job.common.vo.preference.UserJobPreferenceVO;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:用户求职偏好服务
+ * 用户求职偏好服务接口。
+ *
+ * <p>核心职责：管理用户的求职意向、期望薪资、目标城市等偏好配置，并基于偏好提供岗位推荐。</p>
+ *
+ * <p>所属业务模块：用户中心 - 求职偏好</p>
+ *
+ * <p>主要调用链：
+ * UserJobPreferenceController / FrontHomeService -&gt; UserJobPreferenceService -&gt; UserJobPreferenceServiceImpl -&gt; UserJobPreferenceRepository / JobPositionRepository</p>
  */
 public interface UserJobPreferenceService {
 

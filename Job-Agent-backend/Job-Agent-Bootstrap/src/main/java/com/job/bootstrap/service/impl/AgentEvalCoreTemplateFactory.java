@@ -11,12 +11,34 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 功能:Agent Eval 核心链路模板用例工厂。
+ * Agent Eval 核心链路模板用例工厂，负责构造五类核心链路测试用例。
  *
- * 设计说明:
+ * <p>核心职责：
+ * 按固定顺序构造五类核心链路模板（TOOL_CALL、RAG_RETRIEVAL、MEMORY_RECALL、GUARDRAIL、JSON_OUTPUT），
+ * 覆盖 Agent 最核心的五个能力维度。工厂只负责构造模板用例实体，不直接操作数据库。
+ * Service 层负责把已有模板传进来，工厂根据 overwrite 决定跳过还是重新生成。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Eval 子模块（模板用例构建层）。</p>
+ *
+ * <p>主要调用链：
+ * 后台 -> AgentEvalService.createCoreTemplates
+ * -> AgentEvalCoreTemplateFactory.buildTemplates
+ * -> toolCallTemplate / ragRetrievalTemplate / memoryRecallTemplate / guardrailTemplate / jsonOutputTemplate
+ * -> 返回 AgentEvalCoreTemplateCreateResultVO（含创建数与跳过类型）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>这个类只负责构造模板用例，不直接操作数据库；</li>
+ *   <li>核心链路固定覆盖五类：工具调用、RAG 召回、记忆召回、Guardrails、JSON 输出；</li>
+ *   <li>Service 层会把已有模板传进来，工厂根据 overwrite 决定跳过还是重新生成。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 这个类只负责构造模板用例，不直接操作数据库。
  * 2. 核心链路固定覆盖五类: 工具调用、RAG 召回、记忆召回、Guardrails、JSON 输出。
- * 3. Service 层会把已有模板传进来，工厂根据 overwrite 决定跳过还是重新生成。
+ * 3. Service 层会把已有模板传进来，工厂根据 overwrite 决定跳过还是重新生成。</p>
+ *
+ * 作者: hfj
  */
 @Component
 public class AgentEvalCoreTemplateFactory {

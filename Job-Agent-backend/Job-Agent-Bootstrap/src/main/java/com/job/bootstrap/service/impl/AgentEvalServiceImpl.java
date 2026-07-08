@@ -57,14 +57,40 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 作者:hfj
- * 功能:Agent Eval 平台服务实现
- * 日期:2026/6/24
+ * Agent Eval 评测平台服务实现，负责对 Agent 核心链路进行端到端回归评测。
  *
- * 设计说明:
+ * <p>核心职责：
+ * 管理 Eval 数据集、用例、运行批次与结果，提供单条/数据集/全量三种回归模式。
+ * 执行用例时完整调用真实 AgentChatService，走完整模型-Planner-Executor-Tool-RAG 链路。
+ * 评测维度覆盖工具选择、参数准确率、RAG 命中率、回答质量与 LLM-as-Judge 五项。
+ * 每次运行自动与基准批次对比，方便判断 Prompt、模型或工具改动是否退化。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Eval 子模块（评测回归平台）。</p>
+ *
+ * <p>主要调用链：
+ * 后台触发 -> AgentEvalService.runCase/runDataset/runAll
+ * -> AgentEvalServiceImpl.executeCase
+ * -> AgentChatService.chat（真实 Agent 链路）
+ * -> AgentTraceLogMapper（提取 Trace）
+ * -> evaluateCase（规则评分 + LLM-as-Judge）
+ * -> finishRun（统计 + 基准对比）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>调用 AgentChatService 走完整 Agent 链路，评测结果反映真实线上能力；</li>
+ *   <li>调用 AiModelGatewayService.chat（sceneCode=EVAL_JUDGE）完成 LLM-as-Judge，复用模型网关能力；</li>
+ *   <li>第二版引入 LLM-as-Judge，但仍保留规则分，避免模型裁判失败时整条评测不可用；</li>
+ *   <li>工具选择、参数准确率、RAG 命中率使用确定性规则判断，保证核心指标可复现；</li>
+ *   <li>每次运行自动与基准批次对比，方便判断 Prompt、模型或工具改动是否退化。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 第二版引入 LLM-as-Judge，但仍保留规则分，避免模型裁判失败时整条评测不可用。
  * 2. 工具选择、参数准确率、RAG 命中率仍然使用确定性规则判断，保证核心指标可复现。
- * 3. 每次运行会自动和当前数据集/全量基准批次对比，方便判断 Prompt、模型或工具改动是否退化。
+ * 3. 每次运行会自动和当前数据集/全量基准批次对比，方便判断 Prompt、模型或工具改动是否退化。</p>
+ *
+ * 作者: hfj
+ * 日期: 2026/6/24
  */
 @Service
 @RequiredArgsConstructor

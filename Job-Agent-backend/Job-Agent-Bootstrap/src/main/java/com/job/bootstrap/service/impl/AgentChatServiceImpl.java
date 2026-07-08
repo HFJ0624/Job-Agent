@@ -44,15 +44,46 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
+ * AI 助手聊天服务实现，是 Agent 主链路的统一入口与编排者。
+ *
+ * <p>核心职责：
+ * 1. 获取或创建 AI 会话，保存用户消息。
+ * 2. 执行 Guardrails 输入检查与脱敏。
+ * 3. 调用意图路由器识别用户意图。
+ * 4. 调用 Planner 生成或复用 Agent 计划。
+ * 5. 拦截需要澄清或缺工具确认的请求。
+ * 6. 设置 AgentRuntimeContext，调用 Executor 确定性执行计划。
+ * 7. 召回长期记忆并调用模型网关生成总结回复。
+ * 8. 保存助手回复与主链路 Trace，异常也必须落 Trace。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Service 层。</p>
+ *
+ * <p>主要调用链：
+ * 前端 -> AgentChatController -> AgentChatServiceImpl.chat
+ * -> AgentGuardrailService (输入检查)
+ * -> AgentIntentRouter (意图识别)
+ * -> AgentPlanningService (生成计划)
+ * -> AgentPlanExecutorService (执行计划 + Tool Calling)
+ * -> AgentMemoryContextService (召回长期记忆)
+ * -> AiModelGatewayService (AGENT_SUMMARY 场景总结)
+ * -> AgentGuardrailService (输出脱敏)
+ * -> AgentTraceService (落 Trace)</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AgentPlanningService 负责把用户目标拆成可执行 Plan；</li>
+ *   <li>AgentPlanExecutorService 按 Plan 顺序确定性调用 Tool，避免模型自主乱调；</li>
+ *   <li>AgentMemoryCaptureService 在用户消息入库后捕获自然语言事实；</li>
+ *   <li>AgentMemoryContextService 在 Planner 前和 Summary 前构造压缩记忆上下文；</li>
+ *   <li>AiModelGatewayService 提供数据库可配置的模型与 Prompt 网关，失败时降级为确定性兜底摘要；</li>
+ *   <li>AgentTraceService 贯穿主链路，工具内部 Trace 通过 ThreadLocal 共享 traceId。</li>
+ * </ul></p>
+ *
+ * <p>Agent 执行阶段说明：
+ * 输入校验 -> 意图识别 -> 计划生成/复用 -> 澄清/确认拦截 -> 上下文设置
+ * -> 工具执行 (Observation 写入 Trace) -> 记忆召回 -> 总结生成 -> 输出脱敏 -> Trace 落库</p>
+ *
  * 作者:hfj
- * 功能:AI 助手聊天服务实现
- * 职责：
- * 1. 获取或创建 AI 会话。
- * 2. 保存用户消息。
- * 3. 设置 AgentRuntimeContext。
- * 4. 调用 LangChain4j Agent。
- * 5. 保存助手回复。
- * 6. 保存主链路 Trace。
  * 日期: 2026/6/8 15:20
  */
 @Slf4j
@@ -133,14 +164,29 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final ObjectMapper objectMapper;
 
     /**
-     * 执行一次 AI 对话。
+     * 执行一次 AI 对话，是 Agent 主链路的统一入口。
      *
-     * @param userId 当前登录用户ID
-     * @param conversationId 会话ID，可以为空
-     * @param planId 已存在的计划ID，可以为空
-     * @param message 用户输入
-     * @param confirmedToolNames 本轮用户已确认允许执行的工具名
-     * @return Agent 回复
+     * <p>核心处理流程：
+     * 1. 生成 traceId，贯穿主对话、工具调用与异常日志。
+     * 2. Guardrails 输入检查，拦截注入、越权等安全风险。
+     * 3. 对用户消息做 PII 脱敏，得到进入模型上下文的 safeMessage。
+     * 4. 识别用户意图，便于 Trace 分类与后续编排。
+     * 5. 若前端传入 planId，复用已有计划及其 conversationId。
+     * 6. 获取或创建会话，保存用户原始消息。
+     * 7. 捕获用户消息中的长期记忆（失败不影响主流程）。
+     * 8. 在 Planner 前构造长期记忆上下文，补充城市、岗位等参数。
+     * 9. 创建或复用计划，处理需要澄清 / 需要工具确认的分支。
+     * 10. 设置 AgentRuntimeContext，调用 Executor 确定性执行计划。
+     * 11. 召回长期记忆，调用模型网关生成总结回复并做输出脱敏。
+     * 12. 保存助手消息、更新会话时间、写入主链路 Trace。
+     * 13. 异常也必须落 Trace，最后清理 ThreadLocal，避免线程池串用户。</p>
+     *
+     * @param userId 当前登录求职用户唯一标识，用于加载用户画像、历史记忆和鉴权
+     * @param conversationId 会话 ID，为空时自动创建新会话；继续已有计划时会复用原会话
+     * @param planId 已存在的计划 ID，为空表示新建计划；非空表示继续执行（如用户确认工具后再次请求）
+     * @param message 用户原始输入文本，会按原样保存到聊天记录，但进入模型上下文前会脱敏
+     * @param confirmedToolNames 本轮用户已确认允许执行的工具名列表，用于放行需要确认的副作用工具
+     * @return Agent 回复，包含会话 ID、计划 ID、回复正文、是否需要用户确认及待确认工具名
      */
     @Override
     @Transactional(rollbackFor = Exception.class)

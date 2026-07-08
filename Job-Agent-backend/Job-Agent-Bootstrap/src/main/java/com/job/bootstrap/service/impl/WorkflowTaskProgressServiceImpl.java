@@ -16,6 +16,33 @@ import java.util.List;
 
 /**
  * 工作流任务进度服务实现。
+ *
+ * <p>核心职责：记录工作流任务的阶段进度和日志，支持任务执行过程的可观测性和故障排查。</p>
+ *
+ * <p>所属业务模块：工作流调度模块（workflow）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>任务执行器在每个阶段完成后调用 {@link #recordProgress} 记录进度；</li>
+ *   <li>进度同时更新任务主表和写入日志表，列表页无需查日志即可看到最新状态；</li>
+ *   <li>管理员或前端调用 {@link #listLogs} 查看任务完整执行日志。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link WorkflowTaskMapper} 更新任务主表进度；</li>
+ *   <li>依赖 {@link WorkflowTaskLogMapper} 写入阶段日志。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>进度记录采用双写模式，任务表存最新状态，日志表存完整轨迹；</li>
+ *   <li>进度百分比限制在 0-100 范围内，非法值自动归边；</li>
+ *   <li>日志按创建时间正序排列，便于按时间线展示执行过程。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -62,6 +89,12 @@ public class WorkflowTaskProgressServiceImpl implements WorkflowTaskProgressServ
         workflowTaskLogMapper.insert(log);
     }
 
+    /**
+     * 查询任务日志列表，按创建时间正序排列。
+     *
+     * @param taskId 任务 ID
+     * @return 日志 VO 列表
+     */
     @Override
     public List<WorkflowTaskLogVO> listLogs(Long taskId) {
         return workflowTaskLogMapper.selectList(new LambdaQueryWrapper<WorkflowTaskLog>()
@@ -74,6 +107,12 @@ public class WorkflowTaskProgressServiceImpl implements WorkflowTaskProgressServ
                 .toList();
     }
 
+    /**
+     * 规范化进度百分比，限制在 0-100 范围内，null 保留原样。
+     *
+     * @param progressPercent 原始进度
+     * @return 规范化后的进度
+     */
     private Integer normalizeProgress(Integer progressPercent) {
         if (progressPercent == null) {
             return null;

@@ -19,8 +19,37 @@ import java.util.Date;
 import java.util.UUID;
 
 /**
+ * Agent 统一观测事件写入服务实现，是 Observation 模块的统一落库入口。
+ *
+ * <p>核心职责：
+ * 1. 接收 AgentChatService、AgentPlanExecutorService、AgentTraceService、AiModelGatewayService
+ *    等组件上报的观测事件，统一写入 agent_observation_event 表。
+ * 2. 推断失败分类（NONE/TOOL_CONFIRMATION/PERMISSION_DENIED/PARAM_MISSING/GUARDRAIL_BLOCKED
+ *    /TIMEOUT/MODEL_ERROR/TOOL_ERROR/SYSTEM_ERROR），便于后台按维度筛选。
+ * 3. 对请求/响应快照做 PII 脱敏，避免观测数据泄露手机号、邮箱、token。
+ * 4. 写入失败仅记 warn 日志，绝不影响 Agent 主流程。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Observability Service 层。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl (主链路 Trace) -> AgentTraceServiceImpl -> AgentObservationServiceImpl
+ * AgentPlanExecutorServiceImpl (Executor 步骤事件) -> AgentObservationServiceImpl
+ * AiModelGatewayServiceImpl (模型调用事件) -> AgentObservationServiceImpl
+ * 工具内部 (Tool 事件) -> AgentTraceServiceImpl -> AgentObservationServiceImpl</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AgentTraceService 写 Trace 时同步写一条 Observation 事件，形成完整链路；</li>
+ *   <li>AgentRuntimeContext 提供兜底的 traceId / planId / stepId，避免调用方漏传；</li>
+ *   <li>AgentGuardrailService.maskSensitiveData 对快照做 PII 脱敏；</li>
+ *   <li>后台 ObservationDashboard 按 eventType/status/errorCategory 多维查询。</li>
+ * </ul></p>
+ *
+ * <p>Observation 写入逻辑说明：
+ * 调用方传 record -> buildEvent 补全链路字段 + 推断失败分类 + 序列化脱敏快照 -> 落库；
+ * 任何异常都吞掉并 warn，保证观测能力不影响线上业务。</p>
+ *
  * 作者: hfj
- * 功能: Agent 统一观测事件写入服务实现
  * 日期: 2026/6/22
  */
 @Slf4j

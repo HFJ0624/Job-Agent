@@ -5,8 +5,14 @@ import com.job.common.dto.agent.AgentTraceLogQueryDTO;
 import com.job.common.vo.agent.AgentTraceLogVO;
 
 /**
- * 作者:hfj
- * 功能:后台 Agent Trace 日志服务
+ * 后台 Agent Trace 日志服务接口。
+ *
+ * <p>核心职责：为研发和运维人员提供 Agent Trace 日志的分页查询和详情查看，支持链路追踪和问题定位。</p>
+ *
+ * <p>所属业务模块：后台管理 - Agent 运维</p>
+ *
+ * <p>主要调用链：
+ * AdminAgentTraceLogController -&gt; AdminAgentTraceLogService -&gt; AdminAgentTraceLogServiceImpl -&gt; AgentTraceLogRepository</p>
  */
 public interface AdminAgentTraceLogService {
 

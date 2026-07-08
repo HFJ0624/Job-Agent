@@ -21,13 +21,36 @@ import java.math.RoundingMode;
 import java.util.*;
 
 /**
- * 作者:hfj
- * 功能:用户求职偏好服务实现
+ * 用户求职偏好服务实现。
  *
- * 推荐算法说明:
- * 1. 第一版采用规则推荐，不依赖大模型，保证稳定可解释。
- * 2. 推荐分由岗位方向、城市、薪资、技能、学历、经验等维度组成。
- * 3. 后续可以加入 Embedding 相似度或 LLM 综合评价。
+ * <p>核心职责：管理用户求职偏好的持久化，并基于规则算法为用户推荐匹配岗位，提供可解释的推荐分数和匹配原因。</p>
+ *
+ * <p>所属业务模块：用户中心模块（user）/ 岗位推荐模块（recommend）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>用户填写求职偏好后，调用 {@link #saveOrUpdatePreference} 保存；</li>
+ *   <li>前端首页或推荐页调用 {@link #recommendJobs} 获取匹配岗位列表；</li>
+ *   <li>内部按岗位方向、城市、薪资、技能、学历、经验等维度打分排序后返回。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link UserJobPreferenceMapper} 进行偏好数据持久化；</li>
+ *   <li>依赖 {@link JobPositionService} 查询候选岗位；</li>
+ *   <li>依赖 {@link JobCompanyService} 补全公司信息。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>第一版采用规则推荐，不依赖大模型，保证稳定可解释；</li>
+ *   <li>推荐分由岗位方向（15分）、城市（20分）、薪资（15分）、技能（35分）、学历经验（10分）、工作类型（5分）组成，满分100；</li>
+ *   <li>候选岗位先按关键词和城市粗筛，再在内存中打分排序，数据量不大时简单稳定；</li>
+ *   <li>后续可以加入 Embedding 相似度或 LLM 综合评价，替换 scoreJob 方法即可。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -445,6 +468,13 @@ public class UserJobPreferenceServiceImpl implements UserJobPreferenceService {
                 .toList();
     }
 
+    /**
+     * 判断源文本中是否包含目标文本（不区分大小写）。
+     *
+     * @param source 源文本
+     * @param target 目标文本
+     * @return 包含返回 true，否则返回 false
+     */
     private boolean containsIgnoreCase(String source, String target) {
         if (!StringUtils.hasText(source) || !StringUtils.hasText(target)) {
             return false;
@@ -453,12 +483,25 @@ public class UserJobPreferenceServiceImpl implements UserJobPreferenceService {
         return source.toLowerCase(Locale.ROOT).contains(target.toLowerCase(Locale.ROOT));
     }
 
+    /**
+     * 判断两个字符串是否相等（不区分大小写），任一为空返回 false。
+     *
+     * @param a 字符串 a
+     * @param b 字符串 b
+     * @return 相等返回 true，否则返回 false
+     */
     private boolean equalsIgnoreCase(String a, String b) {
         return StringUtils.hasText(a)
                 && StringUtils.hasText(b)
                 && a.equalsIgnoreCase(b);
     }
 
+    /**
+     * 字符串去首尾空白，无有效内容时返回 null。
+     *
+     * @param value 原始字符串
+     * @return 去空白后的字符串或 null
+     */
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }

@@ -29,9 +29,38 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 作者:hfj
- * 功能:用户端首页聚合服务实现，统一从数据库读取首页需要的真实数据
- * 日期:2026/6/24
+ * 用户端首页聚合服务实现。
+ *
+ * <p>核心职责：聚合首页所需的推荐岗位、热门公司和简历匹配报告，基于真实数据库数据生成，不编造不存在的评分或匹配度。</p>
+ *
+ * <p>所属业务模块：用户端首页模块（front-home）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>前端调用 {@link #getOverview} 获取首页聚合数据；</li>
+ *   <li>内部查询最新已发布岗位作为推荐岗位；</li>
+ *   <li>按已发布岗位数量统计热门公司；</li>
+ *   <li>查询用户默认简历和最新评分，生成简历匹配报告和 AI 建议。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link JobPositionService} 查询推荐岗位；</li>
+ *   <li>依赖 {@link JobCompanyService} 查询公司信息；</li>
+ *   <li>依赖 {@link JobResumeService} 查询用户简历；</li>
+ *   <li>依赖 {@link JobResumeScoreService} 获取简历评分。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>首页数据全部来自真实数据库，不返回假数据；</li>
+ *   <li>推荐岗位取最新发布的已发布状态岗位；</li>
+ *   <li>热门公司基于实际已发布岗位数统计，保证数据真实性；</li>
+ *   <li>AI 建议根据用户是否有简历、是否有评分、评分高低和推荐岗位数量动态生成。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor

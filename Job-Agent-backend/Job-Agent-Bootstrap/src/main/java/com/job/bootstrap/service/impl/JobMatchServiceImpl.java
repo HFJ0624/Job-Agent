@@ -22,13 +22,37 @@ import java.math.RoundingMode;
 import java.util.*;
 
 /**
- * 作者:hfj
- * 功能:岗位匹配服务实现类
- * 设计思路:
- * 1. 第一版采用规则评分，不依赖大模型，保证稳定可控。
- * 2. 评分维度包括技能匹配、项目经验匹配、基础条件匹配、求职偏好匹配。
- * 3. 后续可以把本服务封装成 JobMatchTool，供 Agent 自动调用。
- * 日期: 2026/6/8 11:00
+ * 岗位匹配服务实现。
+ *
+ * <p>核心职责：基于规则评分计算简历与岗位的匹配度，输出匹配分、匹配等级、已匹配/缺失技能、优势、风险点和建议。
+ * 第一版不依赖大模型，保证稳定可控、可解释、可测试。</p>
+ *
+ * <p>所属业务模块：求职匹配 - 简历岗位规则匹配核心服务</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>用户触发 / Agent 调用：Controller -> {@link #matchJob}</li>
+ *   <li>数据准备：读取简历原文、岗位信息、提取技能关键词</li>
+ *   <li>四维评分：技能匹配(40%) + 项目经验(25%) + 基础条件(20%) + 求职偏好(15%)</li>
+ *   <li>持久化：保存 {@link JobMatchRecord} 并返回 {@link JobMatchVO}</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link JobResumeService}：读取简历信息，必要时自动解析简历原文</li>
+ *   <li>{@link JobPositionService}：读取岗位详情</li>
+ *   <li>{@link JobApplyDecisionServiceImpl}：投递决策服务复用匹配结果，避免重复计算</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>第一版采用规则评分，不依赖大模型，保证稳定可控。</li>
+ *   <li>评分维度包括技能匹配、项目经验匹配、基础条件匹配、求职偏好匹配。</li>
+ *   <li>后续可以把本服务封装成 JobMatchTool，供 Agent 自动调用。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -41,7 +65,22 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     private final ObjectMapper objectMapper;
 
     /**
-     * 执行岗位匹配。
+     * 执行简历与岗位的匹配评分。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验简历归属，无解析文本时自动触发解析。</li>
+     *   <li>读取并校验岗位信息。</li>
+     *   <li>提取岗位技能关键词，计算四维匹配分。</li>
+     *   <li>保存匹配记录并返回 VO。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param jobId    岗位 ID
+     * @return 岗位匹配结果，包含匹配分、等级、技能命中情况等
+     * @throws BizException 简历无解析文本、岗位不存在或已删除
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -107,7 +146,12 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 查询最近一次岗位匹配记录。
+     * 查询指定简历与岗位最近一次匹配记录。
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param jobId    岗位 ID
+     * @return 最近一次的匹配结果，不存在时返回 null
      */
     @Override
     public JobMatchVO getLatestMatch(Long userId, Long resumeId, Long jobId) {
@@ -128,11 +172,17 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     /**
      * 计算岗位匹配分。
      *
-     * 评分公式:
+     * <p>评分公式：
      * 最终匹配分 = 技能匹配分 * 40%
      *          + 项目经验匹配分 * 25%
      *          + 基础条件匹配分 * 20%
-     *          + 求职偏好匹配分 * 15%
+     *          + 求职偏好匹配分 * 15%</p>
+     *
+     * @param resumeText     简历原文
+     * @param jobText        岗位文本
+     * @param job            岗位信息
+     * @param requiredSkills 岗位要求的技能关键词
+     * @return 完整的匹配评分中间结果
      */
     private MatchScoreDetail calculateMatchScore(
             String resumeText,
@@ -172,8 +222,14 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 技能匹配分，满分100。
-     * 说明：岗位要求的技能命中越多，分数越高。
+     * 计算技能匹配分，满分 100。
+     *
+     * <p>通过简历原文与岗位技能关键词的文本匹配计算命中率，
+     * 返回匹配分、已匹配技能和缺失技能。</p>
+     *
+     * @param resumeText     简历原文
+     * @param requiredSkills 岗位要求的技能关键词
+     * @return 技能匹配中间结果
      */
     private SkillMatchResult calculateSkillScore(String resumeText, List<String> requiredSkills) {
         if (requiredSkills.isEmpty()) {
@@ -197,8 +253,15 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 项目经验匹配分，满分100。
-     * 说明：不仅看简历有没有技能，还要看技能是否出现在项目、系统、模块、优化等上下文中。
+     * 计算项目经验匹配分，满分 100。
+     *
+     * <p>不仅看简历有没有技能，还通过关键词判断技能是否出现在项目、系统、模块、优化等上下文中，
+     * 以及是否有量化指标（QPS、并发、性能提升等）。</p>
+     *
+     * @param resumeText    简历原文
+     * @param jobText       岗位文本
+     * @param matchedSkills 已匹配的技能列表
+     * @return 项目经验匹配分
      */
     private BigDecimal calculateProjectScore(String resumeText, String jobText, List<String> matchedSkills) {
         double score = 40;
@@ -223,8 +286,14 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 基础条件匹配分，满分100。
-     * 说明：第一版先从简历文本里粗略判断学历和经验，后续可以改成读取用户资料表。
+     * 计算基础条件匹配分，满分 100。
+     *
+     * <p>第一版先从简历文本里粗略判断学历和经验是否满足岗位要求，
+     * 不满足时按规则扣分。后续可改成读取用户资料表做精确匹配。</p>
+     *
+     * @param resumeText 简历原文
+     * @param job        岗位信息
+     * @return 基础条件匹配分
      */
     private BigDecimal calculateConditionScore(String resumeText, JobPosition job) {
         double score = 100;
@@ -248,9 +317,14 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 求职偏好匹配分，满分100。
-     * 说明：第一版没有接 user_job_preference 时，先按岗位本身给中高分。
-     * 后续可以读取用户期望城市、薪资、行业、公司规模后再精细计算。
+     * 计算求职偏好匹配分，满分 100。
+     *
+     * <p>第一版未接入 user_job_preference 时，先按岗位本身信息给中高分。
+     * 若简历文本中出现岗位所在城市，或岗位有明确薪资范围，则适当加分。</p>
+     *
+     * @param resumeText 简历原文
+     * @param job        岗位信息
+     * @return 求职偏好匹配分
      */
     private BigDecimal calculatePreferenceScore(String resumeText, JobPosition job) {
         double score = 80;
@@ -268,6 +342,12 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
 
     /**
      * 从岗位文本和 skillKeywords 字段提取技能关键词。
+     *
+     * <p>优先使用岗位表 skill_keywords 字段，再从岗位描述中命中常见技术关键词做补充。</p>
+     *
+     * @param jobText       岗位文本
+     * @param skillKeywords 岗位表技能关键词字段
+     * @return 去重后的技能关键词列表
      */
     private List<String> extractRequiredSkills(String jobText, String skillKeywords) {
         Set<String> result = new LinkedHashSet<>();
@@ -298,7 +378,13 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 生成优势说明。
+     * 生成岗位匹配优势说明。
+     *
+     * @param skillScore    技能匹配分
+     * @param projectScore  项目经验匹配分
+     * @param conditionScore 基础条件匹配分
+     * @param matchedSkills 已匹配技能列表
+     * @return 优势说明列表
      */
     private List<String> buildAdvantages(
             BigDecimal skillScore,
@@ -332,7 +418,12 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 生成风险点。
+     * 生成岗位匹配风险点说明。
+     *
+     * @param missingSkills  缺失技能列表
+     * @param conditionScore 基础条件匹配分
+     * @param projectScore   项目经验匹配分
+     * @return 风险点说明列表
      */
     private List<String> buildRiskPoints(
             List<String> missingSkills,
@@ -357,7 +448,12 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 生成优化建议。
+     * 生成简历优化和投递建议。
+     *
+     * @param missingSkills 缺失技能列表
+     * @param projectScore  项目经验匹配分
+     * @param job           岗位信息
+     * @return 优化建议列表
      */
     private List<String> buildSuggestions(List<String> missingSkills, BigDecimal projectScore, JobPosition job) {
         List<String> suggestions = new ArrayList<>();
@@ -382,7 +478,10 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 根据分数生成匹配等级。
+     * 根据匹配分数映射匹配等级。
+     *
+     * @param score 匹配分数
+     * @return 匹配等级，如 "高度匹配"、"较匹配"、"一般匹配"、"不匹配"
      */
     private String resolveMatchLevel(BigDecimal score) {
         double value = score.doubleValue();
@@ -400,7 +499,13 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 判断学历是否可能满足。
+     * 判断简历学历是否可能满足岗位要求。
+     *
+     * <p>第一版基于简历文本关键词做粗略判断，"不限"时直接通过。</p>
+     *
+     * @param resumeText  简历原文
+     * @param educationReq 岗位学历要求
+     * @return 是否可能满足
      */
     private boolean maySatisfyEducation(String resumeText, String educationReq) {
         if (!StringUtils.hasText(educationReq)) {
@@ -427,7 +532,10 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 拼接岗位文本。
+     * 拼接岗位相关文本，用于统一关键词匹配。
+     *
+     * @param job 岗位信息
+     * @return 包含岗位名称、描述、要求和技能关键词的合并文本
      */
     private String buildJobText(JobPosition job) {
         return normalizeText(
@@ -438,6 +546,13 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
         );
     }
 
+    /**
+     * 判断文本中是否包含任意一个关键词（不区分大小写）。
+     *
+     * @param text     待检查文本
+     * @param keywords 关键词列表
+     * @return 包含任一关键词时返回 true
+     */
     private boolean containsAny(String text, List<String> keywords) {
         String lowerText = safe(text).toLowerCase(Locale.ROOT);
 
@@ -450,6 +565,12 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
         return false;
     }
 
+    /**
+     * 规范化文本，统一换行符和制表符。
+     *
+     * @param text 原始文本
+     * @return 规范化后的文本
+     */
     private String normalizeText(String text) {
         return safe(text)
                 .replace("\r\n", "\n")
@@ -458,18 +579,42 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
                 .trim();
     }
 
+    /**
+     * 空值安全的字符串转换，null 时返回空字符串。
+     *
+     * @param text 原始字符串
+     * @return 非空字符串
+     */
     private String safe(String text) {
         return text == null ? "" : text;
     }
 
+    /**
+     * double 转 BigDecimal，保留两位小数。
+     *
+     * @param value 原始 double 值
+     * @return 保留两位小数的 BigDecimal
+     */
     private BigDecimal decimal(double value) {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * 将字符串列表按换行符拼接为单字符串。
+     *
+     * @param lines 字符串列表
+     * @return 拼接后的文本，空列表时返回空字符串
+     */
     private String joinLines(List<String> lines) {
         return lines == null || lines.isEmpty() ? "" : String.join("\n", lines);
     }
 
+    /**
+     * 将对象序列化为 JSON 字符串。
+     *
+     * @param value 待序列化对象
+     * @return JSON 字符串，失败时返回 "[]"
+     */
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);

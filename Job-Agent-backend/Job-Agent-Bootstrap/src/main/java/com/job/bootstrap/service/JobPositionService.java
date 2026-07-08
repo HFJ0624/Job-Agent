@@ -8,9 +8,14 @@ import com.job.common.vo.position.PositionImportVO;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 作者:hfj
- * 功能:岗位业务服务接口，定义岗位分页、增删改查、发布下架和 Excel 导入能力
- * 日期:2026/6/6 15:20
+ * 岗位业务服务接口。
+ *
+ * <p>核心职责：管理岗位信息的全生命周期，包括分页查询、增删改查、发布下架及批量 Excel 导入。</p>
+ *
+ * <p>所属业务模块：岗位管理 - 岗位信息</p>
+ *
+ * <p>主要调用链：
+ * JobPositionController / FrontHomeController -&gt; JobPositionService -&gt; JobPositionServiceImpl -&gt; JobPositionRepository / JobCompanyService</p>
  */
 public interface JobPositionService extends IService<JobPosition> {
 

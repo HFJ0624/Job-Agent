@@ -24,8 +24,36 @@ import org.springframework.util.StringUtils;
 import java.util.*;
 
 /**
- * 作者:hfj
- * 功能:求职投递记录服务实现
+ * 求职投递记录服务实现。
+ *
+ * <p>核心职责：管理用户求职全生命周期记录，包括新增/更新求职记录、状态流转、分页查询、统计和删除。
+ * 状态进入面试中时自动触发求职跟进 Agent 的面试准备链路。</p>
+ *
+ * <p>所属业务模块：求职管理 - 投递进度跟踪核心服务</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>用户操作：Controller -> saveApplication / updateStatus / deleteApplication</li>
+ *   <li>状态流转：updateStatus -> {@link ApplicationFollowUpAgentService#onInterviewScheduled}</li>
+ *   <li>数据层：{@link JobApplicationRecordMapper}</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link JobPositionService} / {@link JobCompanyService}：保存岗位快照时读取岗位和公司信息</li>
+ *   <li>{@link ApplicationFollowUpAgentService}：面试状态变更后触发自动跟进、提醒和邮件通知</li>
+ *   <li>{@link JobApplicationRecordMapper}：求职记录持久化</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>同一个用户对同一个岗位只保留一条求职记录，重复添加时更新已有记录。</li>
+ *   <li>创建时保存岗位快照，避免后续岗位被修改或删除后影响求职进度展示。</li>
+ *   <li>BaseEntity 使用 {@code @TableLogic}，deleteById 执行逻辑删除。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -49,9 +77,19 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     /**
      * 新增或更新求职记录。
      *
-     * 说明:
-     * 1. 同一个用户对同一个岗位只保留一条求职记录。
-     * 2. 用户重复点击“加入求职进度”时，更新已有记录。
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验岗位是否存在。</li>
+     *   <li>查询当前用户对该岗位是否已有记录；无则新建，有则更新。</li>
+     *   <li>新建时保存岗位快照（公司、岗位、城市、薪资），状态设为 INTERESTED。</li>
+     *   <li>更新时允许修改简历、状态、优先级、HR 信息、时间和备注。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId 当前登录用户 ID
+     * @param dto    保存请求，包含岗位 ID、简历 ID、状态、优先级等信息
+     * @return 保存后的求职记录 VO
+     * @throws BizException 岗位不存在
      */
     @Override
     public JobApplicationVO saveApplication(Long userId, JobApplicationSaveDTO dto) {
@@ -121,7 +159,14 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 分页查询求职记录。
+     * 分页查询当前用户的求职记录。
+     *
+     * <p>支持按状态、城市、优先级和关键词（岗位名/公司名/备注）筛选，
+     * 默认按下次跟进时间升序、更新时间降序排列。</p>
+     *
+     * @param userId 当前登录用户 ID
+     * @param query  分页查询条件
+     * @return 分页求职记录列表
      */
     @Override
     public IPage<JobApplicationVO> pageApplications(Long userId, JobApplicationQueryDTO query) {
@@ -172,7 +217,22 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 修改求职状态。
+     * 修改求职记录状态。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验记录归属。</li>
+     *   <li>规范化新状态并更新记录。</li>
+     *   <li>自动补充时间字段：APPLIED 时记录投递时间，INTERVIEWING 时记录面试时间。</li>
+     *   <li>状态变为 INTERVIEWING 后，调用 {@link ApplicationFollowUpAgentService#onInterviewScheduled} 触发自动跟进。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId 当前登录用户 ID
+     * @param id     求职记录 ID
+     * @param dto    状态更新请求
+     * @return 更新后的求职记录 VO
+     * @throws BizException 求职记录不存在或无权限
      */
     @Override
     public JobApplicationVO updateStatus(Long userId, Long id, JobApplicationStatusUpdateDTO dto) {
@@ -213,6 +273,12 @@ public class JobApplicationServiceImpl implements JobApplicationService {
 
     /**
      * 删除求职记录。
+     *
+     * <p>基于 {@code @TableLogic} 执行逻辑删除，不会物理删除数据。</p>
+     *
+     * @param userId 当前登录用户 ID
+     * @param id     求职记录 ID
+     * @throws BizException 求职记录不存在或无权限
      */
     @Override
     public void deleteApplication(Long userId, Long id) {
@@ -224,6 +290,18 @@ public class JobApplicationServiceImpl implements JobApplicationService {
         jobApplicationRecordMapper.deleteById(record.getId());
     }
 
+    /**
+     * 同步面试进度到求职记录。
+     *
+     * <p>由沟通记录确认面试时调用，自动将求职状态推进到 INTERVIEWING，
+     * 并复用 {@link ApplicationFollowUpAgentService#onInterviewScheduled} 触发自动跟进。</p>
+     *
+     * @param userId         当前登录用户 ID
+     * @param applicationId  求职记录 ID
+     * @param interviewTime  面试时间
+     * @param nextFollowTime 下次跟进时间
+     * @throws SecurityException 无权更新该求职进度
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void syncInterviewProgress(
@@ -270,7 +348,13 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 查询统计信息。
+     * 查询当前用户求职统计信息。
+     *
+     * <p>统计维度包括：各状态数量分布、今日需跟进数、面试中数。
+     * 初始化所有状态计数为 0，保证前端即使数量为 0 也能正常展示。</p>
+     *
+     * @param userId 当前登录用户 ID
+     * @return 求职统计数据
      */
     @Override
     public JobApplicationStatsVO getStats(Long userId) {
@@ -312,7 +396,12 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 查询当前用户的一条求职记录。
+     * 查询并校验当前用户的求职记录。
+     *
+     * @param userId 当前登录用户 ID
+     * @param id     求职记录 ID
+     * @return 归属当前用户的求职记录
+     * @throws BizException 求职记录不存在或无权限访问
      */
     private JobApplicationRecord getUserRecordRequired(Long userId, Long id) {
         JobApplicationRecord record = jobApplicationRecordMapper.selectById(id);
@@ -325,7 +414,13 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 保存岗位快照。
+     * 保存岗位快照到求职记录。
+     *
+     * <p>将岗位的公司、标题、城市、薪资等信息快照写入求职记录，
+     * 避免后续岗位被修改或删除后影响求职进度展示。</p>
+     *
+     * @param record 求职记录
+     * @param job    岗位信息
      */
     private void fillJobSnapshot(JobApplicationRecord record, JobPosition job) {
         String companyName = jobCompanyService.getCompanyRequired(job.getCompanyId()).getCompanyName();
@@ -337,7 +432,10 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 格式化薪资。
+     * 格式化岗位薪资为可读文本。
+     *
+     * @param job 岗位信息
+     * @return 如 "15-25K"、"20K起"、"薪资面议"
      */
     private String formatSalary(JobPosition job) {
         Integer minSalary = job.getMinSalary();
@@ -362,7 +460,11 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 状态校验。
+     * 规范化求职状态，校验是否在支持的状态白名单内。
+     *
+     * @param status 原始状态值
+     * @return 规范化的标准状态
+     * @throws BizException 不支持的状态值
      */
     private String normalizeStatus(String status) {
         String value = status == null ? STATUS_INTERESTED : status.trim();
@@ -375,7 +477,11 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 优先级校验。
+     * 规范化优先级，校验是否在支持的优先级白名单内。
+     *
+     * @param priority 原始优先级值
+     * @return 规范化的标准优先级
+     * @throws BizException 不支持的优先级值
      */
     private String normalizePriority(String priority) {
         String value = priority == null ? PRIORITY_NORMAL : priority.trim();
@@ -388,7 +494,9 @@ public class JobApplicationServiceImpl implements JobApplicationService {
     }
 
     /**
-     * 所有状态。
+     * 返回支持的所有求职状态列表。
+     *
+     * @return 标准求职状态集合
      */
     private List<String> allStatuses() {
         return List.of(

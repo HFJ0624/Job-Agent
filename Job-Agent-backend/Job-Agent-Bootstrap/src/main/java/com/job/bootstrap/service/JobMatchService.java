@@ -5,8 +5,14 @@ import com.job.common.entity.match.JobMatchRecord;
 import com.job.common.vo.match.JobMatchVO;
 
 /**
- * 作者:hfj
- * 功能:岗位匹配服务接口
+ * 岗位匹配服务接口。
+ *
+ * <p>核心职责：基于用户简历与岗位 JD 进行智能匹配分析，计算匹配度并给出维度拆解，辅助用户评估投递价值。</p>
+ *
+ * <p>所属业务模块：求职辅助 - 岗位匹配</p>
+ *
+ * <p>主要调用链：
+ * JobMatchController / JobPositionController -&gt; JobMatchService -&gt; JobMatchServiceImpl -&gt; AiModelGatewayService / JobResumeService / JobPositionService</p>
  */
 public interface JobMatchService extends IService<JobMatchRecord> {
 

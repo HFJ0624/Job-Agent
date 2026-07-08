@@ -5,9 +5,14 @@ import com.job.common.vo.agent.AgentMemoryVO;
 import java.util.List;
 
 /**
- * 作者: hfj
- * 功能: Agent 长期记忆捕获服务
- * 日期: 2026/6/23
+ * Agent 长期记忆捕获服务接口。
+ *
+ * <p>核心职责：从用户自然语言输入中实时提取关键信息（如求职意向、技能变更、偏好调整），并转化为结构化长期记忆。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 长期记忆（Long-Term Memory）</p>
+ *
+ * <p>主要调用链：
+ * AgentChatService -&gt; AgentMemoryCaptureService -&gt; AgentMemoryCaptureServiceImpl -&gt; AiModelGatewayService / AgentMemoryService</p>
  */
 public interface AgentMemoryCaptureService {
 

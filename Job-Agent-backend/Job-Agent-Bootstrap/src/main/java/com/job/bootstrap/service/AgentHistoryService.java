@@ -6,8 +6,14 @@ import com.job.common.vo.agent.AgentMessageVO;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:AI 助手历史会话服务
+ * AI 助手历史会话服务接口。
+ *
+ * <p>核心职责：管理用户与 AI 助手的历史会话及消息记录，支持会话列表查询、消息回溯和会话删除。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 对话（Chat）</p>
+ *
+ * <p>主要调用链：
+ * AgentHistoryController -&gt; AgentHistoryService -&gt; AgentHistoryServiceImpl -&gt; AgentConversationRepository / AgentMessageRepository</p>
  */
 public interface AgentHistoryService {
 

@@ -28,7 +28,31 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 
 /**
- * 功能: 后台模拟面试管理服务实现。
+ * 后台模拟面试管理服务实现。
+ *
+ * <p>核心职责：为管理后台提供模拟面试会话的分页查询、详情查看、媒体记录列表、复盘查询与生成能力。
+ *
+ * <p>所属业务模块：面试训练中心 - 模拟面试管理（Admin Mock Interview）。
+ *
+ * <p>主要调用链：
+ * <ul>
+ *   <li>列表：{@code pageSessions} → 分页返回会话摘要。</li>
+ *   <li>详情：{@code getDetail} → 聚合会话、题目、回答、音频记录。</li>
+ *   <li>复盘：{@code getLatestReview / generateReview} → 复用用户端复盘服务。</li>
+ * </ul>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link MockInterviewReviewService}：前后台共用同一复盘服务，保证展示字段和计算口径一致。</li>
+ *   <li>{@link MockInterviewSessionMapper} / {@link MockInterviewQuestionMapper} / {@link MockInterviewAnswerMapper}：读取原始面试数据。</li>
+ * </ul>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>后台入口只有 sessionId，先读取会话获取 userId，再透传给用户端服务，保证数据权限校验不绕过。</li>
+ *   <li>列表页只查会话摘要，不带题目和音频，避免大数据量拖慢管理台。</li>
+ *   <li>详情和复盘直接复用用户端实现，避免前后台逻辑分叉。</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +66,14 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
     private final MockInterviewMediaRecordMapper mediaRecordMapper;
     private final MockInterviewReviewService mockInterviewReviewService;
 
+    /**
+     * 分页查询模拟面试会话列表。
+     *
+     * <p>支持按用户、岗位、简历、状态及关键词（岗位/公司名）过滤，仅返回会话摘要。
+     *
+     * @param query 查询条件
+     * @return 分页结果
+     */
     @Override
     public PageResult<MockInterviewSessionVO> pageSessions(MockInterviewSessionQueryDTO query) {
         Long pageNum = query.getPageNum() == null ? 1L : query.getPageNum();
@@ -67,6 +99,14 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
         return new PageResult<>(records, page.getTotal(), pageNum, pageSize);
     }
 
+    /**
+     * 获取模拟面试会话完整详情。
+     *
+     * <p>聚合会话、题目、回答及音频媒体记录，供管理台详情页展示。
+     *
+     * @param sessionId 会话 ID
+     * @return 会话详情 VO
+     */
     @Override
     public MockInterviewSessionVO getDetail(Long sessionId) {
         MockInterviewSession session = getExistingSession(sessionId);
@@ -87,6 +127,12 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
         return vo;
     }
 
+    /**
+     * 查询指定会话的所有音频媒体记录。
+     *
+     * @param sessionId 会话 ID
+     * @return 媒体记录列表
+     */
     @Override
     public List<MockInterviewMediaRecordVO> listMediaRecords(Long sessionId) {
         return mediaRecordMapper.selectList(new LambdaQueryWrapper<MockInterviewMediaRecord>()
@@ -98,24 +144,30 @@ public class AdminMockInterviewServiceImpl implements AdminMockInterviewService 
                 .toList();
     }
 
+    /**
+     * 查询指定会话最近一次复盘报告。
+     *
+     * <p>后台入口只有 sessionId，先读取会话获取 userId，再透传用户端复盘服务，保证数据权限校验不绕过。
+     *
+     * @param sessionId 会话 ID
+     * @return 复盘报告 VO
+     */
     @Override
     public MockInterviewReviewVO getLatestReview(Long sessionId) {
-        /*
-         * 1. 后台入口只有 sessionId，所以先读取会话拿到 userId。
-         * 2. 复盘服务内部仍会用 userId + sessionId 做数据范围校验。
-         * 3. 前后台共用同一个复盘聚合服务，避免展示字段和计算口径分叉。
-         */
         MockInterviewSession session = getExistingSession(sessionId);
         return mockInterviewReviewService.getLatestReview(session.getUserId(), sessionId);
     }
 
+    /**
+     * 为指定会话触发 AI 复盘报告生成。
+     *
+     * <p>确认会话有效后，复用用户端复盘服务完成真实模型调用、JSON 解析及复盘记录入库。
+     *
+     * @param sessionId 会话 ID
+     * @return 生成的复盘报告 VO
+     */
     @Override
     public MockInterviewReviewVO generateReview(Long sessionId) {
-        /*
-         * 1. 先确认会话有效，避免后台对已删除会话触发模型调用。
-         * 2. 真实模型调用、JSON 解析、复盘记录入库都复用用户端服务。
-         * 3. 返回值直接包含结构化单题复盘，admin 页面可以立即刷新展示。
-         */
         MockInterviewSession session = getExistingSession(sessionId);
         return mockInterviewReviewService.generateReview(session.getUserId(), sessionId);
     }

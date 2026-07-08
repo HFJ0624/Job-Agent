@@ -24,13 +24,37 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 作者: hfj
- * 功能: 求职提醒服务实现
+ * 求职提醒服务实现。
  *
- * 设计说明:
- * 1. 这层负责提醒任务的创建、更新、查询和状态流转。
- * 2. 沟通记录确认面试后，不直接在 Controller 里创建提醒，而是调用这里统一处理。
- * 3. 这样后续如果求职进度、Agent、定时任务都要创建提醒，可以复用同一套逻辑。
+ * <p>核心职责：管理求职全周期中的提醒任务，包括面试提醒、HR 跟进提醒和自定义提醒的创建、查询、状态流转和延期处理。</p>
+ *
+ * <p>所属业务模块：求职进度模块（application）/ 提醒中心模块（reminder）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>用户创建自定义提醒，调用 {@link #createReminder}；</li>
+ *   <li>沟通记录确认面试或设置跟进时间后，调用 {@link #syncFromCommunicationRecord} 自动同步提醒；</li>
+ *   <li>用户在前端查看提醒列表和统计，调用 {@link #pageReminders} 和 {@link #getStats}；</li>
+ *   <li>用户处理提醒后，调用 {@link #markDone}、{@link #markRead}、{@link #cancelReminder} 或 {@link #postponeReminder} 变更状态。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>被 {@link JobCommunicationRecordServiceImpl} 调用，在沟通状态变更时自动同步面试/跟进提醒；</li>
+ *   <li>依赖 {@link JobReminderMapper} 进行提醒数据持久化；</li>
+ *   <li>前端首页和进度页通过本服务展示待处理提醒数量与到期提醒列表。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>所有提醒创建统一收口到本服务，避免 Controller 或其他模块直接操作 Mapper；</li>
+ *   <li>面试提醒默认提前 30 分钟，若面试时间不足 30 分钟则立即提醒；</li>
+ *   <li>沟通记录多次更新时，通过 communicationId + reminderType 查重，避免重复生成提醒；</li>
+ *   <li>后续求职进度、Agent、定时任务等需要创建提醒时，均可复用同一套逻辑。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -267,6 +291,11 @@ public class JobReminderServiceImpl implements JobReminderService {
 
     /**
      * 创建或更新面试提醒。
+     *
+     * <p>根据沟通记录中的 interviewTime 生成提醒，默认提前 30 分钟。若已存在同沟通记录的面试提醒则更新。</p>
+     *
+     * @param userId 用户 ID
+     * @param record 沟通记录
      */
     private void createOrUpdateInterviewReminder(Long userId, JobCommunicationRecord record) {
         JobReminder reminder = findByCommunicationAndType(
@@ -309,6 +338,11 @@ public class JobReminderServiceImpl implements JobReminderService {
 
     /**
      * 创建或更新 HR 跟进提醒。
+     *
+     * <p>根据沟通记录中的 nextFollowTime 生成跟进提醒。若已存在同沟通记录的跟进提醒则更新。</p>
+     *
+     * @param userId 用户 ID
+     * @param record 沟通记录
      */
     private void createOrUpdateFollowUpReminder(Long userId, JobCommunicationRecord record) {
         JobReminder reminder = findByCommunicationAndType(
@@ -342,7 +376,12 @@ public class JobReminderServiceImpl implements JobReminderService {
     /**
      * 根据沟通记录和提醒类型查询已有提醒。
      *
-     * 这样做是为了避免用户多次确认面试信息时重复生成提醒。
+     * <p>通过 communicationId + reminderType 查重，避免用户多次确认面试信息时重复生成提醒。</p>
+     *
+     * @param userId          用户 ID
+     * @param communicationId 沟通记录 ID
+     * @param reminderType    提醒类型
+     * @return 已存在的提醒，无则返回 null
      */
     private JobReminder findByCommunicationAndType(Long userId, Long communicationId, String reminderType) {
         if (communicationId == null) {
@@ -360,7 +399,9 @@ public class JobReminderServiceImpl implements JobReminderService {
     }
 
     /**
-     * 保存或更新。
+     * 保存或更新提醒记录。
+     *
+     * @param reminder 提醒实体
      */
     private void saveOrUpdate(JobReminder reminder) {
         if (reminder.getId() == null) {
@@ -371,7 +412,10 @@ public class JobReminderServiceImpl implements JobReminderService {
     }
 
     /**
-     * 构建面试提醒内容。
+     * 构建面试提醒内容，拼接面试方式、地点/平台和会议链接。
+     *
+     * @param record 沟通记录
+     * @return 提醒正文
      */
     private String buildInterviewContent(JobCommunicationRecord record) {
         StringBuilder builder = new StringBuilder();
@@ -394,7 +438,11 @@ public class JobReminderServiceImpl implements JobReminderService {
     }
 
     /**
-     * 当前时间减去指定分钟。
+     * 当前时间减去指定分钟数。
+     *
+     * @param date    基准时间
+     * @param minutes 分钟数
+     * @return 减去后的时间
      */
     private Date minusMinutes(Date date, int minutes) {
         Calendar calendar = Calendar.getInstance();
@@ -404,7 +452,13 @@ public class JobReminderServiceImpl implements JobReminderService {
     }
 
     /**
-     * 查询并校验提醒归属。
+     * 查询并校验提醒归属，确保提醒存在、未删除且属于当前用户。
+     *
+     * @param userId     用户 ID
+     * @param reminderId 提醒 ID
+     * @return 提醒实体
+     * @throws IllegalArgumentException 提醒不存在时抛出
+     * @throws SecurityException        无权访问时抛出
      */
     private JobReminder getUserReminderRequired(Long userId, Long reminderId) {
         JobReminder reminder = jobReminderMapper.selectById(reminderId);
@@ -421,7 +475,11 @@ public class JobReminderServiceImpl implements JobReminderService {
     }
 
     /**
-     * 根据 ID 查询 VO。
+     * 根据 ID 查询提醒并组装为 VO，填充前端展示字段。
+     *
+     * @param userId     用户 ID
+     * @param reminderId 提醒 ID
+     * @return 提醒 VO
      */
     private JobReminderVO getReminderVO(Long userId, Long reminderId) {
         ReminderQueryDTO queryDTO = new ReminderQueryDTO();
@@ -460,7 +518,9 @@ public class JobReminderServiceImpl implements JobReminderService {
     }
 
     /**
-     * 填充前端展示字段。
+     * 填充前端展示字段，包括类型中文、状态中文、是否过期和剩余分钟数。
+     *
+     * @param vo 提醒 VO
      */
     private void fillDisplayFields(JobReminderVO vo) {
         vo.setReminderTypeDesc(getReminderTypeDesc(vo.getReminderType()));
@@ -482,6 +542,12 @@ public class JobReminderServiceImpl implements JobReminderService {
         }
     }
 
+    /**
+     * 获取提醒类型中文描述。
+     *
+     * @param type 提醒类型枚举名
+     * @return 中文描述或原值
+     */
     private String getReminderTypeDesc(String type) {
         if (!StringUtils.hasText(type)) {
             return "";
@@ -494,6 +560,12 @@ public class JobReminderServiceImpl implements JobReminderService {
         }
     }
 
+    /**
+     * 获取提醒状态中文描述。
+     *
+     * @param status 提醒状态枚举名
+     * @return 中文描述或原值
+     */
     private String getReminderStatusDesc(String status) {
         if (!StringUtils.hasText(status)) {
             return "";
@@ -506,6 +578,16 @@ public class JobReminderServiceImpl implements JobReminderService {
         }
     }
 
+    /**
+     * 按条件统计提醒数量。
+     *
+     * @param userId 用户 ID
+     * @param type   提醒类型，null 表示不限
+     * @param status 提醒状态，null 表示不限
+     * @param start  提醒时间起始，null 表示不限
+     * @param end    提醒时间截止，null 表示不限
+     * @return 数量
+     */
     private Long count(Long userId, String type, String status, Date start, Date end) {
         LambdaQueryWrapper<JobReminder> wrapper = new LambdaQueryWrapper<>();
 
@@ -531,6 +613,13 @@ public class JobReminderServiceImpl implements JobReminderService {
         return jobReminderMapper.selectCount(wrapper);
     }
 
+    /**
+     * 统计已到期且待处理的提醒数量。
+     *
+     * @param userId 用户 ID
+     * @param now    当前时间
+     * @return 到期提醒数量
+     */
     private Long countDue(Long userId, Date now) {
         return jobReminderMapper.selectCount(
                 new LambdaQueryWrapper<JobReminder>()
@@ -541,6 +630,12 @@ public class JobReminderServiceImpl implements JobReminderService {
         );
     }
 
+    /**
+     * 统计未读提醒数量。
+     *
+     * @param userId 用户 ID
+     * @return 未读提醒数量
+     */
     private Long countUnread(Long userId) {
         return jobReminderMapper.selectCount(
                 new LambdaQueryWrapper<JobReminder>()
@@ -550,6 +645,12 @@ public class JobReminderServiceImpl implements JobReminderService {
         );
     }
 
+    /**
+     * 统计今日待处理提醒数量。
+     *
+     * @param userId 用户 ID
+     * @return 今日提醒数量
+     */
     private Long countToday(Long userId) {
         Calendar start = Calendar.getInstance();
         start.set(Calendar.HOUR_OF_DAY, 0);

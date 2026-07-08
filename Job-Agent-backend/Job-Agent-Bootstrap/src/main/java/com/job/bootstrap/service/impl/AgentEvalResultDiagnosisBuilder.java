@@ -13,12 +13,34 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 功能:Agent Eval 单条结果规则诊断器。
+ * Agent Eval 单条结果规则诊断器，负责解释"为什么失败"和"下一步排查哪里"。
  *
- * 设计说明:
+ * <p>核心职责：
+ * 根据 Eval 结果字段（failureType、actualTools、ragResultsJson、judgeScore 等）做确定性诊断，
+ * 生成包含根因、排查建议和证据的诊断 VO，供后台管理员定位 Agent 链路问题。
+ * 诊断重点不是重新评分，而是解释失败原因和排查方向。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Eval 子模块（结果诊断层）。</p>
+ *
+ * <p>主要调用链：
+ * 后台诊断页面 -> AgentEvalService.diagnoseResult
+ * -> AgentEvalResultDiagnosisBuilder.build
+ * -> diagnose*（按 failureType 分发诊断规则）
+ * -> 返回 AgentEvalResultDiagnosisVO</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>V1 不调用模型，只根据 Eval 结果字段做确定性诊断；</li>
+ *   <li>诊断重点不是重新评分，而是解释“为什么失败”和“下一步排查哪里”；</li>
+ *   <li>规则集中放在这里，避免 Controller 和页面里到处写 if/else。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. V1 不调用模型，只根据 Eval 结果字段做确定性诊断。
  * 2. 诊断重点不是重新评分，而是解释“为什么失败”和“下一步排查哪里”。
- * 3. 规则集中放在这里，避免 Controller 和页面里到处写 if/else。
+ * 3. 规则集中放在这里，避免 Controller 和页面里到处写 if/else。</p>
+ *
+ * 作者: hfj
  */
 @Component
 @RequiredArgsConstructor

@@ -5,8 +5,14 @@ import com.job.common.entity.greeting.JobGreetingRecord;
 import com.job.common.vo.greeting.GreetingVO;
 
 /**
- * 作者:hfj
- * 功能:HR 打招呼语生成服务
+ * HR 打招呼语生成服务接口。
+ *
+ * <p>核心职责：基于用户简历和岗位 JD，调用 AI 模型生成个性化 HR 打招呼语，并记录生成历史。</p>
+ *
+ * <p>所属业务模块：求职辅助 - 沟通助手</p>
+ *
+ * <p>主要调用链：
+ * JobGreetingController / JobInteractionService -&gt; JobGreetingService -&gt; JobGreetingServiceImpl -&gt; AiModelGatewayService / JobResumeService / JobPositionService</p>
  */
 public interface JobGreetingService extends IService<JobGreetingRecord> {
 

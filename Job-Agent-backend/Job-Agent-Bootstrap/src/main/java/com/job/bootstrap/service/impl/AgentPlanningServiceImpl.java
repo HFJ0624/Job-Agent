@@ -29,8 +29,35 @@ import java.util.List;
 import java.util.Map;
 
 /**
+ * Agent 计划生成服务实现，负责把用户目标拆成可执行的 Plan。
+ *
+ * <p>核心职责：
+ * 1. 根据用户目标、意图和长期记忆上下文抽取关键参数。
+ * 2. 根据意图选择计划模板，生成计划标题、摘要、步骤。
+ * 3. 检查必填参数是否齐全，缺失则标记为 NEED_CLARIFICATION。
+ * 4. 把计划和步骤落库，供 Executor 确定性执行。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Service 层（Planner 阶段）。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl.chat -> AgentPlanningServiceImpl.createPlan
+ * -> AgentPlanParameterExtractor (抽取参数)
+ * -> AgentPlanTemplateFactory (选择模板)
+ * -> AgentPlanMapper / AgentPlanStepMapper (落库)
+ * -> 返回 AgentPlanVO 交给 Executor 执行</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AgentPlanParameterExtractor 负责从自然语言 + 记忆上下文抽取 resumeId、jobId、city 等参数；</li>
+ *   <li>AgentPlanTemplateFactory 按意图返回固定步骤模板，避免模型自由发挥导致步骤不可控；</li>
+ *   <li>计划落库后由 AgentPlanExecutorService 按 stepNo 顺序执行；</li>
+ *   <li>hasRequiredParam 中允许 resumeName/jobTitle 作为 resumeId/jobId 的自然语言替代，真正解析留给 Tool。</li>
+ * </ul></p>
+ *
+ * <p>Agent 阶段说明：本服务对应 Planning 阶段，输入是用户目标 + 意图 + 记忆上下文，
+ * 输出是结构化 Plan（含步骤、工具建议、完成条件），不调用任何工具。</p>
+ *
  * 作者:hfj
- * 功能:Agent 计划生成服务实现
  * 日期:2026/6/19
  */
 @Service

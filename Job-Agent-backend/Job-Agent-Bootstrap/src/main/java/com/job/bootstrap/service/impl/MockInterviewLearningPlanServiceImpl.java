@@ -37,6 +37,31 @@ import java.util.UUID;
 
 /**
  * 模拟面试学习计划服务实现。
+ *
+ * <p>核心职责：基于用户错题本生成个性化 AI 学习计划，支持学习任务状态更新、知识点复测及复测评分。
+ *
+ * <p>所属业务模块：面试训练中心 - 学习计划（Mock Interview Learning Plan）。
+ *
+ * <p>主要调用链：
+ * <ul>
+ *   <li>计划生成：{@code generatePlan} → 读取错题 → RAG 检索材料 → LLM 生成计划 → 持久化。</li>
+ *   <li>任务管理：{@code updateItemStatus} → 刷新计划整体完成状态。</li>
+ *   <li>复测闭环：{@code startRetest} → {@code submitRetest} → 更新错题掌握状态。</li>
+ * </ul>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link AiModelGatewayService}：用于学习计划生成和复测评分的 LLM 调用。</li>
+ *   <li>{@link RagRetrievalService}：为每个知识点检索 RAG 学习材料。</li>
+ *   <li>{@link MockInterviewWrongQuestionMapper}：读取错题本数据作为计划输入源。</li>
+ * </ul>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>错题驱动：计划内容完全来源于用户错题本中的未掌握/复习中题目，确保针对性。</li>
+ *   <li>模型+规则双保险：LLM 生成计划失败时自动降级为规则模板，保证用户始终能看到训练路径。</li>
+ *   <li>复测闭环：复测通过后自动将对应知识点下的错题标记为已掌握，形成学习-复测-掌握闭环。</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -61,6 +86,21 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
     private final AiModelGatewayService aiModelGatewayService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 基于用户错题本生成 AI 学习计划。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>读取用户未掌握/复习中的错题。</li>
+     *   <li>提取薄弱知识点，通过 RAG 检索学习材料。</li>
+     *   <li>调用 LLM 生成每日学习任务；失败时降级为规则模板。</li>
+     *   <li>持久化计划及任务项，返回计划详情。</li>
+     * </ol>
+     *
+     * @param userId 用户 ID
+     * @param dto    计划生成参数，包含计划天数
+     * @return 生成的学习计划详情
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewLearningPlanVO generatePlan(Long userId, MockInterviewStudyPlanGenerateDTO dto) {
@@ -103,6 +143,14 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return getPlanDetail(userId, plan.getId());
     }
 
+    /**
+     * 查询用户最近一次学习计划。
+     *
+     * <p>若用户尚未生成计划，返回 {@code null}。
+     *
+     * @param userId 用户 ID
+     * @return 学习计划详情，或 {@code null}
+     */
     @Override
     public MockInterviewLearningPlanVO getLatestPlan(Long userId) {
         MockInterviewStudyPlan plan = planMapper.selectOne(
@@ -118,6 +166,16 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return getPlanDetail(userId, plan.getId());
     }
 
+    /**
+     * 更新学习任务完成状态。
+     *
+     * <p>状态变更后自动刷新计划整体完成状态（全部完成则标记计划结束）。
+     *
+     * @param userId 用户 ID
+     * @param itemId 任务项 ID
+     * @param dto    状态更新参数
+     * @return 更新后的学习计划详情
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewLearningPlanVO updateItemStatus(Long userId, Long itemId, MockInterviewStudyPlanItemStatusDTO dto) {
@@ -132,6 +190,15 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return getPlanDetail(userId, item.getPlanId());
     }
 
+    /**
+     * 为指定学习任务启动知识点复测。
+     *
+     * <p>根据任务知识点自动生成复测题目和参考答案，创建待回答的复测记录。
+     *
+     * @param userId 用户 ID
+     * @param itemId 任务项 ID
+     * @return 复测记录 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewStudyPlanRetestVO startRetest(Long userId, Long itemId) {
@@ -151,6 +218,21 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return MockInterviewStudyPlanRetestVO.from(retest);
     }
 
+    /**
+     * 提交复测回答并评分。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>校验复测记录归属与状态。</li>
+     *   <li>调用 LLM 评分（失败时规则兜底）。</li>
+     *   <li>更新复测记录并同步错题掌握状态。</li>
+     * </ol>
+     *
+     * @param userId  用户 ID
+     * @param retestId 复测记录 ID
+     * @param dto     复测提交参数
+     * @return 评分后的复测记录 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewStudyPlanRetestVO submitRetest(Long userId, Long retestId, MockInterviewStudyPlanRetestSubmitDTO dto) {
@@ -175,6 +257,13 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return MockInterviewStudyPlanRetestVO.from(retest);
     }
 
+    /**
+     * 获取学习计划完整详情。
+     *
+     * @param userId 用户 ID
+     * @param planId 计划 ID
+     * @return 学习计划详情 VO
+     */
     private MockInterviewLearningPlanVO getPlanDetail(Long userId, Long planId) {
         MockInterviewStudyPlan plan = planMapper.selectById(planId);
         if (plan == null || !userId.equals(plan.getUserId())) {
@@ -191,6 +280,13 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return MockInterviewLearningPlanVO.from(plan, items, objectMapper);
     }
 
+    /**
+     * 获取并校验学习计划归属与有效性。
+     *
+     * @param userId 用户 ID
+     * @param planId 计划 ID
+     * @return 校验通过的计划实体
+     */
     private MockInterviewStudyPlan getUserPlanRequired(Long userId, Long planId) {
         MockInterviewStudyPlan plan = planMapper.selectById(planId);
         if (plan == null || !userId.equals(plan.getUserId()) || (plan.getIsDeleted() != null && plan.getIsDeleted() == 1)) {
@@ -199,6 +295,13 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return plan;
     }
 
+    /**
+     * 获取并校验学习任务项归属与有效性。
+     *
+     * @param userId 用户 ID
+     * @param itemId 任务项 ID
+     * @return 校验通过的任务项实体
+     */
     private MockInterviewStudyPlanItem getUserPlanItemRequired(Long userId, Long itemId) {
         MockInterviewStudyPlanItem item = itemMapper.selectById(itemId);
         if (item == null || !userId.equals(item.getUserId()) || (item.getIsDeleted() != null && item.getIsDeleted() == 1)) {
@@ -229,6 +332,16 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         );
     }
 
+    /**
+     * 对复测回答进行评分。
+     *
+     * <p>优先调用 LLM 评分，模型异常时降级为规则评分（回答长度、知识点提及、项目表达）。
+     *
+     * @param userId    用户 ID
+     * @param retest    复测记录
+     * @param userAnswer 用户回答内容
+     * @return 复测评分结果
+     */
     private RetestEvaluation evaluateRetest(Long userId, MockInterviewStudyPlanRetest retest, String userAnswer) {
         try {
             String prompt = buildRetestEvaluatePrompt(retest, userAnswer);
@@ -332,6 +445,15 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         );
     }
 
+    /**
+     * 复测完成后同步更新错题掌握状态。
+     *
+     * <p>将包含该知识点的所有错题标记为已掌握（通过）或复习中（未通过）。
+     *
+     * @param userId        用户 ID
+     * @param knowledgePoint 知识点
+     * @param passed        是否通过复测
+     */
     private void updateWrongQuestionsAfterRetest(Long userId, String knowledgePoint, boolean passed) {
         if (!StringUtils.hasText(knowledgePoint)) {
             return;
@@ -348,6 +470,14 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         }
     }
 
+    /**
+     * 加载用户未掌握或复习中的错题列表。
+     *
+     * <p>按错误次数和更新时间倒序排列，最多取 50 条。
+     *
+     * @param userId 用户 ID
+     * @return 活跃错题列表
+     */
     private List<MockInterviewWrongQuestion> loadActiveWrongQuestions(Long userId) {
         return wrongQuestionMapper.selectList(
                 new LambdaQueryWrapper<MockInterviewWrongQuestion>()
@@ -391,6 +521,18 @@ public class MockInterviewLearningPlanServiceImpl implements MockInterviewLearni
         return materialMap;
     }
 
+    /**
+     * 生成学习计划任务种子。
+     *
+     * <p>优先调用 LLM 生成每日学习任务；模型异常时降级为规则模板。
+     *
+     * @param userId         用户 ID
+     * @param planDays       计划天数
+     * @param knowledgePoints 薄弱知识点列表
+     * @param wrongQuestions  错题列表
+     * @param materialMap     知识点到学习材料的映射
+     * @return 计划任务种子列表
+     */
     private List<PlanItemSeed> generatePlanSeeds(
             Long userId,
             int planDays,

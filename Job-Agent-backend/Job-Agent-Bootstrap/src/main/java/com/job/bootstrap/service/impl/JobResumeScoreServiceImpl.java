@@ -25,16 +25,39 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 作者:hfj
- * 功能:简历 AI 评分业务实现
- * 日期:2026/6/15
+ * 简历 AI 评分服务实现（V2）。
  *
- * V2 设计说明:
- * 1. 先用 ResumeScoreRuleEngine 计算稳定分数，保证评分可解释、可测试、可重复。
- * 2. 配置了大模型路由时，评分接口会优先等待统一模型网关返回，让页面直接看到 AI 参与后的结果。
- * 3. 大模型作为第二评分员参与维度打分和建议生成，规则引擎只负责提供稳定初始分和兜底。
- * 4. 大模型结果回来后按“规则分 65% + 模型分 35%”合并，既体现模型参与，又避免模型分数大幅漂移。
- * 5. score_json 保存完整 V2 结构，老字段继续写入，兼容当前数据库和旧前端字段。
+ * <p>核心职责：基于规则引擎和大模型协同对简历进行多维度评分，生成总分、维度分、优势、问题和改进建议。
+ * 规则引擎提供稳定可复现的初始分，大模型作为第二评分员参与语义理解和质量判断，最终按加权合并输出。</p>
+ *
+ * <p>所属业务模块：简历管理 - AI 智能评分子模块</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>用户触发：Controller -> {@link #scoreResume}</li>
+ *   <li>规则评分：{@code scoreResume -> ResumeScoreRuleEngine.calculate}</li>
+ *   <li>模型评分：{@code calculateLlmScoreNow -> AiModelGatewayService.chat}</li>
+ *   <li>结果合并与持久化：保存 {@link JobResumeScoreRecord} 并同步更新 {@link JobResume}</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link ResumeScoreRuleEngine}：提供稳定、可解释、可测试的初始维度分</li>
+ *   <li>{@link AiModelGatewayService}：统一模型网关，负责 Prompt 路由、调用日志和熔断</li>
+ *   <li>{@link JobResumeService}：解析简历原文和更新简历表上的分数与状态</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>先用 ResumeScoreRuleEngine 计算稳定分数，保证评分可解释、可测试、可重复。</li>
+ *   <li>配置了大模型路由时，评分接口会优先等待统一模型网关返回，让页面直接看到 AI 参与后的结果。</li>
+ *   <li>大模型作为第二评分员参与维度打分和建议生成，规则引擎只负责提供稳定初始分和兜底。</li>
+ *   <li>大模型结果回来后按“规则分 65% + 模型分 35%”合并，既体现模型参与，又避免模型分数大幅漂移。</li>
+ *   <li>score_json 保存完整 V2 结构，老字段继续写入，兼容当前数据库和旧前端字段。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -240,6 +263,13 @@ public class JobResumeScoreServiceImpl
         return variables;
     }
 
+    /**
+     * 构建简历评分模型调用 TraceId，用于链路追踪和日志排查。
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @return 唯一 TraceId
+     */
     private String buildResumeScoreTraceId(Long userId, Long resumeId) {
         return "resume_score_" + userId + "_" + resumeId + "_" + System.currentTimeMillis();
     }
@@ -401,10 +431,25 @@ public class JobResumeScoreServiceImpl
         return dimensions;
     }
 
+    /**
+     * 空值安全的 Integer 转换，null 时返回 0。
+     *
+     * @param value 原始 Integer 值
+     * @return 非空的 Integer
+     */
     private Integer valueOrZero(Integer value) {
         return value == null ? 0 : value;
     }
 
+    /**
+     * 合并规则维度和模型维度，生成最终维度分。
+     *
+     * <p>按维度名称匹配模型返回的维度分；若名称不匹配但顺序一致，则按位置兜底匹配。</p>
+     *
+     * @param ruleDimensions 规则引擎维度分列表
+     * @param llmDimensions  模型返回的维度分列表
+     * @return 合并后的维度分列表
+     */
     private List<ResumeScoreRuleEngine.ScoreDimension> mergeDimensions(
             List<ResumeScoreRuleEngine.ScoreDimension> ruleDimensions,
             List<ResumeScoreRuleEngine.ScoreDimension> llmDimensions
@@ -462,12 +507,26 @@ public class JobResumeScoreServiceImpl
         return clamp(weightedScore, safeRuleScore - maxAdjustment, safeRuleScore + maxAdjustment);
     }
 
+    /**
+     * 将整数限制在指定范围内。
+     *
+     * @param value 原始值
+     * @param min   最小值
+     * @param max   最大值
+     * @return 限制后的值
+     */
     private int clamp(Integer value, int min, Integer max) {
         int safeValue = value == null ? min : value;
         int safeMax = max == null ? safeValue : max;
         return Math.max(min, Math.min(safeValue, safeMax));
     }
 
+    /**
+     * 计算维度分总和。
+     *
+     * @param dimensions 维度分列表
+     * @return 总分
+     */
     private int sumDimensionScore(List<ResumeScoreRuleEngine.ScoreDimension> dimensions) {
         return nonNullList(dimensions).stream()
                 .map(ResumeScoreRuleEngine.ScoreDimension::getScore)
@@ -475,6 +534,12 @@ public class JobResumeScoreServiceImpl
                 .sum();
     }
 
+    /**
+     * 从维度分列表构建 ScoreBreakdown 对象。
+     *
+     * @param dimensions 维度分列表（固定 8 个维度顺序）
+     * @return 各维度分的结构化 breakdown
+     */
     private ResumeScoreRuleEngine.ScoreBreakdown buildBreakdownFromDimensions(List<ResumeScoreRuleEngine.ScoreDimension> dimensions) {
         ResumeScoreRuleEngine.ScoreBreakdown breakdown = new ResumeScoreRuleEngine.ScoreBreakdown();
         List<ResumeScoreRuleEngine.ScoreDimension> safeDimensions = nonNullList(dimensions);
@@ -489,6 +554,13 @@ public class JobResumeScoreServiceImpl
         return breakdown;
     }
 
+    /**
+     * 按索引获取维度分，越界或空值时返回 0。
+     *
+     * @param dimensions 维度分列表
+     * @param index      维度索引
+     * @return 该维度的分数
+     */
     private Integer dimensionScore(List<ResumeScoreRuleEngine.ScoreDimension> dimensions, int index) {
         if (dimensions == null || dimensions.size() <= index || dimensions.get(index).getScore() == null) {
             return 0;
@@ -512,6 +584,13 @@ public class JobResumeScoreServiceImpl
                 .toList();
     }
 
+    /**
+     * 优先使用模型返回的列表；若模型列表为空，则回退到规则引擎列表。
+     *
+     * @param llmList      模型返回的列表
+     * @param fallbackList 规则引擎的兜底列表
+     * @return 非空的字符串列表
+     */
     private List<String> preferLlmList(List<String> llmList, List<String> fallbackList) {
         List<String> cleaned = nonNullList(llmList).stream()
                 .filter(StringUtils::hasText)
@@ -521,14 +600,32 @@ public class JobResumeScoreServiceImpl
         return cleaned.isEmpty() ? nonNullList(fallbackList) : cleaned;
     }
 
+    /**
+     * 空值安全的列表转换，null 时返回空列表。
+     *
+     * @param list 原始列表
+     * @return 非空的列表
+     */
     private <T> List<T> nonNullList(List<T> list) {
         return list == null ? List.of() : list;
     }
 
+    /**
+     * Integer 转 BigDecimal，null 时返回 0。
+     *
+     * @param value 原始 Integer 值
+     * @return 对应的 BigDecimal
+     */
     private BigDecimal toDecimal(Integer value) {
         return BigDecimal.valueOf(value == null ? 0 : value);
     }
 
+    /**
+     * 将字符串列表按换行符拼接为单字符串。
+     *
+     * @param lines 字符串列表
+     * @return 拼接后的文本，空列表时返回空字符串
+     */
     private String joinLines(List<String> lines) {
         if (lines == null || lines.isEmpty()) {
             return "";
@@ -536,6 +633,12 @@ public class JobResumeScoreServiceImpl
         return String.join("\n", lines);
     }
 
+    /**
+     * 去除字符串首尾空白，空文本时返回 null。
+     *
+     * @param value 原始字符串
+     * @return trim 后的字符串或 null
+     */
     private String trimToNull(String value) {
         if (!StringUtils.hasText(value)) {
             return null;
@@ -543,6 +646,12 @@ public class JobResumeScoreServiceImpl
         return value.trim();
     }
 
+    /**
+     * 将对象序列化为 JSON 字符串。
+     *
+     * @param value 待序列化对象
+     * @return JSON 字符串，失败时返回 "{}"
+     */
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -551,6 +660,13 @@ public class JobResumeScoreServiceImpl
         }
     }
 
+    /**
+     * 截断文本至指定最大长度，并在末尾附加截断提示。
+     *
+     * @param text      原始文本
+     * @param maxLength 最大字符数
+     * @return 截断后的文本
+     */
     private String truncate(String text, int maxLength) {
         if (text == null || text.length() <= maxLength) {
             return text;
@@ -558,6 +674,12 @@ public class JobResumeScoreServiceImpl
         return text.substring(0, maxLength) + "\n\n[后续内容因长度限制已截断]";
     }
 
+    /**
+     * 提取异常消息，超长时截断至 300 字符。
+     *
+     * @param exception 异常对象
+     * @return 简短的异常描述
+     */
     private String shortMessage(Exception exception) {
         String message = exception.getMessage();
         if (!StringUtils.hasText(message)) {
@@ -566,6 +688,12 @@ public class JobResumeScoreServiceImpl
         return message.length() <= 300 ? message : message.substring(0, 300);
     }
 
+    /**
+     * 根据总分映射评分等级。
+     *
+     * @param score 总分
+     * @return 等级描述，如 "优秀"、"良好"、"一般"、"较弱"、"需要重写"
+     */
     private String resolveLevel(Integer score) {
         int value = score == null ? 0 : score;
         if (value >= 90) {

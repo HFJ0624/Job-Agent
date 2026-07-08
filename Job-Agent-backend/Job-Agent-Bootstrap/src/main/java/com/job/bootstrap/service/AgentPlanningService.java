@@ -4,9 +4,14 @@ import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.common.vo.agent.AgentPlanVO;
 
 /**
- * 作者:hfj
- * 功能:Agent 计划生成服务
- * 日期:2026/6/19
+ * Agent 计划生成服务接口。
+ *
+ * <p>核心职责：根据用户输入的意图和目标，结合长期记忆上下文，生成可执行的 Agent 任务计划并持久化。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 计划（Planning）</p>
+ *
+ * <p>主要调用链：
+ * AgentChatService -&gt; AgentPlanningService -&gt; AgentPlanningServiceImpl -&gt; AiModelGatewayService / AgentMemoryContextService / AgentPlanRepository</p>
  */
 public interface AgentPlanningService {
 

@@ -44,6 +44,33 @@ import java.util.stream.Collectors;
 
 /**
  * 后台求职跟进 Agent 服务实现。
+ *
+ * <p>核心职责：为后台运营人员提供求职跟进规则（Follow-Up Rule）的管理能力，
+ * 并支持按规则扫描求职记录，自动生成提醒（Reminder）和面试通知邮件工作流任务，
+ * 实现求职进度的自动化跟进与触达。</p>
+ *
+ * <p>所属业务模块：Agent 运营中心 - 求职跟进 Agent</p>
+ *
+ * <p>主要调用链：
+ * AdminFollowUpAgentController → {@link AdminFollowUpAgentServiceImpl} →
+ * AgentFollowUpRuleMapper / JobApplicationRecordMapper / JobReminderMapper / WorkflowTaskMapper →
+ * 返回求职记录分页、规则 VO 或创建数量</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link AgentFollowUpRuleMapper} 管理跟进规则的 CRUD</li>
+ *   <li>依赖 {@link JobApplicationRecordMapper} 扫描符合条件的求职记录</li>
+ *   <li>依赖 {@link JobReminderMapper} 创建用户提醒，实现站内触达</li>
+ *   <li>依赖 {@link WorkflowTaskMapper} 及 {@link WorkflowTaskService} 创建面试通知邮件任务</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>规则扫描采用定时调度触发，每次只扫描启用（ENABLED）且未删除的规则。</li>
+ *   <li>第一版只处理投递未反馈（APPLICATION_NO_FEEDBACK）和面试后复盘（INTERVIEW_AFTER_REVIEW）两类规则。</li>
+ *   <li>每条规则扫描时限制最大候选记录数（200 条），防止单次调度拖垮数据库。</li>
+ *   <li>提醒创建前做幂等检查，避免同一求职记录重复生成提醒。</li>
+ * </ul></p>
  */
 @Service
 @RequiredArgsConstructor
@@ -67,6 +94,19 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
     private final WorkflowTaskService workflowTaskService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 分页查询求职记录，并关联提醒、邮件任务等跟进状态。
+     *
+     * <p>方法步骤：</p>
+     * <ol>
+     *   <li>防御性处理分页参数。</li>
+     *   <li>动态拼接查询条件，支持用户 ID、求职状态、关键词及邮件失败筛选。</li>
+     *   <li>对每个求职记录构造 VO，统计关联提醒数和邮件任务状态。</li>
+     * </ol>
+     *
+     * @param query 求职记录查询条件，包含分页、过滤及失败邮件筛选
+     * @return 带跟进状态的求职记录分页
+     */
     @Override
     public IPage<AgentFollowUpApplicationVO> pageApplications(AgentFollowUpApplicationQueryDTO query) {
         AgentFollowUpApplicationQueryDTO safeQuery = query == null ? new AgentFollowUpApplicationQueryDTO() : query;
@@ -100,6 +140,12 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return jobApplicationRecordMapper.selectPage(page, wrapper).convert(this::buildApplicationVO);
     }
 
+    /**
+     * 分页查询求职跟进规则。
+     *
+     * @param query 规则查询条件，支持按规则名称、规则类型、状态筛选
+     * @return 跟进规则分页
+     */
     @Override
     public IPage<AgentFollowUpRuleVO> pageRules(AgentFollowUpRuleQueryDTO query) {
         AgentFollowUpRuleQueryDTO safeQuery = query == null ? new AgentFollowUpRuleQueryDTO() : query;
@@ -119,6 +165,15 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return agentFollowUpRuleMapper.selectPage(page, wrapper).convert(AgentFollowUpRuleVO::from);
     }
 
+    /**
+     * 创建求职跟进规则。
+     *
+     * <p>创建前校验规则编码唯一性，防止重复编码导致调度歧义。</p>
+     *
+     * @param request 规则创建表单，包含编码、名称、类型、触发条件及提醒模板
+     * @return 创建后的规则 VO
+     * @throws BizException 当规则编码已存在时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentFollowUpRuleVO createRule(AgentFollowUpRuleSaveDTO request) {
@@ -133,6 +188,16 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return AgentFollowUpRuleVO.from(rule);
     }
 
+    /**
+     * 修改求职跟进规则。
+     *
+     * <p>修改前校验规则编码唯一性（排除自身），防止编码冲突。</p>
+     *
+     * @param id 规则主键 ID
+     * @param request 规则修改表单
+     * @return 修改后的规则 VO
+     * @throws BizException 当规则不存在或编码已存在时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentFollowUpRuleVO updateRule(Long id, AgentFollowUpRuleSaveDTO request) {
@@ -144,6 +209,12 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return AgentFollowUpRuleVO.from(rule);
     }
 
+    /**
+     * 逻辑删除求职跟进规则。
+     *
+     * @param id 规则主键 ID
+     * @throws BizException 当规则不存在时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteRule(Long id) {
@@ -154,13 +225,18 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
     }
 
     /**
-     * 扫描启用规则并创建提醒。
+     * 扫描所有启用的跟进规则并创建提醒。
      *
-     * 步骤：
-     * 1. 只加载 ENABLED 且未删除的规则，避免后台禁用后仍继续触发。
-     * 2. 第一版只扫描适合定时处理的规则：投递未反馈、面试后复盘。
-     * 3. 每条规则最多扫描 200 条候选投递记录，防止一次调度拖垮数据库。
-     * 4. 创建提醒前做幂等检查，已有同类提醒时直接跳过。
+     * <p>方法步骤：</p>
+     * <ol>
+     *   <li>只加载 ENABLED 且未删除的规则，避免后台禁用后仍继续触发。</li>
+     *   <li>第一版只扫描适合定时处理的规则：投递未反馈、面试后复盘。</li>
+     *   <li>每条规则最多扫描 200 条候选投递记录，防止一次调度拖垮数据库。</li>
+     *   <li>创建提醒前做幂等检查，已有同类提醒时直接跳过。</li>
+     *   <li>若规则启用邮件通知，则进一步创建面试通知邮件工作流任务。</li>
+     * </ol>
+     *
+     * @return 本次扫描实际创建的提醒数量
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -182,6 +258,12 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return createdCount;
     }
 
+    /**
+     * 构造求职记录展示 VO，并关联提醒数量、邮件任务状态等跟进信息。
+     *
+     * @param application 求职记录实体
+     * @return 包含跟进状态的展示 VO
+     */
     private AgentFollowUpApplicationVO buildApplicationVO(JobApplicationRecord application) {
         AgentFollowUpApplicationVO vo = AgentFollowUpApplicationVO.from(application);
         if (vo == null || application.getId() == null) {
@@ -297,6 +379,22 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return created;
     }
 
+    /**
+     * 幂等创建提醒记录。
+     *
+     * <p>方法步骤：</p>
+     * <ol>
+     *   <li>按用户 ID、求职记录 ID、提醒类型、提醒标题做幂等查询，已存在则直接跳过。</li>
+     *   <li>构造提醒实体，填充模板渲染后的内容、事件时间及提醒时间。</li>
+     *   <li>若规则同时启用了工作流和邮件通知，则进一步调用 {@link #createEmailTaskIfAbsent} 创建邮件任务。</li>
+     * </ol>
+     *
+     * @param rule 当前执行的跟进规则
+     * @param application 目标求职记录
+     * @param eventTime 事件触发时间（如投递时间、面试时间）
+     * @param remindTime 提醒应触达时间
+     * @return true 表示本次创建了新的提醒，false 表示已存在未重复创建
+     */
     private boolean createReminderIfAbsent(AgentFollowUpRule rule, JobApplicationRecord application, Date eventTime, Date remindTime) {
         String reminderType = safeReminderType(rule.getReminderType());
         String title = safeText(rule.getReminderTitle(), rule.getRuleName());
@@ -336,6 +434,15 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return true;
     }
 
+    /**
+     * 幂等创建面试通知邮件工作流任务。
+     *
+     * <p>检查同一求职记录下是否已存在 pending / running / failed_retryable / success 状态的邮件任务，
+     * 无重复时才通过 {@link WorkflowTaskService} 创建新任务，避免邮件重复发送。</p>
+     *
+     * @param rule 当前执行的跟进规则
+     * @param application 目标求职记录
+     */
     private void createEmailTaskIfAbsent(AgentFollowUpRule rule, JobApplicationRecord application) {
         Long count = workflowTaskMapper.selectCount(
                 new LambdaQueryWrapper<WorkflowTask>()
@@ -375,6 +482,12 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return payload;
     }
 
+    /**
+     * 将规则表单数据填充到实体中，处理默认值及枚举转换。
+     *
+     * @param rule 待填充的规则实体
+     * @param request 规则保存表单
+     */
     private void fillRule(AgentFollowUpRule rule, AgentFollowUpRuleSaveDTO request) {
         AgentFollowUpRuleType ruleType = parseRuleType(request.getRuleType());
         AgentFollowUpRuleStatus status = parseRuleStatus(safeText(request.getStatus(), AgentFollowUpRuleStatus.ENABLED.name()));
@@ -395,6 +508,13 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         rule.setRemark(trimToNull(request.getRemark()));
     }
 
+    /**
+     * 按 ID 加载跟进规则，并校验未删除状态。
+     *
+     * @param id 规则主键 ID
+     * @return 有效的跟进规则实体
+     * @throws BizException 当规则不存在或已删除时抛出
+     */
     private AgentFollowUpRule loadRule(Long id) {
         AgentFollowUpRule rule = agentFollowUpRuleMapper.selectById(id);
         if (rule == null || Objects.equals(rule.getIsDeleted(), DELETED)) {
@@ -403,6 +523,13 @@ public class AdminFollowUpAgentServiceImpl implements AdminFollowUpAgentService 
         return rule;
     }
 
+    /**
+     * 校验规则编码唯一性（排除自身 ID），防止重复编码。
+     *
+     * @param id 当前规则 ID，编辑时用于排除自身；创建时传 null
+     * @param ruleCode 待校验的规则编码
+     * @throws BizException 当编码已存在时抛出
+     */
     private void ensureRuleCodeUnique(Long id, String ruleCode) {
         Long count = agentFollowUpRuleMapper.selectCount(
                 new LambdaQueryWrapper<AgentFollowUpRule>()

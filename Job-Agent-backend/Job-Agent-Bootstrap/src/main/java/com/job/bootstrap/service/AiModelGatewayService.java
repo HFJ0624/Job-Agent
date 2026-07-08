@@ -3,9 +3,14 @@ package com.job.bootstrap.service;
 import java.util.Map;
 
 /**
- * 作者:hfj
- * 功能:AI 模型统一调用网关
- * 日期:2026/6/21
+ * AI 模型统一调用网关接口。
+ *
+ * <p>核心职责：根据业务场景编码路由到对应的模型和 Prompt 模板，完成变量渲染、模型调用、结果返回及调用日志记录。</p>
+ *
+ * <p>所属业务模块：基础设施 - AI 模型网关</p>
+ *
+ * <p>主要调用链：
+ * AgentChatService / AgentPlanningService / AgentMemoryCaptureService -&gt; AiModelGatewayService -&gt; AiModelGatewayServiceImpl -&gt; AiPromptRuntimeService / ModelProviderClient / AiModelCallLogRepository</p>
  */
 public interface AiModelGatewayService {
 

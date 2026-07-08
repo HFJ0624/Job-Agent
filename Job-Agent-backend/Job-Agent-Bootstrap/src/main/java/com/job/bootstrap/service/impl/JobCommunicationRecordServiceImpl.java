@@ -27,14 +27,39 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 作者: hfj
- * 功能: 求职沟通记录服务实现
+ * 求职沟通记录服务实现。
  *
- * 设计说明:
- * 1. 这不是自动投递模块。
- * 2. 这是用户在外部平台和 HR 沟通后的过程记录。
- * 3. 生成打招呼语后，系统自动创建沟通记录。
- * 4. 用户复制、沟通、收到回复、邀约面试，都在这里流转状态。
+ * <p>核心职责：记录用户在外部招聘平台与 HR 沟通的全过程，支持状态流转、AI 回复生成、面试邀约信息提取和确认，并同步触发提醒和求职进度更新。</p>
+ *
+ * <p>所属业务模块：求职沟通模块（communication）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>生成打招呼语后，调用 {@link #createFromGreeting} 自动创建沟通记录；</li>
+ *   <li>用户复制话术到平台后，调用 {@link #markCopied} 标记已复制；</li>
+ *   <li>用户收到 HR 回复后，调用 {@link #saveHrReplyAndGenerateReply} 保存 HR 回复并生成 AI 建议回复；</li>
+ *   <li>用户确认面试邀约后，调用 {@link #confirmInterviewInvite} 保存面试信息并同步提醒；</li>
+ *   <li>沟通结束时，调用 {@link #closeCommunication} 关闭记录。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link AiModelGatewayService} 生成 AI 回复和提取面试邀约信息；</li>
+ *   <li>依赖 {@link JobReminderService} 在面试确认后自动同步面试/跟进提醒；</li>
+ *   <li>依赖 {@link JobApplicationService} 同步求职进度；</li>
+ *   <li>依赖 {@link JobCommunicationRecordMapper} 和 {@link JobCommunicationMessageMapper} 进行数据持久化。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>每条沟通记录维护一条消息流水（job_communication_message），便于前端时间线展示；</li>
+ *   <li>状态变更统一收口，禁止 Controller 直接修改状态；</li>
+ *   <li>AI 回复生成和面试邀约提取均通过统一模型网关调用，不依赖本地配置；</li>
+ *   <li>面试确认后自动联动提醒和求职进度，保证多模块数据一致性。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -101,6 +126,13 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         return vo;
     }
 
+    /**
+     * 查询沟通记录下的消息流水列表。
+     *
+     * @param userId          用户 ID
+     * @param communicationId 沟通记录 ID
+     * @return 消息 VO 列表
+     */
     @Override
     public List<JobCommunicationMessageVO> listMessages(Long userId, Long communicationId) {
         /*
@@ -119,6 +151,14 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         return messages.stream().map(this::toMessageVO).toList();
     }
 
+    /**
+     * 更新沟通状态并保存状态变更消息流水，同步触发提醒。
+     *
+     * @param userId 用户 ID
+     * @param id     沟通记录 ID
+     * @param dto    状态更新 DTO
+     * @return 更新后的沟通记录 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public JobCommunicationRecordVO updateStatus(
@@ -161,6 +201,14 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         return getDetail(userId, id);
     }
 
+    /**
+     * 标记用户已发送回复给 HR，保存消息流水并更新沟通状态。
+     *
+     * @param userId 用户 ID
+     * @param id     沟通记录 ID
+     * @param dto    用户回复 DTO
+     * @return 更新后的沟通记录 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public JobCommunicationRecordVO markUserReplySent(
@@ -609,6 +657,14 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         return variables;
     }
 
+    /**
+     * 构建模型调用 Trace ID，用于日志串联和链路追踪。
+     *
+     * @param sceneCode       场景编码
+     * @param userId          用户 ID
+     * @param communicationId 沟通记录 ID
+     * @return Trace ID 字符串
+     */
     private String buildCommunicationTraceId(String sceneCode, Long userId, Long communicationId) {
         return sceneCode.toLowerCase()
                 + "_"
@@ -620,7 +676,11 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 空值兜底。
+     * 字符串空值兜底，无有效内容时返回默认值。
+     *
+     * @param value        原始字符串
+     * @param defaultValue 默认值
+     * @return 有效字符串或默认值
      */
     private String nullToDefault(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
@@ -674,7 +734,11 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 查询详情。
+     * 查询沟通记录详情，包含关联的岗位、公司和简历名称。
+     *
+     * @param userId 用户 ID
+     * @param id     沟通记录 ID
+     * @return 沟通记录详情 VO
      */
     @Override
     public JobCommunicationRecordVO getDetail(Long userId, Long id) {
@@ -694,6 +758,10 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
 
     /**
      * 手动创建沟通记录。
+     *
+     * @param userId    用户 ID
+     * @param createDTO 创建 DTO
+     * @return 创建后的沟通记录 VO
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -730,7 +798,14 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 生成打招呼语后自动创建沟通记录。
+     * 生成打招呼语后自动创建沟通记录，保证业务链路不断裂。
+     *
+     * @param userId           用户 ID
+     * @param resumeId         简历 ID
+     * @param jobId            岗位 ID
+     * @param greetingRecordId 打招呼记录 ID
+     * @param greetingText     打招呼语内容
+     * @return 创建后的沟通记录 VO
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -753,7 +828,11 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 标记已复制。
+     * 标记沟通记录为已复制状态。
+     *
+     * @param userId 用户 ID
+     * @param id     沟通记录 ID
+     * @return 更新后的沟通记录 VO
      */
     @Override
     public JobCommunicationRecordVO markCopied(Long userId, Long id) {
@@ -769,7 +848,11 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 标记已沟通。
+     * 标记沟通记录为已沟通状态。
+     *
+     * @param userId 用户 ID
+     * @param id     沟通记录 ID
+     * @return 更新后的沟通记录 VO
      */
     @Override
     public JobCommunicationRecordVO markCommunicated(Long userId, Long id) {
@@ -785,7 +868,12 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 保存 HR 回复。
+     * 保存 HR 回复并更新沟通状态为已回复。
+     *
+     * @param userId  用户 ID
+     * @param id      沟通记录 ID
+     * @param replyDTO HR 回复 DTO
+     * @return 更新后的沟通记录 VO
      */
     @Override
     public JobCommunicationRecordVO saveHrReply(Long userId, Long id, JobCommunicationReplyDTO replyDTO) {
@@ -805,7 +893,12 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 标记邀约面试。
+     * 标记沟通记录为邀约面试状态，同步创建提醒。
+     *
+     * @param userId       用户 ID
+     * @param id           沟通记录 ID
+     * @param interviewDTO 面试信息 DTO
+     * @return 更新后的沟通记录 VO
      */
     @Override
     public JobCommunicationRecordVO markInterviewInvited(
@@ -832,7 +925,11 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 关闭沟通。
+     * 关闭沟通记录。
+     *
+     * @param userId 用户 ID
+     * @param id     沟通记录 ID
+     * @return 更新后的沟通记录 VO
      */
     @Override
     public JobCommunicationRecordVO closeCommunication(Long userId, Long id) {
@@ -848,7 +945,10 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
     }
 
     /**
-     * 查询统计数据。
+     * 查询沟通记录统计数据，按状态分组计数。
+     *
+     * @param userId 用户 ID
+     * @return 沟通统计 VO
      */
     @Override
     public JobCommunicationStatsVO getStats(Long userId) {

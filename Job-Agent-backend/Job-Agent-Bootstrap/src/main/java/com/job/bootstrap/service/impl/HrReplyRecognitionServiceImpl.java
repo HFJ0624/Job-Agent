@@ -39,10 +39,35 @@ import java.util.Map;
 /**
  * HR 回复识别服务实现。
  *
- * 核心原则：
- * 1. 识别阶段只读上下文、调用模型、保存 PENDING 记录，不修改业务状态。
- * 2. 确认阶段才执行用户勾选的动作，避免 AI 误判直接污染求职进度。
- * 3. 面试邀约复用已有提醒和求职进度同步链路，不另写一套分叉逻辑。
+ * <p>核心职责：基于 AI 模型识别 HR 回复意图（面试邀约、需补充信息、等待、拒绝、Offer、普通回复），
+ * 生成结构化识别结果供用户确认后，再驱动下游业务状态变更。</p>
+ *
+ * <p>所属业务模块：求职沟通管理 - HR 回复智能识别子模块</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>识别入口：{@code Controller -> recognizeFromCommunication / recognizeFromApplication}</li>
+ *   <li>模型调用：{@code recognizeAndSave -> AiModelGatewayService.chat}</li>
+ *   <li>结果确认：{@code Controller -> confirm -> [updateCommunicationByRecognition / updateApplicationByRecognition]}</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link AiModelGatewayService}：统一模型网关，负责 Prompt 路由和调用日志</li>
+ *   <li>{@link JobApplicationService}：确认阶段同步求职进度状态</li>
+ *   <li>{@link JobReminderService}：确认阶段自动生成面试/跟进提醒</li>
+ *   <li>{@link JobCommunicationRecordMapper} / {@link JobCommunicationMessageMapper}：读写沟通记录和消息流水</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>识别阶段只读上下文、调用模型、保存 PENDING 记录，不修改业务状态。</li>
+ *   <li>确认阶段才执行用户勾选的动作，避免 AI 误判直接污染求职进度。</li>
+ *   <li>面试邀约复用已有提醒和求职进度同步链路，不另写一套分叉逻辑。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -63,6 +88,25 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
     private final JobReminderService jobReminderService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 基于已有沟通记录识别 HR 回复意图。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验沟通记录归属和状态。</li>
+     *   <li>提取 HR 回复文本（优先使用用户传入，其次取记录中的 hrReply）。</li>
+     *   <li>调用 {@link #recognizeAndSave} 执行模型识别并持久化 PENDING 记录。</li>
+     *   <li>返回识别结果 VO 供前端展示和人工确认。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId         当前登录用户 ID
+     * @param communicationId 沟通记录 ID
+     * @param dto            识别请求，可携带用户自定义 HR 回复文本和补充说明
+     * @return HR 回复识别结果，包含意图类型、建议状态、面试时间等
+     * @throws BizException      沟通记录不存在或 HR 回复内容为空
+     * @throws SecurityException 无权访问该沟通记录
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public HrReplyRecognitionVO recognizeFromCommunication(Long userId, Long communicationId, HrReplyRecognizeDTO dto) {
@@ -86,6 +130,23 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return toVO(recognition);
     }
 
+    /**
+     * 基于求职记录直接识别 HR 回复意图（无沟通记录场景）。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验求职记录归属。</li>
+     *   <li>提取用户传入的 HR 回复文本（必须非空）。</li>
+     *   <li>调用 {@link #recognizeAndSave} 执行模型识别并持久化 PENDING 记录。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId        当前登录用户 ID
+     * @param applicationId 求职记录 ID
+     * @param dto           识别请求，必须携带 HR 回复文本
+     * @return HR 回复识别结果
+     * @throws BizException 求职记录不存在或 HR 回复内容为空
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public HrReplyRecognitionVO recognizeFromApplication(Long userId, Long applicationId, HrReplyRecognizeDTO dto) {
@@ -108,6 +169,27 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return toVO(recognition);
     }
 
+    /**
+     * 确认 HR 回复识别结果，并执行用户勾选的业务动作。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验识别记录归属和状态（必须为 PENDING）。</li>
+     *   <li>将用户编辑后的字段回写识别记录。</li>
+     *   <li>若勾选保存沟通，更新沟通记录并写入消息流水。</li>
+     *   <li>若勾选创建提醒，复用 {@link JobReminderService#syncFromCommunicationRecord} 生成提醒。</li>
+     *   <li>若勾选更新求职进度，调用 {@link JobApplicationService#updateStatus} 同步状态。</li>
+     *   <li>标记确认状态为 CONFIRMED，并记录已执行动作快照。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId       当前登录用户 ID
+     * @param recognitionId 识别记录 ID
+     * @param dto          确认请求，包含用户勾选的执行项和编辑后的字段
+     * @return 更新后的识别结果
+     * @throws BizException      识别记录已处理或不存在
+     * @throws RuntimeException  动作执行异常时会记录 errorMsg 并重抛，保证事务回滚
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public HrReplyRecognitionVO confirm(Long userId, Long recognitionId, HrReplyRecognitionConfirmDTO dto) {
@@ -165,6 +247,16 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         }
     }
 
+    /**
+     * 取消 HR 回复识别结果。
+     *
+     * <p>仅允许对 PENDING 状态的识别记录执行取消操作，取消后记录不再允许确认或再次取消。</p>
+     *
+     * @param userId        当前登录用户 ID
+     * @param recognitionId 识别记录 ID
+     * @return 更新后的识别结果
+     * @throws BizException 识别记录已处理或不存在
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public HrReplyRecognitionVO cancel(Long userId, Long recognitionId) {
@@ -179,6 +271,31 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return toVO(recognition);
     }
 
+    /**
+     * 调用 AI 模型识别 HR 回复并持久化为 PENDING 记录。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>构造含上下文信息的 Prompt。</li>
+     *   <li>通过 {@link AiModelGatewayService#chat} 调用模型并获取 JSON 结果。</li>
+     *   <li>解析模型返回的意图、建议状态、时间、待办、回复建议等字段。</li>
+     *   <li>填充并保存 {@link HrReplyRecognitionRecord}，状态固定为 PENDING。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId          当前登录用户 ID
+     * @param applicationId   关联求职记录 ID，可为空
+     * @param communicationId 关联沟通记录 ID，可为空
+     * @param jobId           岗位 ID
+     * @param resumeId        简历 ID
+     * @param companyName     公司名称
+     * @param jobTitle        岗位名称
+     * @param currentStatus   当前求职状态
+     * @param hrReplyText     HR 回复原文
+     * @param userNote        用户补充说明
+     * @return 已持久化的识别记录
+     * @throws BizException 模型返回解析失败或时间格式不合法
+     */
     private HrReplyRecognitionRecord recognizeAndSave(
             Long userId,
             Long applicationId,
@@ -234,6 +351,12 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return record;
     }
 
+    /**
+     * 将用户确认时编辑的字段回写到识别记录。
+     *
+     * @param recognition 待更新的识别记录
+     * @param dto         用户确认请求，包含编辑后的建议状态、面试时间、下次跟进时间
+     */
     private void applyUserConfirmedFields(HrReplyRecognitionRecord recognition, HrReplyRecognitionConfirmDTO dto) {
         if (StringUtils.hasText(dto.getSuggestedStatus())) {
             recognition.setSuggestedStatus(normalizeSuggestedStatus(dto.getSuggestedStatus(), recognition.getIntentType()));
@@ -246,6 +369,21 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         }
     }
 
+    /**
+     * 根据识别结果更新沟通记录，并写入消息流水。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>读取并校验沟通记录归属。</li>
+     *   <li>将 HR 回复、AI 回复建议、沟通状态、面试时间等回写沟通记录。</li>
+     *   <li>插入 HR 回复消息和 AI 识别系统消息两条流水。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId      当前登录用户 ID
+     * @param recognition 已确认的识别结果
+     * @return 更新后的沟通记录
+     */
     private JobCommunicationRecord updateCommunicationByRecognition(Long userId, HrReplyRecognitionRecord recognition) {
         JobCommunicationRecord communication = getUserCommunicationRequired(userId, recognition.getCommunicationId());
         String communicationStatus = resolveCommunicationStatus(recognition.getIntentType());
@@ -278,6 +416,16 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return communication;
     }
 
+    /**
+     * 根据识别结果更新求职记录状态。
+     *
+     * <p>通过 {@link JobApplicationService#updateStatus} 复用已有状态更新链路，
+     * 确保面试状态变更后继续触发跟进 Agent、面试准备任务和邮件通知。</p>
+     *
+     * @param userId      当前登录用户 ID
+     * @param recognition 已确认的识别结果
+     * @param dto         用户确认请求，可携带备注
+     */
     private void updateApplicationByRecognition(Long userId, HrReplyRecognitionRecord recognition, HrReplyRecognitionConfirmDTO dto) {
         String suggestedStatus = normalizeSuggestedStatus(recognition.getSuggestedStatus(), recognition.getIntentType());
 
@@ -292,6 +440,17 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         jobApplicationService.updateStatus(userId, recognition.getApplicationId(), statusDTO);
     }
 
+    /**
+     * 解析 HR 回复文本。
+     *
+     * <p>优先级：用户传入的 dto.hrReplyText > fallback（沟通记录中的 hrReply）。
+     * 两者皆空时抛出业务异常。</p>
+     *
+     * @param dto      识别请求 DTO，可能为空
+     * @param fallback 备选 HR 回复文本
+     * @return 非空且已 trim 的 HR 回复文本
+     * @throws BizException HR 回复内容不能为空
+     */
     private String resolveHrReply(HrReplyRecognizeDTO dto, String fallback) {
         String value = dto == null ? null : dto.getHrReplyText();
         if (!StringUtils.hasText(value)) {
@@ -303,6 +462,15 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return value.trim();
     }
 
+    /**
+     * 获取并校验用户沟通记录。
+     *
+     * @param userId          当前登录用户 ID
+     * @param communicationId 沟通记录 ID
+     * @return 归属当前用户且未删除的沟通记录
+     * @throws BizException      沟通记录不存在或 ID 为空
+     * @throws SecurityException 无权访问该沟通记录
+     */
     private JobCommunicationRecord getUserCommunicationRequired(Long userId, Long communicationId) {
         if (communicationId == null) {
             throw new BizException("沟通记录 ID 不能为空");
@@ -318,6 +486,14 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return record;
     }
 
+    /**
+     * 获取并校验用户求职记录。
+     *
+     * @param userId        当前登录用户 ID
+     * @param applicationId 求职记录 ID
+     * @return 归属当前用户的求职记录
+     * @throws BizException 求职记录不存在、无权访问或 ID 为空
+     */
     private JobApplicationRecord getUserApplicationRequired(Long userId, Long applicationId) {
         if (applicationId == null) {
             throw new BizException("求职记录 ID 不能为空");
@@ -330,6 +506,14 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return record;
     }
 
+    /**
+     * 获取并校验用户 HR 回复识别记录。
+     *
+     * @param userId        当前登录用户 ID
+     * @param recognitionId 识别记录 ID
+     * @return 归属当前用户且未删除的识别记录
+     * @throws BizException 识别记录不存在
+     */
     private HrReplyRecognitionRecord getUserRecognitionRequired(Long userId, Long recognitionId) {
         HrReplyRecognitionRecord record = recognitionRecordMapper.selectOne(
                 new LambdaQueryWrapper<HrReplyRecognitionRecord>()
@@ -344,6 +528,19 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return record;
     }
 
+    /**
+     * 构造 HR 回复识别 Prompt。
+     *
+     * <p>Prompt 包含系统时间、岗位上下文、HR 回复原文，要求模型只输出固定格式的 JSON。</p>
+     *
+     * @param nowText       当前系统时间文本
+     * @param companyName   公司名称
+     * @param jobTitle      岗位名称
+     * @param currentStatus 当前求职状态
+     * @param hrReplyText   HR 回复原文
+     * @param userNote      用户补充说明
+     * @return 完整的模型识别 Prompt
+     */
     private String buildPrompt(
             String nowText,
             String companyName,
@@ -387,6 +584,20 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         );
     }
 
+    /**
+     * 构造 Prompt 变量映射，供后台模板引擎引用。
+     *
+     * <p>同时提供驼峰和下划线两种 key 风格，兼容不同模板引用习惯。</p>
+     *
+     * @param nowText       当前系统时间文本
+     * @param companyName   公司名称
+     * @param jobTitle      岗位名称
+     * @param currentStatus 当前求职状态
+     * @param hrReplyText   HR 回复原文
+     * @param userNote      用户补充说明
+     * @param fullPrompt    完整 Prompt 文本
+     * @return 供模型网关使用的变量映射
+     */
     private Map<String, Object> buildPromptVariables(
             String nowText,
             String companyName,
@@ -414,6 +625,13 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return variables;
     }
 
+    /**
+     * 解析模型返回的识别 JSON。
+     *
+     * @param json 模型原始返回文本（已清洗）
+     * @return Jackson JsonNode
+     * @throws BizException JSON 解析失败
+     */
     private JsonNode parseRecognitionJson(String json) {
         try {
             return objectMapper.readTree(cleanJson(json));
@@ -422,6 +640,12 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         }
     }
 
+    /**
+     * 清洗模型返回内容，去除 Markdown 代码块标记。
+     *
+     * @param text 模型原始返回文本
+     * @return 纯 JSON 文本
+     */
     private String cleanJson(String text) {
         if (text == null) {
             return "{}";
@@ -479,6 +703,15 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         }
     }
 
+    /**
+     * 规范化建议求职状态，防止模型返回非法状态值。
+     *
+     * <p>若传入状态不在白名单内，则按意图类型返回默认状态。</p>
+     *
+     * @param suggestedStatus 模型建议的状态
+     * @param intentType      识别出的意图类型
+     * @return 合法的标准求职状态
+     */
     private String normalizeSuggestedStatus(String suggestedStatus, String intentType) {
         String value = StringUtils.hasText(suggestedStatus) ? suggestedStatus.trim() : defaultStatusByIntent(intentType);
         if (!List.of("INTERESTED", "COMMUNICATED", "APPLIED", "INTERVIEWING", "OFFER", "REJECTED", "CLOSED").contains(value)) {
@@ -503,6 +736,12 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return "COMMUNICATED";
     }
 
+    /**
+     * 根据识别意图映射沟通记录状态。
+     *
+     * @param intentType 识别意图类型
+     * @return 沟通状态枚举名称
+     */
     private String resolveCommunicationStatus(String intentType) {
         if ("INTERVIEW_INVITE".equals(intentType)) {
             return CommunicationStatus.INTERVIEW_INVITED.name();
@@ -513,6 +752,15 @@ public class HrReplyRecognitionServiceImpl implements HrReplyRecognitionService 
         return CommunicationStatus.REPLIED.name();
     }
 
+    /**
+     * 保存沟通消息流水。
+     *
+     * @param userId          当前登录用户 ID
+     * @param communicationId 沟通记录 ID
+     * @param senderType      消息发送方类型，如 HR_TO_USER、HR_REPLY_RECOGNIZED
+     * @param content         消息内容
+     * @param statusAfter     消息发生后的沟通状态
+     */
     private void saveCommunicationMessage(Long userId, Long communicationId, String senderType, String content, String statusAfter) {
         JobCommunicationMessage message = new JobCommunicationMessage();
         message.setUserId(userId);

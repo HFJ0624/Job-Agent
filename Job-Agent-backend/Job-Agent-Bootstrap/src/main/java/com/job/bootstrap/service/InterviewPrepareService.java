@@ -3,8 +3,14 @@ package com.job.bootstrap.service;
 import com.job.common.vo.interview.InterviewPrepareVO;
 
 /**
- * 作者:hfj
- * 功能:AI 面试准备服务
+ * AI 面试准备服务接口。
+ *
+ * <p>核心职责：基于求职记录、简历和岗位信息，调用 AI 模型生成个性化面试准备材料，包括常见问题、技术要点及答题建议。</p>
+ *
+ * <p>所属业务模块：求职辅助 - 面试准备</p>
+ *
+ * <p>主要调用链：
+ * InterviewController -&gt; InterviewPrepareService -&gt; InterviewPrepareServiceImpl -&gt; AiModelGatewayService / JobApplicationService / JobResumeService</p>
  */
 public interface InterviewPrepareService {
 

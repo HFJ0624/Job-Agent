@@ -33,9 +33,34 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:后台 AI 模型与路由管理服务实现
- * 日期:2026/6/21
+ * 后台 AI 模型与路由管理服务实现。
+ *
+ * <p>核心职责：为后台运营人员提供 AI 模型配置、模型路由及调用日志的查询与管理能力，
+ * 支持模型增删改查、启用停用、路由策略配置（主模型、Fallback、灰度、AB 实验）以及 Token 和成本统计。</p>
+ *
+ * <p>所属业务模块：AI 基础设施 - 模型管理</p>
+ *
+ * <p>主要调用链：
+ * AdminAiModelController → {@link AdminAiModelServiceImpl} →
+ * AiModelConfigMapper / AiModelRouteMapper / AiModelCallLogMapper → 返回模型、路由或日志 VO</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link AiModelConfigMapper} 管理模型配置 CRUD</li>
+ *   <li>依赖 {@link AiModelRouteMapper} 管理场景级模型路由</li>
+ *   <li>依赖 {@link AiModelCallLogMapper} 查询模型调用日志及成本统计</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>模型编码全局唯一，创建和修改时做唯一性校验。</li>
+ *   <li>API Key 编辑时若前端传脱敏值（含 ******），则保留数据库旧值，避免覆盖。</li>
+ *   <li>路由配置支持主模型 + Fallback 模型，灰度百分比和 AB 分组用于渐进式上线。</li>
+ *   <li>成本统计第一版在 Java 内存聚合，日志量大后建议迁移为数据库 group by 或报表表。</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/21
  */
 @Service
 @RequiredArgsConstructor
@@ -79,9 +104,9 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
     }
 
     /**
-     * 查询启用模型列表。
+     * 查询全部处于 ACTIVE 状态的模型配置列表。
      *
-     * @return 启用模型
+     * @return 启用状态的模型配置列表，按创建时间倒序
      */
     @Override
     public List<AiModelConfigVO> listActiveModels() {
@@ -156,10 +181,10 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
     }
 
     /**
-     * 分页查询模型路由。
+     * 分页查询模型路由配置。
      *
-     * @param query 查询条件
-     * @return 路由分页
+     * @param query 路由查询条件，支持按场景编码、Prompt 编码、主模型编码、状态筛选
+     * @return 模型路由分页
      */
     @Override
     public IPage<AiModelRouteVO> pageRoutes(AiModelRouteQueryDTO query) {
@@ -185,10 +210,13 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
     }
 
     /**
-     * 新增模型路由。
+     * 创建模型路由配置。
      *
-     * @param request 路由表单
-     * @return 保存后的路由
+     * <p>创建前校验主模型及 Fallback 模型是否存在且已启用。</p>
+     *
+     * @param request 路由保存表单
+     * @return 创建后的路由 VO
+     * @throws BizException 当引用的模型不存在或未启用时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -206,11 +234,14 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
     }
 
     /**
-     * 修改模型路由。
+     * 修改模型路由配置。
+     *
+     * <p>修改前校验主模型及 Fallback 模型是否存在且已启用。</p>
      *
      * @param id 路由 ID
-     * @param request 路由表单
-     * @return 修改后的路由
+     * @param request 路由保存表单
+     * @return 修改后的路由 VO
+     * @throws BizException 当路由不存在或引用的模型不合法时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -228,6 +259,7 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
      * 逻辑删除模型路由。
      *
      * @param id 路由 ID
+     * @throws BizException 当路由不存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -242,8 +274,8 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
     /**
      * 分页查询模型调用日志。
      *
-     * @param query 查询条件
-     * @return 调用日志分页
+     * @param query 调用日志查询条件，支持按 Trace ID、用户 ID、场景编码、模型编码、状态及时间范围筛选
+     * @return 模型调用日志分页
      */
     @Override
     public IPage<AiModelCallLogVO> pageCallLogs(AiModelCallLogQueryDTO query) {

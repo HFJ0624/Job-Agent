@@ -25,14 +25,35 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 作者: hfj
- * 功能: Agent 长期记忆上下文服务实现
- * 日期: 2026/6/23
+ * Agent 长期记忆上下文服务实现，负责按 token 预算拼出本轮 Prompt 可用的记忆上下文。
  *
- * 说明:
+ * <p>核心职责：
+ * 解决企业级长期记忆的核心矛盾“记忆库可以很大，但每次 Prompt 必须很小”。
+ * MySQL 保存完整事实，profile 表保存压缩画像，本服务按字符预算组装 Prompt 上下文，
+ * 并在记忆写入或归档后触发画像重建，保持画像与原始事实同步。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Memory 子模块（记忆上下文构建层）。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl.chat -> AgentMemoryContextService.buildContext（Prompt 上下文组装）
+ * AgentMemoryCaptureServiceImpl.captureFromUserMessage -> rebuildProfile（画像重建）
+ * AgentPlanExecutorServiceImpl 执行 Tool 后 -> AgentMemoryExtractionService -> rebuildProfile</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>buildContext 被 Agent 主链路在 Planner 前调用，产出 promptContext 注入到系统 Prompt；</li>
+ *   <li>rebuildProfile 被 AgentMemoryCaptureService / AgentMemoryExtractionService 在写入或归档后调用；</li>
+ *   <li>recallMemories 委托 AgentMemoryService.searchMemories 完成相关记忆召回，后续可替换为向量检索；</li>
+ *   <li>profileSummary 当前存 MySQL，后续可缓存 Redis；searchMemories 内部召回算法后续可替换为向量库。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 这层解决企业级长期记忆的核心问题: “记忆库可以很大，但每次 Prompt 必须很小”。
  * 2. MySQL 保存完整事实，profile 表保存压缩画像，本服务负责按 token 预算拼出本轮可用上下文。
- * 3. 后续接入 Redis 时，可以缓存 profileSummary；接入向量库时，可以替换 searchMemories 内部召回算法。
+ * 3. 后续接入 Redis 时，可以缓存 profileSummary；接入向量库时，可以替换 searchMemories 内部召回算法。</p>
+ *
+ * 作者: hfj
+ * 日期: 2026/6/23
  */
 @Service
 @RequiredArgsConstructor
@@ -80,17 +101,19 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
     private final AgentMemoryService agentMemoryService;
 
     /**
-     * 构造本轮 Prompt 可用的长期记忆上下文。
+     * 构造本轮 Prompt 可用的长期记忆上下文，覆盖画像读取、相关记忆召回与字符预算拼接。
      *
-     * 方法步骤:
-     * 1. 读取用户画像摘要，作为低成本、稳定的默认上下文。
-     * 2. 按当前问题召回少量相关记忆，避免把所有历史事实塞进 Prompt。
-     * 3. 从画像开始拼接，再逐条加入相关记忆，超过字符预算就停止。
-     * 4. 返回 promptContext、命中记忆和粗略 token 估算，方便 Trace 排查。
+     * <p>核心处理流程：
+     * 1. 校验 userId 有效性，无效时返回空上下文，避免后续查询无意义数据；
+     * 2. 读取用户画像摘要（profileSummary），作为低成本、稳定的默认上下文；
+     * 3. 调用 AgentMemoryService.searchMemories 按当前 query 召回少量相关记忆（默认 8 条），
+     *    避免把所有历史事实塞进 Prompt 拖慢推理；
+     * 4. 从画像开始拼接 Prompt 上下文，再逐条加入相关记忆，超过 PROMPT_CONTEXT_MAX_CHARS 即截断；
+     * 5. 回填 profileSummary、命中记忆、promptContext、token 估算与 truncated 标识，便于 Trace 排查。</p>
      *
-     * @param userId 当前用户 ID
-     * @param query 当前问题或检索词
-     * @return 本轮长期记忆上下文
+     * @param userId 当前求职用户 ID，用于定位画像与召回记忆
+     * @param query  当前用户问题或检索词，用于相关记忆召回，可为空
+     * @return 本轮长期记忆上下文 VO，包含 promptContext、命中记忆、画像摘要与 token 估算
      */
     @Override
     public AgentMemoryContextVO buildContext(Long userId, String query) {
@@ -113,6 +136,17 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         return context;
     }
 
+    /**
+     * 读取当前用户最新的有效画像摘要。
+     *
+     * <p>核心处理流程：
+     * 1. 校验 userId 有效性，无效时直接返回 null；
+     * 2. 按 updateTime 倒序查询 agent_user_memory_profile 中未删除的最新一条；
+     * 3. 仅当 status=ACTIVE 时返回，避免已停用画像污染 Prompt 上下文。</p>
+     *
+     * @param userId 当前用户 ID
+     * @return 有效画像 VO，不存在或已停用时返回 null
+     */
     @Override
     public AgentUserMemoryProfileVO getProfile(Long userId) {
         if (userId == null || userId <= 0) {
@@ -133,16 +167,19 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
     }
 
     /**
-     * 重建用户画像摘要。
+     * 重建用户画像摘要，将分散的长期记忆压缩为稳定且可注入 Prompt 的画像文本。
      *
-     * 方法步骤:
-     * 1. 读取当前用户最近、重要、有效的长期记忆，限制最多 100 条，避免后台重建时扫描过多数据。
-     * 2. 优先选择固定 key 的稳定事实，例如 assistant_nickname、preferred_city、target_role。
-     * 3. 其余高重要性记忆作为“其他重要信息”补充，但仍受画像字符预算限制。
-     * 4. 写入或更新 agent_user_memory_profile，后续对话优先读取这份压缩摘要。
+     * <p>核心处理流程：
+     * 1. 校验 userId 有效性，缺失时抛 BizException 中断重建；
+     * 2. 加载当前用户重要、有效、未删除的长期记忆，限制最多 100 条，避免后台重建扫描过多数据；
+     * 3. 按固定 key 顺序（assistant_nickname、preferred_city、target_role 等）优先拼接稳定事实；
+     * 4. 其余高重要性记忆作为“其他重要信息”补充，但仍受 PROFILE_MAX_CHARS 字符预算限制；
+     * 5. 查询已有画像记录，存在则 profileVersion+1 更新，不存在则插入新记录；
+     * 6. 写入或更新 agent_user_memory_profile，后续对话优先读取这份压缩摘要。</p>
      *
-     * @param userId 用户 ID
-     * @return 重建后的画像摘要
+     * @param userId 当前用户 ID，用于定位长期记忆与画像记录
+     * @return 重建后的画像 VO，包含压缩摘要、记忆条数、版本号与最后构建时间
+     * @throws BizException userId 缺失或非正数时抛出，避免无效画像写入
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -181,6 +218,12 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         return AgentUserMemoryProfileVO.from(profile);
     }
 
+    /**
+     * 加载用于画像重建的长期记忆，按重要性 + 更新时间倒序取前 100 条。
+     *
+     * @param userId 当前用户 ID
+     * @return 重要且未删除的有效长期记忆列表，最多 PROFILE_MEMORY_LIMIT 条
+     */
     private List<AgentLongTermMemory> loadProfileMemories(Long userId) {
         return agentLongTermMemoryMapper.selectList(
                 new LambdaQueryWrapper<AgentLongTermMemory>()
@@ -193,6 +236,12 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         );
     }
 
+    /**
+     * 查询当前用户最新画像记录，用于判断本轮重建是 insert 还是 update。
+     *
+     * @param userId 当前用户 ID
+     * @return 未删除的最新画像记录，不存在时返回 null
+     */
     private AgentUserMemoryProfile findProfileForUpdate(Long userId) {
         return agentUserMemoryProfileMapper.selectOne(
                 new LambdaQueryWrapper<AgentUserMemoryProfile>()
@@ -203,6 +252,19 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         );
     }
 
+    /**
+     * 将长期记忆列表压缩为画像摘要文本，固定 key 优先，其余高重要性记忆作为补充。
+     *
+     * <p>核心处理流程：
+     * 1. 记忆为空时直接返回兜底文案“暂无稳定长期记忆。”；
+     * 2. 按 memoryKey 去重保留首条，避免重复事实撑爆画像；
+     * 3. 按 PROFILE_KEY_ORDER 固定顺序拼接稳定事实，保证画像可读性；
+     * 4. 调用 buildExtraMemoryLines 追加最多 4 条其他重要信息作为补充；
+     * 5. 最终结果受 PROFILE_MAX_CHARS 字符预算限制，超出部分截断。</p>
+     *
+     * @param memories 用于画像重建的长期记忆列表
+     * @return 压缩后的画像摘要文本
+     */
     private String buildProfileSummary(List<AgentLongTermMemory> memories) {
         if (CollectionUtils.isEmpty(memories)) {
             return "暂无稳定长期记忆。";
@@ -234,6 +296,13 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         return truncate(StringUtils.hasText(summary) ? summary : "暂无稳定长期记忆。", PROFILE_MAX_CHARS);
     }
 
+    /**
+     * 构建画像中“其他重要信息”补充行，跳过已纳入固定 key 的事实，最多 4 条。
+     *
+     * @param memories 原始长期记忆列表
+     * @param byKey    已去重的 memoryKey -> 记忆映射
+     * @return 最多 4 条补充行文本，每行已截断到 80 字符
+     */
     private List<String> buildExtraMemoryLines(List<AgentLongTermMemory> memories, Map<String, AgentLongTermMemory> byKey) {
         List<String> extras = new ArrayList<>();
         for (AgentLongTermMemory memory : memories) {
@@ -253,6 +322,13 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         return extras;
     }
 
+    /**
+     * 追加一行画像事实到 StringBuilder，value 为空时跳过，保证画像只包含有效信息。
+     *
+     * @param builder 画像文本构建器
+     * @param label   画像字段中文标签
+     * @param value   画像字段值
+     */
     private void appendProfileLine(StringBuilder builder, String label, String value) {
         if (!StringUtils.hasText(value)) {
             return;
@@ -260,6 +336,20 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         builder.append(label).append(": ").append(value.trim()).append('\n');
     }
 
+    /**
+     * 拼接本轮 Prompt 上下文文本，先画像后相关记忆，超过 PROMPT_CONTEXT_MAX_CHARS 即截断。
+     *
+     * <p>核心处理流程：
+     * 1. 画像存在时先写入“【长期记忆画像】”段落，受 PROFILE_MAX_CHARS 限制；
+     * 2. 相关记忆逐条编号写入“【本轮相关长期记忆】”段落，每条限制 120 字符；
+     * 3. 单条追加会超过预算时停止追加并标记 truncated=true，避免 Prompt 过长拖慢推理；
+     * 4. 最终结果再次受 PROMPT_CONTEXT_MAX_CHARS 兜底截断，并把 truncated 回写到 context。</p>
+     *
+     * @param profile         用户画像 VO，可为 null
+     * @param relatedMemories 本轮召回的相关记忆列表，可为空
+     * @param context         上下文 VO，用于回写 truncated 标识
+     * @return 拼接后的 Prompt 上下文文本，可能为空字符串
+     */
     private String buildPromptContext(
             AgentUserMemoryProfileVO profile,
             List<AgentMemoryVO> relatedMemories,
@@ -299,6 +389,12 @@ public class AgentMemoryContextServiceImpl implements AgentMemoryContextService 
         return text;
     }
 
+    /**
+     * 粗略估算 Prompt 上下文 token 数，按 2 字符/token 计算，最少 1。
+     *
+     * @param text 待估算文本
+     * @return token 估算值，文本为空时返回 0
+     */
     private Integer estimateTokens(String text) {
         if (!StringUtils.hasText(text)) {
             return 0;

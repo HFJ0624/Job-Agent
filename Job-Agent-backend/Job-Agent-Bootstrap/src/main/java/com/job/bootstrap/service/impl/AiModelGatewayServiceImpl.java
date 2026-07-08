@@ -48,8 +48,42 @@ import java.util.List;
 import java.util.Map;
 
 /**
+ * AI 模型统一调用网关实现，是企业级模型路由、Prompt 渲染、重试、熔断与成本观测的核心入口。
+ *
+ * <p>核心职责：
+ * 1. 按业务场景（sceneCode）解析模型路由（ai_model_route），支持灰度与 A/B 分流。
+ * 2. 调用 AiPromptRuntimeService 渲染 Prompt（支持固定版本与最新已发布版本）。
+ * 3. 按主模型 + 备用模型顺序调用，单模型按配置重试。
+ * 4. 维护模型熔断状态（CLOSED/OPEN），失败累计达阈值后熔断，冷却时间过后自动恢复。
+ * 5. 每次调用写入 ai_model_call_log，记录 token、费用、耗时，并同步 Observation 事件。
+ * 6. 模型熔断时不真实请求供应商，但仍写 Observation 事件便于排障。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 AI Gateway Service 层。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl.summarizeExecutorResult -> AiModelGatewayServiceImpl.chat (AGENT_SUMMARY)
+ * AgentDailyReportAiComposer.compose -> AiModelGatewayServiceImpl.chat (AGENT_DAILY_REPORT)
+ * -> resolveRoute (路由解析 + 灰度/A-B)
+ * -> AiPromptRuntimeService.renderPrompt (Prompt 渲染)
+ * -> callOpenAiCompatibleModel (HTTP 调用 OpenAI 兼容接口)
+ * -> recordCallLog (写 ai_model_call_log)
+ * -> AgentObservationService.recordEvent (写 MODEL 观测事件)
+ * -> openCircuitIfNeeded / closeCircuit (熔断状态维护)</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AiPromptRuntimeService 负责 Prompt 模板与版本解析；</li>
+ *   <li>ai_model_route / ai_model_config / ai_model_circuit_state 三张表支撑路由、模型与熔断；</li>
+ *   <li>AgentObservationService 接收 MODEL 观测事件，与 Trace 互补；</li>
+ *   <li>调用方（AgentChatServiceImpl）在网关失败时降级为确定性兜底摘要。</li>
+ * </ul></p>
+ *
+ * <p>模型调用与重试机制说明：
+ * 外层循环遍历 [主模型, 备用模型]，内层循环按 maxRetries+1 重试；
+ * 单次失败累计熔断计数，达阈值后 OPEN，冷却时间过后试探恢复（CLOSED）；
+ * 全部模型重试用完仍失败则抛 BizException，由调用方降级。</p>
+ *
  * 作者:hfj
- * 功能:AI 模型统一调用网关实现
  * 日期:2026/6/21
  */
 @Slf4j

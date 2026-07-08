@@ -20,14 +20,37 @@ import org.springframework.util.StringUtils;
 import java.util.*;
 
 /**
- * 作者:hfj
- * 功能:AI 面试准备服务实现
+ * AI 面试准备服务实现。
  *
- * 设计说明:
- * 1. 第一版采用规则生成，确保稳定可用。
- * 2. 技术题来自岗位 skillKeywords 和 JD。
- * 3. 项目追问题来自简历 rawText 和岗位要求。
- * 4. 后续接入 LLM 时，可以把这些规则输出作为 Prompt 上下文。
+ * <p>核心职责：基于用户求职记录、岗位 JD 和简历内容，生成结构化面试准备材料，包括技术题、项目追问题、HR 题和复习建议。</p>
+ *
+ * <p>所属业务模块：面试辅导模块（interview）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>前端调用 {@link #generatePrepare} 生成面试准备；</li>
+ *   <li>内部按岗位 skillKeywords 和 JD 构建技术题，按简历 rawText 构建项目追问题；</li>
+ *   <li>结果持久化到 interview_prepare_record 表；</li>
+ *   <li>前端调用 {@link #getLatestPrepare} 查询最近一次准备记录。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link JobPositionService} 获取岗位信息；</li>
+ *   <li>依赖 {@link JobResumeService} 获取并解析简历文本；</li>
+ *   <li>依赖 {@link InterviewPrepareRecordMapper} 进行数据持久化。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>第一版采用规则生成，确保稳定可用，不依赖大模型；</li>
+ *   <li>技术题来自岗位 skillKeywords 和 JD 关键词匹配；</li>
+ *   <li>项目追问题来自简历 rawText 和岗位要求；</li>
+ *   <li>后续接入 LLM 时，可将规则输出作为 Prompt 上下文，只需替换 build 方法即可。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -297,6 +320,13 @@ public class InterviewPrepareServiceImpl implements InterviewPrepareService {
                 .toList();
     }
 
+    /**
+     * 判断文本中是否包含任意一个关键词（不区分大小写）。
+     *
+     * @param text     待检查文本
+     * @param keywords 关键词列表
+     * @return 包含任意关键词返回 true，否则返回 false
+     */
     private boolean containsAny(String text, List<String> keywords) {
         String lower = safe(text).toLowerCase(Locale.ROOT);
 
@@ -309,14 +339,33 @@ public class InterviewPrepareServiceImpl implements InterviewPrepareService {
         return false;
     }
 
+    /**
+     * 字符串空值兜底，null 转为空字符串。
+     *
+     * @param value 原始字符串
+     * @return 非空字符串
+     */
     private String safe(String value) {
         return value == null ? "" : value;
     }
 
+    /**
+     * 字符串空值兜底，无有效内容时返回默认值。
+     *
+     * @param value        原始字符串
+     * @param defaultValue 默认值
+     * @return 有效字符串或默认值
+     */
     private String safeValue(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
     }
 
+    /**
+     * 对象序列化为 JSON 字符串，失败返回空数组字符串。
+     *
+     * @param value 待序列化对象
+     * @return JSON 字符串
+     */
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);

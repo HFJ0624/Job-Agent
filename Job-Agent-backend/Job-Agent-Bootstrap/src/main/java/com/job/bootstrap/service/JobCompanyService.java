@@ -8,9 +8,14 @@ import com.job.common.vo.company.CompanyImportVO;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 作者:hfj
- * 功能:公司业务服务接口，定义后台公司列表、增删改查和 Excel 导入能力
- * 日期:2026/6/6 10:30
+ * 公司业务服务接口。
+ *
+ * <p>核心职责：管理公司信息的全生命周期，包括分页查询、增删改查及批量 Excel 导入。</p>
+ *
+ * <p>所属业务模块：岗位管理 - 公司信息</p>
+ *
+ * <p>主要调用链：
+ * JobCompanyController / JobPositionService -&gt; JobCompanyService -&gt; JobCompanyServiceImpl -&gt; JobCompanyRepository</p>
  */
 public interface JobCompanyService extends IService<JobCompany> {
 

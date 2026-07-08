@@ -27,12 +27,37 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 功能: AI 投递决策服务实现。
+ * AI 投递决策服务实现。
  *
- * 设计:
- * 1. 复用已有岗位匹配结果，避免重复计算“简历和岗位像不像”。
- * 2. 再交给模型判断“是否值得投”，输出决策、风险和行动建议。
- * 3. 模型 JSON 解析失败直接报错，不保存脏记录。
+ * <p>核心职责：基于已有岗位匹配结果和大模型分析，判断某岗位对当前简历是否值得投递，
+ * 输出决策结论（建议投递 / 谨慎投递 / 暂不投递）、风险点、简历优化建议、面试准备建议和下一步行动。</p>
+ *
+ * <p>所属业务模块：求职决策 - AI 智能投递决策子模块</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>用户触发：Controller -> {@link #generateDecision}</li>
+ *   <li>匹配复用：{@code generateDecision -> JobMatchService.getLatestMatch / matchJob}</li>
+ *   <li>模型决策：{@code AiModelGatewayService.chat} 生成结构化决策 JSON</li>
+ *   <li>结果持久化：保存 {@link JobApplyDecisionRecord} 并返回 {@link JobApplyDecisionVO}</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link JobMatchService}：复用岗位匹配结果，避免重复计算“简历和岗位像不像”</li>
+ *   <li>{@link AiModelGatewayService}：统一模型网关，负责 Prompt 路由和调用日志</li>
+ *   <li>{@link JobResumeService} / {@link JobPositionService}：读取简历和岗位基础信息</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>复用已有岗位匹配结果，避免重复计算“简历和岗位像不像”。</li>
+ *   <li>再交给模型判断“是否值得投”，输出决策、风险和行动建议。</li>
+ *   <li>模型 JSON 解析失败直接报错，不保存脏记录。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -49,6 +74,24 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
     private final AiModelGatewayService aiModelGatewayService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 生成简历对指定岗位的 AI 投递决策。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验简历归属和岗位发布状态。</li>
+     *   <li>复用或触发岗位匹配，获取匹配结果。</li>
+     *   <li>构造决策 Prompt 并调用模型网关生成决策 JSON。</li>
+     *   <li>解析并校验模型结果，持久化后返回 VO。</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param jobId    岗位 ID
+     * @return AI 投递决策结果，包含决策结论、风险点和行动建议
+     * @throws BizException 岗位未发布、模型解析失败
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public JobApplyDecisionVO generateDecision(Long userId, Long resumeId, Long jobId) {
@@ -79,6 +122,14 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return JobApplyDecisionVO.from(record, objectMapper);
     }
 
+    /**
+     * 查询指定简历与岗位最近一次投递决策记录。
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param jobId    岗位 ID
+     * @return 最近一次的投递决策结果，不存在时返回 null
+     */
     @Override
     public JobApplyDecisionVO getLatestDecision(Long userId, Long resumeId, Long jobId) {
         JobApplyDecisionRecord record = decisionMapper.selectOne(new LambdaQueryWrapper<JobApplyDecisionRecord>()
@@ -91,6 +142,16 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return JobApplyDecisionVO.from(record, objectMapper);
     }
 
+    /**
+     * 构造投递决策 Prompt 变量映射，供后台模板引擎引用。
+     *
+     * <p>同时提供驼峰和下划线两种 key 风格，兼容不同模板引用习惯。</p>
+     *
+     * @param resume 简历信息
+     * @param job    岗位信息
+     * @param match  岗位匹配结果
+     * @return 供模型网关使用的变量映射
+     */
     private Map<String, Object> buildVariables(JobResume resume, JobPosition job, JobMatchVO match) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("resumeName", resume.getResumeName());
@@ -108,6 +169,14 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return variables;
     }
 
+    /**
+     * 构造投递决策 Prompt，要求模型输出固定格式的 JSON 决策结果。
+     *
+     * @param resume 简历信息
+     * @param job    岗位信息
+     * @param match  岗位匹配结果
+     * @return 完整的模型决策 Prompt
+     */
     private String buildDecisionPrompt(JobResume resume, JobPosition job, JobMatchVO match) {
         return """
                 请你作为求职决策顾问，基于简历、岗位和岗位匹配结果，判断这个岗位是否值得投递。
@@ -167,6 +236,18 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         );
     }
 
+    /**
+     * 将模型决策结果转换为持久化实体。
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param job      岗位信息
+     * @param match    岗位匹配结果
+     * @param traceId  模型调用 TraceId
+     * @param response 模型原始响应
+     * @param result   解析后的决策结果
+     * @return 待持久化的决策记录
+     */
     private JobApplyDecisionRecord toRecord(
             Long userId,
             Long resumeId,
@@ -198,6 +279,13 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return record;
     }
 
+    /**
+     * 解析模型返回的决策 JSON 并校验必填字段。
+     *
+     * @param response 模型原始响应文本
+     * @return 解析后的决策结果
+     * @throws BizException JSON 解析失败或必填字段缺失
+     */
     private LlmDecisionResult parseDecisionResult(String response) {
         try {
             LlmDecisionResult result = objectMapper.readValue(extractJson(response), LlmDecisionResult.class);
@@ -210,6 +298,12 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         }
     }
 
+    /**
+     * 校验模型决策结果的关键字段完整性。
+     *
+     * @param result 解析后的决策结果
+     * @throws BizException 关键字段缺失时抛出
+     */
     private void validateResult(LlmDecisionResult result) {
         if (result == null
                 || !StringUtils.hasText(result.decision())
@@ -219,6 +313,13 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         }
     }
 
+    /**
+     * 从模型响应中提取 JSON 对象，兼容 Markdown 代码块包裹。
+     *
+     * @param response 模型原始响应文本
+     * @return 纯 JSON 文本
+     * @throws BizException 未返回合法 JSON 时抛出
+     */
     private String extractJson(String response) {
         if (!StringUtils.hasText(response)) {
             throw new BizException("AI投递决策解析失败，请稍后重试");
@@ -232,6 +333,12 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return cleaned.substring(start, end + 1);
     }
 
+    /**
+     * 规范化决策编码，非法值时默认返回 CAUTIOUS。
+     *
+     * @param decision 原始决策编码
+     * @return 规范化的标准决策编码
+     */
     private String normalizeDecision(String decision) {
         String value = decision == null ? "" : decision.trim().toUpperCase();
         if ("APPLY".equals(value) || "CAUTIOUS".equals(value) || "SKIP".equals(value)) {
@@ -240,6 +347,13 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return "CAUTIOUS";
     }
 
+    /**
+     * 规范化决策标签，空值时按决策编码映射默认中文标签。
+     *
+     * @param label    原始决策标签
+     * @param decision 规范化的决策编码
+     * @return 中文决策标签
+     */
     private String normalizeDecisionLabel(String label, String decision) {
         if (StringUtils.hasText(label)) {
             return label.trim();
@@ -251,11 +365,23 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         };
     }
 
+    /**
+     * double 决策分转 BigDecimal，限制在 0~100 范围并保留两位小数。
+     *
+     * @param score 原始决策分
+     * @return 规范化后的 BigDecimal 分数
+     */
     private BigDecimal toScore(Double score) {
         double value = score == null ? 0 : Math.max(0, Math.min(100, score));
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * 限制字符串列表长度和空值，最多保留 5 条非空文本。
+     *
+     * @param values 原始字符串列表
+     * @return 清洗后的列表
+     */
     private List<String> limitList(List<String> values) {
         if (values == null) {
             return List.of();
@@ -267,6 +393,12 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
                 .toList();
     }
 
+    /**
+     * 拼接岗位文本，用于 Prompt 中的岗位信息展示。
+     *
+     * @param job 岗位信息
+     * @return 格式化的岗位文本
+     */
     private String buildJobText(JobPosition job) {
         return String.join("\n",
                 "岗位名称: " + safe(job.getJobTitle()),
@@ -277,6 +409,13 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         );
     }
 
+    /**
+     * 截断文本至指定最大长度。
+     *
+     * @param value     原始文本
+     * @param maxLength 最大字符数
+     * @return 截断后的文本
+     */
     private String truncate(String value, int maxLength) {
         if (!StringUtils.hasText(value) || value.length() <= maxLength) {
             return value;
@@ -284,6 +423,12 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         return value.substring(0, maxLength);
     }
 
+    /**
+     * 将对象序列化为 JSON 字符串。
+     *
+     * @param value 待序列化对象
+     * @return JSON 字符串，失败时返回 "[]"
+     */
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -292,10 +437,24 @@ public class JobApplyDecisionServiceImpl implements JobApplyDecisionService {
         }
     }
 
+    /**
+     * 构建投递决策模型调用 TraceId。
+     *
+     * @param userId   当前登录用户 ID
+     * @param resumeId 简历 ID
+     * @param jobId    岗位 ID
+     * @return 唯一 TraceId
+     */
     private String buildTraceId(Long userId, Long resumeId, Long jobId) {
         return "apply_decision_" + userId + "_" + resumeId + "_" + jobId + "_" + UUID.randomUUID();
     }
 
+    /**
+     * 空值安全的字符串转换，null 时返回空字符串。
+     *
+     * @param value 原始字符串
+     * @return 非空字符串
+     */
     private String safe(String value) {
         return value == null ? "" : value;
     }

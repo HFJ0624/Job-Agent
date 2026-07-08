@@ -19,9 +19,39 @@ import java.util.Date;
 import java.util.Objects;
 
 /**
- * 作者:hfj
- * 功能:用户业务服务实现，处理注册、登录、资料修改和用户分页查询
- * 日期:2026/6/2 10:45
+ * 用户业务服务实现类。
+ *
+ * <p>核心职责：负责用户（JobUser）账户全生命周期管理，包括用户注册、登录认证、
+ * 个人资料修改以及后台用户分页查询。提供用户名/手机号/邮箱唯一性校验与密码安全校验能力。</p>
+ *
+ * <p>所属业务模块：用户中心模块（User Center）</p>
+ *
+ * <p>主要调用链：
+ * <pre>
+ * JobUserController -&gt; JobUserService -&gt; JobUserServiceImpl
+ *                              |
+ *                              v
+ *                       JobUserMapper / PasswordEncoder
+ * </pre></p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>继承 {@link ServiceImpl}，依赖 {@link JobUserMapper} 进行用户持久化操作</li>
+ *   <li>依赖 {@link PasswordEncoder}（BCrypt）进行密码加密与登录时的密文比对</li>
+ *   <li>被 {@link JobResumeServiceImpl} 等模块依赖，用于用户存在性校验</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>所有写操作均使用 {@link Transactional} 保证事务一致性</li>
+ *   <li>注册时对用户名、手机号、邮箱进行唯一性校验，防止脏数据入库</li>
+ *   <li>登录支持用户名/手机号/邮箱三种账号类型，密码必须使用 BCrypt 密文存储</li>
+ *   <li>资料修改接口禁止修改密码和账号状态，避免权限提升风险</li>
+ *   <li>登录失败时在控制台打印诊断日志，便于排查密码格式问题（不泄露完整密码）</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/2
  */
 @Service
 @RequiredArgsConstructor
@@ -46,7 +76,9 @@ public class JobUserServiceImpl extends ServiceImpl<JobUserMapper, JobUser> impl
 
     /**
      * 注册用户。
-     * P表示参数描述，注册前会检查用户名、手机号、邮箱是否重复。
+     *
+     * <p>对用户名字段去空后，依次校验用户名、手机号、邮箱的唯一性；
+     * 密码使用 BCrypt 加密存储，状态默认正常，并填充创建与更新时间。</p>
      *
      * @param user 前端提交后转换出来的用户实体
      * @return 返回保存后的用户实体
@@ -84,9 +116,11 @@ public class JobUserServiceImpl extends ServiceImpl<JobUserMapper, JobUser> impl
 
     /**
      * 用户登录。
-     * P表示参数描述，account 可以是用户名、手机号或邮箱。
      *
-     * @param account 登录账号
+     * <p>支持使用用户名、手机号或邮箱作为登录账号；登录时校验用户存在性、密码 BCrypt 格式、
+     * 密码匹配度以及账号禁用状态，任一条件不满足均抛出 {@link BizException}。</p>
+     *
+     * @param account 登录账号（用户名/手机号/邮箱）
      * @param rawPassword 前端提交的明文密码
      * @return 返回登录成功的用户实体
      */
@@ -129,7 +163,9 @@ public class JobUserServiceImpl extends ServiceImpl<JobUserMapper, JobUser> impl
     }
 
     /**
-     * 根据用户 ID 查询用户。
+     * 根据用户 ID 查询未删除的用户。
+     *
+     * <p>若用户不存在或已被逻辑删除，则抛出 {@link BizException}。</p>
      *
      * @param userId 用户 ID
      * @return 返回用户实体，不存在时抛出业务异常
@@ -148,7 +184,9 @@ public class JobUserServiceImpl extends ServiceImpl<JobUserMapper, JobUser> impl
 
     /**
      * 修改当前登录用户资料。
-     * P表示参数描述，只允许修改资料字段，不能通过这个方法改密码或账号状态。
+     *
+     * <p>只允许修改昵称、真实姓名、手机号、邮箱、头像、性别、学历、工作年限等资料字段；
+     * 禁止通过本方法修改密码、用户名、账号状态或删除标记。手机号与邮箱变更时需排除自身后校验唯一性。</p>
      *
      * @param userId 当前登录用户 ID
      * @param profile 前端提交的资料字段

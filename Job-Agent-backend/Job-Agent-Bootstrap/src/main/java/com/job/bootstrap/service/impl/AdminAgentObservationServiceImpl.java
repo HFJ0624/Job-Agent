@@ -55,9 +55,38 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 作者: hfj
- * 功能: 后台 Agent 统一观测查询、统计、告警和保留策略服务实现
- * 日期: 2026/6/22
+ * 后台 Agent 统一观测查询、统计、告警和保留策略服务实现。
+ *
+ * <p>核心职责：为后台运营人员提供 Agent 全链路可观测能力，
+ * 覆盖观测事件（Observation Event）分页查询、看板聚合统计、告警规则评估与告警记录管理，
+ * 以及 Trace 日志保留策略的制定与执行，帮助管理员及时发现 Agent 运行异常并控制存储成本。</p>
+ *
+ * <p>所属业务模块：Agent 运营中心 - 统一观测（Observability）</p>
+ *
+ * <p>主要调用链：
+ * AdminAgentObservationController → {@link AdminAgentObservationServiceImpl} →
+ * AgentObservationEventMapper / AgentObservationAlertRuleMapper / AgentObservationAlertRecordMapper /
+ * AgentTraceRetentionPolicyMapper / AgentTraceLogMapper / AiModelCallLogMapper → 返回观测事件、看板、告警或策略 VO</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 AgentObservationEventMapper 读取 Agent 观测事件明细</li>
+ *   <li>依赖 AgentObservationAlertRuleMapper 管理告警规则 CRUD</li>
+ *   <li>依赖 AgentObservationAlertRecordMapper 管理告警记录</li>
+ *   <li>依赖 AgentTraceRetentionPolicyMapper 管理 Trace 保留策略</li>
+ *   <li>依赖 AgentTraceLogMapper 和 AiModelCallLogMapper 执行保留策略时的逻辑删除</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>看板数据默认查询最近 7 天，避免无筛选条件时扫描全表。</li>
+ *   <li>告警评估支持失败率、错误分类计数、平均耗时、总成本、Guardrail 拦截等多种规则类型，并具备冷却期机制。</li>
+ *   <li>保留策略采用白名单制限制目标表，只允许逻辑删除，防止误删核心数据。</li>
+ *   <li>每日凌晨 3 点定时执行告警评估和保留策略清理，异常只记录日志不中断调度。</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/22
  */
 @Slf4j
 @Service
@@ -168,6 +197,12 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return buildFailureStats(loadDashboardEvents(query));
     }
 
+    /**
+     * 分页查询告警规则。
+     *
+     * @param query 告警规则查询条件，支持按规则名称、类型、状态筛选
+     * @return 告警规则分页
+     */
     @Override
     public IPage<AgentObservationAlertRuleVO> pageAlertRules(AgentObservationAlertRuleQueryDTO query) {
         AgentObservationAlertRuleQueryDTO safeQuery = query == null ? new AgentObservationAlertRuleQueryDTO() : query;
@@ -187,6 +222,12 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return agentObservationAlertRuleMapper.selectPage(page, wrapper).convert(AgentObservationAlertRuleVO::from);
     }
 
+    /**
+     * 创建告警规则。
+     *
+     * @param request 告警规则保存表单
+     * @return 创建后的告警规则 VO
+     */
     @Override
     public AgentObservationAlertRuleVO createAlertRule(AgentObservationAlertRuleSaveDTO request) {
         AgentObservationAlertRule rule = new AgentObservationAlertRule();
@@ -199,6 +240,14 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return AgentObservationAlertRuleVO.from(rule);
     }
 
+    /**
+     * 修改告警规则。
+     *
+     * @param id 告警规则 ID
+     * @param request 告警规则保存表单
+     * @return 修改后的告警规则 VO
+     * @throws BizException 当规则不存在时抛出
+     */
     @Override
     public AgentObservationAlertRuleVO updateAlertRule(Long id, AgentObservationAlertRuleSaveDTO request) {
         AgentObservationAlertRule rule = loadAlertRule(id);
@@ -208,6 +257,12 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return AgentObservationAlertRuleVO.from(rule);
     }
 
+    /**
+     * 逻辑删除告警规则。
+     *
+     * @param id 告警规则 ID
+     * @throws BizException 当规则不存在时抛出
+     */
     @Override
     public void deleteAlertRule(Long id) {
         AgentObservationAlertRule rule = loadAlertRule(id);
@@ -255,6 +310,12 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return alerts;
     }
 
+    /**
+     * 分页查询告警记录。
+     *
+     * @param query 告警记录查询条件，支持按规则 ID、类型、级别、状态及时间范围筛选
+     * @return 告警记录分页
+     */
     @Override
     public IPage<AgentObservationAlertRecordVO> pageAlertRecords(AgentObservationAlertRecordQueryDTO query) {
         AgentObservationAlertRecordQueryDTO safeQuery = query == null ? new AgentObservationAlertRecordQueryDTO() : query;
@@ -283,6 +344,14 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return agentObservationAlertRecordMapper.selectPage(page, wrapper).convert(AgentObservationAlertRecordVO::from);
     }
 
+    /**
+     * 修改告警记录处理状态。
+     *
+     * @param id 告警记录 ID
+     * @param status 目标告警状态
+     * @return 修改后的告警记录 VO
+     * @throws BizException 当记录不存在时抛出
+     */
     @Override
     public AgentObservationAlertRecordVO updateAlertRecordStatus(Long id, String status) {
         AgentObservationAlertRecord record = agentObservationAlertRecordMapper.selectById(id);
@@ -296,6 +365,11 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return AgentObservationAlertRecordVO.from(record);
     }
 
+    /**
+     * 查询全部 Trace 保留策略列表。
+     *
+     * @return 按目标表升序、创建时间倒序排列的策略列表
+     */
     @Override
     public List<AgentTraceRetentionPolicyVO> listRetentionPolicies() {
         return agentTraceRetentionPolicyMapper.selectList(new LambdaQueryWrapper<AgentTraceRetentionPolicy>()
@@ -307,6 +381,12 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
                 .toList();
     }
 
+    /**
+     * 创建 Trace 保留策略。
+     *
+     * @param request 策略保存表单
+     * @return 创建后的策略 VO
+     */
     @Override
     public AgentTraceRetentionPolicyVO createRetentionPolicy(AgentTraceRetentionPolicySaveDTO request) {
         AgentTraceRetentionPolicy policy = new AgentTraceRetentionPolicy();
@@ -320,6 +400,14 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return AgentTraceRetentionPolicyVO.from(policy);
     }
 
+    /**
+     * 修改 Trace 保留策略。
+     *
+     * @param id 策略 ID
+     * @param request 策略保存表单
+     * @return 修改后的策略 VO
+     * @throws BizException 当策略不存在时抛出
+     */
     @Override
     public AgentTraceRetentionPolicyVO updateRetentionPolicy(Long id, AgentTraceRetentionPolicySaveDTO request) {
         AgentTraceRetentionPolicy policy = loadRetentionPolicy(id);
@@ -329,6 +417,13 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return AgentTraceRetentionPolicyVO.from(policy);
     }
 
+    /**
+     * 预览保留策略执行效果，计算截止时间及匹配记录数，不实际删除数据。
+     *
+     * @param id 策略 ID
+     * @return 策略预览信息，包含截止时间及匹配记录数
+     * @throws BizException 当策略不存在时抛出
+     */
     @Override
     public AgentTraceRetentionPreviewVO previewRetentionPolicy(Long id) {
         AgentTraceRetentionPolicy policy = loadRetentionPolicy(id);
@@ -338,13 +433,17 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
     /**
      * 执行单条 Trace 保留策略。
      *
-     * 方法步骤:
-     * 1. 先根据 retentionDays 计算截止时间。
-     * 2. 目标表必须命中后端白名单，避免前端传任意表名。
-     * 3. 只做 is_deleted=1 逻辑删除，并限制 batchSize。
+     * <p>方法步骤：</p>
+     * <ol>
+     *   <li>先根据 retentionDays 计算截止时间。</li>
+     *   <li>目标表必须命中后端白名单，避免前端传任意表名。</li>
+     *   <li>只做 is_deleted=1 逻辑删除，并限制 batchSize。</li>
+     *   <li>更新策略最后执行时间和本次删除数量。</li>
+     * </ol>
      *
      * @param id 策略 ID
      * @return 执行后的预览信息
+     * @throws BizException 当策略不存在或目标表不合法时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -361,11 +460,16 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
     }
 
     /**
-     * 每天凌晨执行维护任务。
+     * 每天凌晨 3 点执行可观测性维护任务。
      *
-     * 说明:
-     * 1. 告警评估和保留策略都属于可观测性后台维护，不参与用户请求主流程。
-     * 2. 任何异常都只记录日志，避免定时任务中断影响应用启动或后续调度。
+     * <p>方法步骤：</p>
+     * <ol>
+     *   <li>评估所有启用状态的告警规则，生成新的告警记录。</li>
+     *   <li>执行所有启用状态的 Trace 保留策略，清理过期数据。</li>
+     * </ol>
+     *
+     * <p>说明：告警评估和保留策略都属于可观测性后台维护，不参与用户请求主流程。
+     * 任何异常都只记录日志，避免定时任务中断影响应用启动或后续调度。</p>
      */
     @Scheduled(cron = "0 0 3 * * ?")
     public void runDailyObservationMaintenance() {
@@ -595,6 +699,13 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return now.getTime() - rule.getLastAlertTime().getTime() < cooldownMs;
     }
 
+    /**
+     * 将告警规则表单数据填充到实体中，处理默认值及枚举转换。
+     *
+     * @param rule 待填充的告警规则实体
+     * @param request 告警规则保存表单
+     * @throws BizException 当必填项为空时抛出
+     */
     private void fillAlertRule(AgentObservationAlertRule rule, AgentObservationAlertRuleSaveDTO request) {
         String ruleName = requireText(request.getRuleName(), "规则名称不能为空");
         AgentObservationAlertRuleType ruleType = parseRuleType(request.getRuleType());
@@ -616,6 +727,13 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         rule.setRemark(trimToNull(request.getRemark()));
     }
 
+    /**
+     * 按 ID 加载告警规则，并校验未删除状态。
+     *
+     * @param id 告警规则 ID
+     * @return 有效的告警规则实体
+     * @throws BizException 当规则不存在或已删除时抛出
+     */
     private AgentObservationAlertRule loadAlertRule(Long id) {
         AgentObservationAlertRule rule = agentObservationAlertRuleMapper.selectById(id);
         if (rule == null || Integer.valueOf(DELETED).equals(rule.getIsDeleted())) {
@@ -624,6 +742,13 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return rule;
     }
 
+    /**
+     * 将保留策略表单数据填充到实体中，校验目标表白名单。
+     *
+     * @param policy 待填充的保留策略实体
+     * @param request 策略保存表单
+     * @throws BizException 当必填项为空或目标表不合法时抛出
+     */
     private void fillRetentionPolicy(AgentTraceRetentionPolicy policy, AgentTraceRetentionPolicySaveDTO request) {
         String policyName = requireText(request.getPolicyName(), "策略名称不能为空");
         String targetTable = assertAllowedTargetTable(request.getTargetTable());
@@ -635,6 +760,13 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         policy.setRemark(trimToNull(request.getRemark()));
     }
 
+    /**
+     * 按 ID 加载保留策略，并校验未删除状态。
+     *
+     * @param id 保留策略 ID
+     * @return 有效的保留策略实体
+     * @throws BizException 当策略不存在或已删除时抛出
+     */
     private AgentTraceRetentionPolicy loadRetentionPolicy(Long id) {
         AgentTraceRetentionPolicy policy = agentTraceRetentionPolicyMapper.selectById(id);
         if (policy == null || Integer.valueOf(DELETED).equals(policy.getIsDeleted())) {
@@ -643,6 +775,12 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         return policy;
     }
 
+    /**
+     * 预览保留策略执行效果，计算截止时间及匹配记录数。
+     *
+     * @param policy 保留策略实体
+     * @return 策略预览信息
+     */
     private AgentTraceRetentionPreviewVO previewPolicy(AgentTraceRetentionPolicy policy) {
         Date cutoffTime = retentionCutoff(policy);
         return AgentTraceRetentionPreviewVO.builder()
@@ -677,6 +815,17 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         };
     }
 
+    /**
+     * 对目标表执行逻辑删除，只删除 retentionDays 之前的记录，并限制单次 batchSize。
+     *
+     * <p>目标表必须通过 {@link #assertAllowedTargetTable} 白名单校验，
+     * 目前支持 agent_observation_event、agent_trace_log、ai_model_call_log。</p>
+     *
+     * @param targetTable 目标表名
+     * @param cutoffTime 截止时间，早于该时间的记录将被删除
+     * @param batchSize 单次最大删除数量
+     * @return 实际删除的记录数
+     */
     private int executeLogicalDelete(String targetTable, Date cutoffTime, int batchSize) {
         Date now = new Date();
         return switch (assertAllowedTargetTable(targetTable)) {
@@ -702,6 +851,13 @@ public class AdminAgentObservationServiceImpl implements AdminAgentObservationSe
         };
     }
 
+    /**
+     * 校验目标表是否处于白名单内，防止前端传入任意表名导致误删。
+     *
+     * @param targetTable 待校验的目标表名
+     * @return 清理后的目标表名
+     * @throws BizException 当目标表为空或不合法时抛出
+     */
     private String assertAllowedTargetTable(String targetTable) {
         if (!StringUtils.hasText(targetTable)) {
             throw new BizException("目标表不能为空");

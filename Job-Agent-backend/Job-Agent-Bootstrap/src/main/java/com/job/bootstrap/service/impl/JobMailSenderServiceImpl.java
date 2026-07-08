@@ -16,13 +16,35 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * 功能：基于 Spring Mail 的邮件发送实现。
+ * 基于 Spring Mail 的邮件发送服务实现。
  *
- * 实现步骤：
- * 1. 从 JobMailProperties 读取默认邮箱账号，第一版默认是 mail.qq。
- * 2. 将 application-local.yml 里的 host、port、username、password、ssl 等配置转换成 JavaMail 配置。
- * 3. 创建 MimeMessage 并发送纯文本邮件。
- * 4. 发送失败时抛出业务异常，让工作流任务队列接管重试和失败记录。
+ * <p>核心职责：读取应用配置文件中的邮箱账号信息，构建 JavaMailSender 并发送纯文本邮件。
+ * 发送失败时统一抛出业务异常，由上层工作流任务队列接管重试和失败记录。</p>
+ *
+ * <p>所属业务模块：系统基础设施 - 邮件通知服务</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>业务服务 / Agent 任务调用 {@link #sendText}</li>
+ *   <li>从 {@link JobMailProperties} 读取默认账号配置</li>
+ *   <li>构建 {@link JavaMailSenderImpl} 并发送 {@link MimeMessage}</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link JobMailProperties}：承载 application-local.yml 中的多账号邮件配置</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>从 JobMailProperties 读取默认邮箱账号，第一版默认是 mail.qq。</li>
+ *   <li>将 application-local.yml 里的 host、port、username、password、ssl 等配置转换成 JavaMail 配置。</li>
+ *   <li>创建 MimeMessage 并发送纯文本邮件。</li>
+ *   <li>发送失败时抛出业务异常，让工作流任务队列接管重试和失败记录。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -30,6 +52,23 @@ public class JobMailSenderServiceImpl implements JobMailSenderService {
 
     private final JobMailProperties mailProperties;
 
+    /**
+     * 发送纯文本邮件。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>校验收件人邮箱非空。</li>
+     *   <li>读取默认邮件账号配置并校验完整性。</li>
+     *   <li>构建 {@link JavaMailSenderImpl} 和 {@link MimeMessageHelper}，显式指定编码避免中文乱码。</li>
+     *   <li>执行发送，异常时转为业务异常抛出。</li>
+     * </ol>
+     * </p>
+     *
+     * @param to      收件人邮箱地址
+     * @param subject 邮件主题
+     * @param content 邮件正文（纯文本）
+     * @throws BizException 收件人邮箱为空、账号配置不完整或 SMTP 发送失败
+     */
     @Override
     public void sendText(String to, String subject, String content) {
         if (!StringUtils.hasText(to)) {
@@ -62,6 +101,12 @@ public class JobMailSenderServiceImpl implements JobMailSenderService {
         }
     }
 
+    /**
+     * 根据账号配置构建 JavaMailSenderImpl。
+     *
+     * @param account 邮件账号配置
+     * @return 已配置完成的邮件发送器
+     */
     private JavaMailSenderImpl buildSender(JobMailProperties.MailAccount account) {
         JavaMailSenderImpl sender = new JavaMailSenderImpl();
         sender.setHost(account.getHost());
@@ -74,6 +119,15 @@ public class JobMailSenderServiceImpl implements JobMailSenderService {
         return sender;
     }
 
+    /**
+     * 将嵌套 Map 配置压平为 JavaMail 所需的 Properties。
+     *
+     * <p>yml 中 properties.mail.smtp.auth 这种嵌套结构会被递归压平为 mail.smtp.auth。
+     * 同时设置默认 SMTP 超时，避免工作流线程因网络阻塞长时间挂起。</p>
+     *
+     * @param source 嵌套配置 Map
+     * @return 压平后的 JavaMail Properties
+     */
     private Properties toJavaMailProperties(Map<String, Object> source) {
         Properties properties = new Properties();
 
@@ -92,6 +146,13 @@ public class JobMailSenderServiceImpl implements JobMailSenderService {
         return properties;
     }
 
+    /**
+     * 递归压平嵌套 Map，将其转换为 Properties 的平铺键值对。
+     *
+     * @param prefix 当前层级前缀
+     * @param source 源嵌套 Map
+     * @param target 目标 Properties
+     */
     @SuppressWarnings("unchecked")
     private void flatten(String prefix, Map<String, Object> source, Properties target) {
         if (source == null || source.isEmpty()) {
@@ -109,6 +170,12 @@ public class JobMailSenderServiceImpl implements JobMailSenderService {
         }
     }
 
+    /**
+     * 解析字符集，空值时默认返回 UTF-8。
+     *
+     * @param charsetName 字符集名称
+     * @return 对应的 {@link Charset} 实例
+     */
     private Charset resolveCharset(String charsetName) {
         if (!StringUtils.hasText(charsetName)) {
             return StandardCharsets.UTF_8;
@@ -116,6 +183,12 @@ public class JobMailSenderServiceImpl implements JobMailSenderService {
         return Charset.forName(charsetName.trim());
     }
 
+    /**
+     * 校验邮件账号配置完整性。
+     *
+     * @param account 邮件账号配置
+     * @throws BizException 配置不完整时抛出
+     */
     private void validateAccount(JobMailProperties.MailAccount account) {
         if (account == null
                 || !StringUtils.hasText(account.getHost())

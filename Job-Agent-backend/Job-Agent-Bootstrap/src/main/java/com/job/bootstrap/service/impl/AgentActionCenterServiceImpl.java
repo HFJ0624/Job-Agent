@@ -16,12 +16,36 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Agent 行动确认中心服务实现。
+ * Agent 行动确认中心服务实现，负责行动项状态机与执行编排。
  *
- * 说明：
+ * <p>核心职责：
+ * 管理 Agent 生成的行动项全生命周期（PENDING/DONE/IGNORED/SNOOZED/FAILED），
+ * 在用户确认完成时调用 AgentActionExecutor 联动业务服务，
+ * 在查询时聚合 WorkflowTask 快照供前端展示异步任务进度。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Action 子模块（行动确认中心）。</p>
+ *
+ * <p>主要调用链：
+ * 前端确认/忽略/稍后处理 -> AgentActionCenterService
+ * -> getUserActionRequired（权限校验）
+ * -> AgentActionExecutor.execute（联动业务服务）
+ * -> actionItemMapper.updateById（状态回写）
+ * listPending -> 查询 PENDING/FAILED/SNOOZED 已到期行动项 + fillWorkflowTaskSnapshot</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>V1 只管理行动项自身状态，不联动原业务表；V2 通过 AgentActionExecutor 联动业务服务；</li>
+ *   <li>稍后处理的行动项在 snoozeUntil 到期前不展示，避免用户反复看到已推迟的建议；</li>
+ *   <li>所有状态更新都校验 userId，防止用户修改别人的行动项；</li>
+ *   <li>markDone 使用 noRollbackFor=Exception，让 FAILED 状态能正常落库，方便用户重试。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. V1 只管理行动项自身状态，不联动原业务表。
  * 2. 稍后处理的行动项在 snoozeUntil 到期前不展示，避免用户反复看到已推迟的建议。
- * 3. 所有状态更新都校验 userId，防止用户修改别人的行动项。
+ * 3. 所有状态更新都校验 userId，防止用户修改别人的行动项。</p>
+ *
+ * 作者: hfj
  */
 @Service
 @RequiredArgsConstructor
@@ -39,6 +63,19 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
     private final WorkflowTaskMapper workflowTaskMapper;
     private final AgentActionExecutor actionExecutor;
 
+    /**
+     * 列出当前用户待处理的行动项，包含 PENDING、FAILED 与已到期 SNOOZED。
+     *
+     * <p>核心处理流程：
+     * 1. 对 limit 做 [1,50] 范围裁剪，避免过大查询拖慢数据库；
+     * 2. 查询 userId 维度下未删除且状态属于 PENDING / FAILED / SNOOZED 已到期的行动项；
+     * 3. 按 createTime 升序排列，优先展示最早产生的建议；
+     * 4. 通过 toVO 转换并补充 WorkflowTask 快照，让前端展示异步任务进度。</p>
+     *
+     * @param userId 当前用户 ID，用于过滤归属
+     * @param limit  期望返回的最大条数，会被裁剪到 [1,50]
+     * @return 待处理行动项 VO 列表，已聚合 WorkflowTask 快照
+     */
     @Override
     public List<AgentActionItemVO> listPending(Long userId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 50));
@@ -62,6 +99,22 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
                 .toList();
     }
 
+    /**
+     * 标记行动项为已完成，必要时联动业务服务执行真实动作。
+     *
+     * <p>核心处理流程：
+     * 1. 校验行动项归属当前用户，防止越权操作他人行动项；
+     * 2. 非 MANUAL_CONFIRM 类型先调用 AgentActionExecutor.execute 联动业务服务；
+     * 3. 执行成功则更新状态为 DONE、记录完成时间与备注，回写 workflowTaskId；
+     * 4. 执行失败则更新状态为 FAILED、记录 executeError，并重新抛出异常让上层感知。
+     *    noRollbackFor=Exception 保证 FAILED 状态能落库，方便用户重试。</p>
+     *
+     * @param userId   当前用户 ID，用于权限校验
+     * @param actionId 行动项 ID
+     * @param dto      状态更新 DTO，包含 note 等附加信息
+     * @throws IllegalArgumentException 行动项不存在或不归属当前用户时抛出
+     * @throws RuntimeException         AgentActionExecutor 执行失败时抛出，状态已落库为 FAILED
+     */
     @Override
     @Transactional(noRollbackFor = Exception.class)
     public void markDone(Long userId, Long actionId, AgentActionItemStatusDTO dto) {
@@ -93,6 +146,14 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         }
     }
 
+    /**
+     * 忽略行动项，仅更新状态为 IGNORED，不联动业务服务。
+     *
+     * @param userId   当前用户 ID，用于权限校验
+     * @param actionId 行动项 ID
+     * @param dto      状态更新 DTO，包含 note 等附加信息
+     * @throws IllegalArgumentException 行动项不存在或不归属当前用户时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void ignore(Long userId, Long actionId, AgentActionItemStatusDTO dto) {
@@ -103,6 +164,14 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         actionItemMapper.updateById(item);
     }
 
+    /**
+     * 推迟行动项到指定时间后再展示，避免用户反复看到已推迟的建议。
+     *
+     * @param userId   当前用户 ID，用于权限校验
+     * @param actionId 行动项 ID
+     * @param dto      状态更新 DTO，必须包含 snoozeUntil
+     * @throws IllegalArgumentException snoozeUntil 为空或行动项不存在时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void snooze(Long userId, Long actionId, AgentActionItemStatusDTO dto) {
@@ -118,6 +187,14 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         actionItemMapper.updateById(item);
     }
 
+    /**
+     * 查询并校验行动项归属当前用户，缺失或不归属时抛 IllegalArgumentException。
+     *
+     * @param userId   当前用户 ID
+     * @param actionId 行动项 ID
+     * @return 行动项实体
+     * @throws IllegalArgumentException 行动项不存在或不归属当前用户时抛出
+     */
     private AgentActionItem getUserActionRequired(Long userId, Long actionId) {
         AgentActionItem item = actionItemMapper.selectOne(
                 new LambdaQueryWrapper<AgentActionItem>()
@@ -132,6 +209,12 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         return item;
     }
 
+    /**
+     * 将行动项实体转换为 VO，并填充 WorkflowTask 快照字段。
+     *
+     * @param item 行动项实体
+     * @return 行动项 VO，包含基础字段与异步任务快照
+     */
     private AgentActionItemVO toVO(AgentActionItem item) {
         AgentActionItemVO vo = new AgentActionItemVO();
         vo.setId(item.getId());
@@ -159,6 +242,18 @@ public class AgentActionCenterServiceImpl implements AgentActionCenterService {
         return vo;
     }
 
+    /**
+     * 填充行动项 VO 中的 WorkflowTask 快照字段，让前端展示异步任务最新状态。
+     *
+     * <p>核心处理流程：
+     * 1. workflowTaskId 为空时直接返回；
+     * 2. 查询未删除的工作流任务，避免行动项保存过期状态；
+     * 3. 任务不存在时只保留 workflowTaskId，前端仍能知道曾经关联过异步任务；
+     * 4. 任务存在时回填任务编号、状态、进度、当前步骤与错误信息。</p>
+     *
+     * @param vo             行动项 VO
+     * @param workflowTaskId 关联的工作流任务 ID
+     */
     private void fillWorkflowTaskSnapshot(AgentActionItemVO vo, Long workflowTaskId) {
         if (workflowTaskId == null) {
             return;

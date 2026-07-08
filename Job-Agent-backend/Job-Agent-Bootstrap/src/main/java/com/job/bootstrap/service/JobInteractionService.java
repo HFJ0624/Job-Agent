@@ -4,9 +4,14 @@ import com.job.common.entity.interaction.JobPositionMessage;
 import com.job.common.vo.interaction.FavoriteStateVO;
 
 /**
- * 作者:hfj
- * 功能:前台岗位互动服务，负责收藏岗位和立即沟通
- * 日期:2026/6/6 16:10
+ * 前台岗位互动服务接口。
+ *
+ * <p>核心职责：为用户提供岗位收藏、取消收藏及立即沟通等互动能力，维护用户与岗位的关联关系。</p>
+ *
+ * <p>所属业务模块：用户端 - 岗位互动</p>
+ *
+ * <p>主要调用链：
+ * JobInteractionController -&gt; JobInteractionService -&gt; JobInteractionServiceImpl -&gt; JobPositionRepository / JobCommunicationRecordService / JobGreetingService</p>
  */
 public interface JobInteractionService {
 

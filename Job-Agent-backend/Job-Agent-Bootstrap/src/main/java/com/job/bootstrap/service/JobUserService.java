@@ -5,9 +5,14 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.job.common.entity.user.JobUser;
 
 /**
- * 作者:hfj
- * 功能:用户业务服务接口，定义注册、登录、资料修改和分页查询能力
- * 日期:2026/6/2 10:45
+ * 用户业务服务接口。
+ *
+ * <p>核心职责：管理平台用户的全生命周期，包括注册、登录、资料修改及后台分页查询。</p>
+ *
+ * <p>所属业务模块：用户中心 - 账号管理</p>
+ *
+ * <p>主要调用链：
+ * UserController / AuthController / AdminUserController -&gt; JobUserService -&gt; JobUserServiceImpl -&gt; JobUserRepository / PasswordEncoder</p>
  */
 public interface JobUserService extends IService<JobUser> {
 

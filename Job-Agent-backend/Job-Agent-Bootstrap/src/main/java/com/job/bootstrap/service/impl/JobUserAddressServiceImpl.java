@@ -15,9 +15,37 @@ import org.springframework.util.StringUtils;
 import java.util.Date;
 
 /**
- * 作者:hfj
- * 功能:用户地址业务服务实现，处理家庭地址查询、归属校验和保存
- * 日期:2026/6/4 11:00
+ * 用户地址业务服务实现类。
+ *
+ * <p>核心职责：负责用户家庭地址（JobUserAddress）的查询与保存。
+ * 提供默认地址查询、地址归属校验、字段清洗与强制更新能力。</p>
+ *
+ * <p>所属业务模块：用户中心模块（User Center）- 地址子模块</p>
+ *
+ * <p>主要调用链：
+ * <pre>
+ * JobUserAddressController -&gt; JobUserAddressService -&gt; JobUserAddressServiceImpl
+ *                                         |
+ *                                         v
+ *                              JobUserAddressMapper
+ * </pre></p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>继承 {@link ServiceImpl}，依赖 {@link JobUserAddressMapper} 进行地址持久化操作</li>
+ *   <li>被个人中心等模块调用，用于通勤范围计算与推荐排序</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>写操作使用 {@link Transactional} 保证事务一致性</li>
+ *   <li>每个用户仅维护一份默认家庭地址，不存在时自动新增，存在时强制更新</li>
+ *   <li>地址字段（省、市、区、详细地址、经纬度）为空时也要显式写入数据库，避免旧数据残留</li>
+ *   <li>保存前进行字段清洗与内容非空校验，防止无效数据入库</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/4
  */
 @Service
 public class JobUserAddressServiceImpl extends ServiceImpl<JobUserAddressMapper, JobUserAddress>
@@ -41,6 +69,8 @@ public class JobUserAddressServiceImpl extends ServiceImpl<JobUserAddressMapper,
     /**
      * 查询当前用户默认家庭地址。
      *
+     * <p>按用户 ID 查询未删除的默认地址，按更新时间倒序取第一条；未填写时返回 null。</p>
+     *
      * @param userId 当前登录用户 ID
      * @return 返回默认地址，没有填写时返回 null
      */
@@ -57,7 +87,9 @@ public class JobUserAddressServiceImpl extends ServiceImpl<JobUserAddressMapper,
 
     /**
      * 保存当前用户家庭地址。
-     * P表示参数描述，手动填写和高德地图选择都会走这个方法。
+     *
+     * <p>支持手动填写与高德地图选择两种录入方式；先清洗字段并校验内容非空，
+     * 再按地址 ID 查询已有记录进行更新，无记录则自动新增。更新时使用强制写入确保空值也能覆盖旧数据。</p>
      *
      * @param userId 当前登录用户 ID
      * @param address 前端提交的地址实体
@@ -107,6 +139,8 @@ public class JobUserAddressServiceImpl extends ServiceImpl<JobUserAddressMapper,
     /**
      * 复制允许用户维护的地址字段。
      *
+     * <p>不复制 userId、isDeleted 等归属字段，仅复制地址内容与默认标记。</p>
+     *
      * @param target 数据库地址实体
      * @param source 前端提交的地址实体
      * @param now 当前时间
@@ -126,7 +160,9 @@ public class JobUserAddressServiceImpl extends ServiceImpl<JobUserAddressMapper,
 
     /**
      * 强制更新地址字段。
-     * P表示参数描述，省、市、区这些字段即使之前为 null，也要明确写入数据库。
+     *
+     * <p>使用 {@link LambdaUpdateWrapper} 进行显式字段设置，确保省、市、区、详细地址、
+     * 经纬度等字段即使传入 null 也能覆盖数据库旧值，避免残留脏数据。</p>
      *
      * @param address 待更新地址实体
      */

@@ -20,9 +20,38 @@ import org.springframework.util.StringUtils;
 import java.util.Date;
 
 /**
- * 作者:hfj
- * 功能:前台岗位互动服务实现，处理岗位收藏和立即沟通消息保存
- * 日期:2026/6/6 16:10
+ * 前台岗位互动服务实现类。
+ *
+ * <p>核心职责：负责求职用户与岗位之间的互动行为，包括岗位收藏（Favorite）状态的查询、切换
+ * 与统计，以及“立即沟通”消息（Message）的保存。提供岗位发布状态校验与公司信息兜底能力。</p>
+ *
+ * <p>所属业务模块：岗位互动模块（Job Interaction）</p>
+ *
+ * <p>主要调用链：
+ * <pre>
+ * JobInteractionController -&gt; JobInteractionService -&gt; JobInteractionServiceImpl
+ *                                       |
+ *                                       v
+ *              JobPositionMapper / JobCompanyMapper / JobPositionFavoriteMapper / JobPositionMessageMapper
+ * </pre></p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>直接操作 {@link JobPositionFavoriteMapper} 与 {@link JobPositionMessageMapper} 进行互动数据持久化</li>
+ *   <li>依赖 {@link JobPositionMapper} 校验岗位存在性与发布状态</li>
+ *   <li>依赖 {@link JobCompanyMapper} 查询公司信息，用于生成沟通默认消息</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>收藏使用逻辑删除恢复机制，避免同一用户同一岗位产生多条有效收藏记录</li>
+ *   <li>所有写操作均使用 {@link Transactional} 保证事务一致性</li>
+ *   <li>沟通消息在用户未填写内容时自动生成默认话术，提升用户体验</li>
+ *   <li>收藏与沟通前均强制校验岗位是否已发布，防止对草稿岗位产生互动</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/6
  */
 @Service
 @RequiredArgsConstructor
@@ -64,9 +93,11 @@ public class JobInteractionServiceImpl implements JobInteractionService {
     /**
      * 判断用户是否收藏指定岗位。
      *
+     * <p>查询用户与岗位之间是否存在未删除的收藏记录；userId 或 positionId 为空时直接返回 false。</p>
+     *
      * @param userId 当前登录用户ID
      * @param positionId 岗位ID
-     * @return true 表示已收藏
+     * @return true 表示已收藏，false 表示未收藏或参数为空
      */
     @Override
     public boolean isFavorited(Long userId, Long positionId) {
@@ -82,6 +113,8 @@ public class JobInteractionServiceImpl implements JobInteractionService {
 
     /**
      * 统计岗位收藏数。
+     *
+     * <p>统计指定岗位下未删除的收藏记录数；positionId 为空时返回 0。</p>
      *
      * @param positionId 岗位ID
      * @return 返回未删除收藏数
@@ -99,11 +132,13 @@ public class JobInteractionServiceImpl implements JobInteractionService {
 
     /**
      * 切换收藏状态。
-     * P表示参数描述，使用逻辑删除恢复方式处理重复收藏，避免同一个用户同一个岗位插入多条有效收藏记录。
+     *
+     * <p>对指定岗位执行收藏/取消收藏操作：未收藏时新增记录，已收藏时逻辑删除，
+     * 已取消时恢复记录。使用逻辑删除恢复机制避免同一用户同一岗位产生多条有效收藏记录。</p>
      *
      * @param userId 当前登录用户ID
      * @param positionId 岗位ID
-     * @return 返回最新收藏状态
+     * @return 返回最新收藏状态（包含收藏标记与当前收藏总数）
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -146,10 +181,12 @@ public class JobInteractionServiceImpl implements JobInteractionService {
     /**
      * 保存立即沟通消息。
      *
+     * <p>校验岗位已发布后，保存用户沟通消息；若用户未输入内容，则自动生成包含公司与岗位名称的默认话术。</p>
+     *
      * @param userId 当前登录用户ID
      * @param positionId 岗位ID
      * @param content 用户输入的消息内容
-     * @return 返回消息实体
+     * @return 返回保存后的消息实体
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -173,7 +210,10 @@ public class JobInteractionServiceImpl implements JobInteractionService {
     }
 
     /**
-     * 查询已发布岗位，不存在或未发布时抛出业务异常。
+     * 查询已发布岗位。
+     *
+     * <p>校验岗位存在且状态为已发布；岗位不存在或处于草稿状态时抛出 {@link BizException}，
+     * 用于收藏与沟通前的前置校验。</p>
      *
      * @param positionId 岗位ID
      * @return 返回岗位实体
@@ -193,10 +233,12 @@ public class JobInteractionServiceImpl implements JobInteractionService {
     }
 
     /**
-     * 查询公司信息，允许为空，避免公司历史数据缺失时影响消息保存。
+     * 查询公司信息。
+     *
+     * <p>允许返回 null，避免公司历史数据缺失时影响消息保存；用于生成沟通默认话术时兜底。</p>
      *
      * @param companyId 公司ID
-     * @return 返回公司实体
+     * @return 返回公司实体，可能为 null
      */
     private JobCompany getCompany(Long companyId) {
         if (companyId == null) {
@@ -207,6 +249,8 @@ public class JobInteractionServiceImpl implements JobInteractionService {
 
     /**
      * 生成立即沟通默认消息。
+     *
+     * <p>用户未输入内容时，自动生成包含公司名称与岗位名称的标准沟通话术，提升用户体验。</p>
      *
      * @param content 用户输入内容
      * @param position 岗位实体

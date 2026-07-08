@@ -15,10 +15,31 @@ import java.util.Map;
 /**
  * Agent 日报内容组装器。
  *
- * 设计说明：
- * 1. 第一版不调用大模型，直接基于 Agent Inbox 规则结果生成日报，保证定时任务稳定、低成本。
- * 2. 内容组装和数据库写入拆开，后续要替换成 LLM 生成时，只需要替换这个类的实现。
- * 3. 同时输出纯文本和结构化 JSON，纯文本用于邮件，JSON 用于后续前端做更丰富的卡片展示。
+ * <p>核心职责：基于 Agent Inbox 规则聚合结果，生成纯文本日报和结构化 JSON，供日报服务落库和邮件推送。</p>
+ *
+ * <p>所属业务模块：求职 Agent - 日报生成子模块</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>定时任务 / 手动触发调用 {@link #compose}</li>
+ *   <li>生成摘要、建议处理顺序、纯文本正文、结构化 JSON</li>
+ *   <li>返回 {@link ComposeResult} 供上层落库和发送</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link com.job.common.vo.agent.AgentInboxVO}：日报的数据源，由 Inbox 聚合服务产出</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>第一版不调用大模型，直接基于 Agent Inbox 规则结果生成日报，保证定时任务稳定、低成本。</li>
+ *   <li>内容组装和数据库写入拆开，后续要替换成 LLM 生成时，只需要替换这个类的实现。</li>
+ *   <li>同时输出纯文本和结构化 JSON，纯文本用于邮件，JSON 用于后续前端做更丰富的卡片展示。</li>
+ * </ol>
+ * </p>
  */
 @Component
 public class AgentDailyReportComposer {
@@ -38,6 +59,15 @@ public class AgentDailyReportComposer {
 
     /**
      * 根据 Inbox 聚合结果生成日报内容。
+     *
+     * <p>核心处理流程：
+     * <ol>
+     *   <li>生成短摘要，用于页面卡片和邮件开头。</li>
+     *   <li>截取优先级最高的前 5 条待办作为建议处理顺序。</li>
+     *   <li>组装纯文本正文，兼容所有邮件客户端。</li>
+     *   <li>组装结构化 JSON，为前端可视化日报做准备。</li>
+     * </ol>
+     * </p>
      *
      * @param inbox Agent Inbox 今日聚合结果
      * @return 日报标题、摘要、正文和结构化 JSON
@@ -71,6 +101,12 @@ public class AgentDailyReportComposer {
         return new ComposeResult("今日求职 Agent 日报", summary, content, contentJson);
     }
 
+    /**
+     * 生成日报摘要。
+     *
+     * @param inbox Agent Inbox 聚合结果
+     * @return 一句话摘要，描述今日待办总数、高优先级数和到期数
+     */
     private String buildSummary(AgentInboxVO inbox) {
         Integer totalCount = defaultInt(inbox.getTotalCount());
         Integer highPriorityCount = defaultInt(inbox.getHighPriorityCount());
@@ -84,6 +120,14 @@ public class AgentDailyReportComposer {
                 + dueCount + " 个已到期或需要今天处理。";
     }
 
+    /**
+     * 组装纯文本日报正文。
+     *
+     * @param summary          日报摘要
+     * @param inbox            Agent Inbox 聚合结果
+     * @param recommendedItems 建议优先处理的前 5 条待办
+     * @return 纯文本日报正文
+     */
     private String buildContent(String summary, AgentInboxVO inbox, List<AgentInboxVO.Item> recommendedItems) {
         StringBuilder builder = new StringBuilder();
         builder.append("你好，这是你的今日求职 Agent 日报。\n\n");
@@ -123,6 +167,14 @@ public class AgentDailyReportComposer {
         return builder.toString();
     }
 
+    /**
+     * 组装结构化 JSON 日报内容。
+     *
+     * @param summary          日报摘要
+     * @param inbox            Agent Inbox 聚合结果
+     * @param recommendedItems 建议优先处理的前 5 条待办
+     * @return JSON 字符串，解析失败时返回 "{}"
+     */
     private String buildContentJson(String summary, AgentInboxVO inbox, List<AgentInboxVO.Item> recommendedItems) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("summary", summary);
@@ -151,10 +203,22 @@ public class AgentDailyReportComposer {
         }
     }
 
+    /**
+     * 空值安全的 Integer 转换，null 时返回 0。
+     *
+     * @param value 原始 Integer 值
+     * @return 非空的 Integer
+     */
     private Integer defaultInt(Integer value) {
         return value == null ? 0 : value;
     }
 
+    /**
+     * 将优先级编码转换为中文描述。
+     *
+     * @param priority 优先级编码，如 HIGH、LOW
+     * @return 中文优先级描述
+     */
     private String priorityText(String priority) {
         if ("HIGH".equals(priority)) {
             return "高优先级";
@@ -165,12 +229,24 @@ public class AgentDailyReportComposer {
         return "普通";
     }
 
+    /**
+     * 空值安全的字符串转换，空文本时返回默认值。
+     *
+     * @param value        原始字符串
+     * @param defaultValue 默认值
+     * @return 非空的字符串
+     */
     private String safe(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value.trim() : defaultValue;
     }
 
     /**
      * 日报组装结果。
+     *
+     * @param title       日报标题
+     * @param summary     日报摘要
+     * @param content     纯文本正文
+     * @param contentJson 结构化 JSON 正文
      */
     public record ComposeResult(
             String title,

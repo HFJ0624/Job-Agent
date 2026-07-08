@@ -20,12 +20,38 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 功能:Agent Eval 质量体检报告构建器。
+ * Agent Eval 质量体检报告构建器，负责把 Eval 数据聚合为可指导行动的质量报告。
  *
- * 设计说明:
+ * <p>核心职责：
+ * 接收 Service 层查询的最近批次、启用用例和批次结果，进行纯规则统计并生成质量体检报告。
+ * 报告包含运行总览、核心链路覆盖率、指标明细、失败分类、最薄弱指标和质量建议。
+ * 构建器只做纯规则统计，不访问数据库，不调用模型，方便单元测试稳定回归。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Eval 子模块（质量报告构建层）。</p>
+ *
+ * <p>主要调用链：
+ * 后台 -> AgentEvalService.buildHealthReport
+ * -> AgentEvalHealthReportBuilder.build
+ * -> fillRunOverview（运行总览）
+ * -> fillCoreCoverage（核心链路覆盖率）
+ * -> fillMetrics（指标明细）
+ * -> fillFailureItems（失败分类）
+ * -> fillWeakestMetric（最薄弱指标）
+ * -> fillQualitySuggestions（质量建议）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>构建器只做纯规则统计，不访问数据库，不调用模型，方便单元测试稳定回归；</li>
+ *   <li>Service 层负责查询最近批次、启用用例和批次结果，然后把数据交给这里聚合；</li>
+ *   <li>第一版聚焦核心 Agent 链路：工具选择、RAG 命中、记忆召回、Guardrails、JSON 输出。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 构建器只做纯规则统计，不访问数据库，不调用模型，方便单元测试稳定回归。
  * 2. Service 层负责查询最近批次、启用用例和批次结果，然后把数据交给这里聚合。
- * 3. 第一版聚焦核心 Agent 链路: 工具选择、RAG 命中、记忆召回、Guardrails、JSON 输出。
+ * 3. 第一版聚焦核心 Agent 链路: 工具选择、RAG 命中、记忆召回、Guardrails、JSON 输出。</p>
+ *
+ * 作者: hfj
  */
 @Component
 public class AgentEvalHealthReportBuilder {

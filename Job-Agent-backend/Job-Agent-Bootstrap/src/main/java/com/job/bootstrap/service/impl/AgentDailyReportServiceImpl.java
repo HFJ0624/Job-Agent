@@ -33,12 +33,37 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Agent 主动日报服务实现。
+ * Agent 主动日报服务实现，负责日报生成、订阅管理与定时调度。
  *
- * 设计说明：
+ * <p>核心职责：
+ * 复用 Agent Inbox 聚合的待办数据，调用 AgentDailyReportAiComposer 由大模型生成结构化日报，
+ * 持久化到 agent_daily_report_record 并按需发送邮件。同时管理用户订阅配置（启用、发送时间、邮件开关），
+ * 提供 generateDueSubscriptions 供定时任务批量调度。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Daily Report 子模块（主动日报层）。</p>
+ *
+ * <p>主要调用链：
+ * 定时任务 -> generateDueSubscriptions -> generateForUser
+ * 用户手动生成 -> generateForUser
+ * -> AgentInboxService.getTodayInbox（聚合待办）
+ * -> AgentDailyReportAiComposer.compose（LLM 生成日报）
+ * -> createActionItemsFromDailyReport（行动项幂等插入）
+ * -> JobMailSenderService.sendText（邮件发送）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>日报内容复用 Agent Inbox，避免再写一套“待办扫描”逻辑导致两边口径不一致；</li>
+ *   <li>userId + reportDate 做幂等，定时任务重复执行或用户手动点击生成，都只会更新当天同一条日报；</li>
+ *   <li>邮件发送失败不会回滚日报记录，因为“日报已生成”和“邮件发送失败”是两个不同事实，都应该被保存；</li>
+ *   <li>AI 生成失败时不使用规则日报兜底，保证用户看到的就是模型真实输出。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 日报内容复用 Agent Inbox，避免再写一套“待办扫描”逻辑导致两边口径不一致。
  * 2. userId + reportDate 做幂等：定时任务重复执行或用户手动点击生成，都只会更新当天同一条日报。
- * 3. 邮件发送失败不会回滚日报记录，因为“日报已生成”和“邮件发送失败”是两个不同事实，都应该被保存。
+ * 3. 邮件发送失败不会回滚日报记录，因为“日报已生成”和“邮件发送失败”是两个不同事实，都应该被保存。</p>
+ *
+ * 作者: hfj
  */
 @Service
 @RequiredArgsConstructor
@@ -69,6 +94,25 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
     private final JobMailSenderService mailSenderService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 为指定用户生成当天的 Agent 日报，可选发送邮件。
+     *
+     * <p>核心处理流程：
+     * 1. 标准化 reportDate 并校验用户存在且未删除；
+     * 2. 调用 AgentInboxService 聚合当天待办数据；
+     * 3. 查询当天是否已有日报记录，存在则复用，不存在则新建；
+     * 4. 先保存 PENDING 快照，确保模型失败时也能落库记录失败原因；
+     * 5. 调用 AgentDailyReportAiComposer.compose 由大模型生成结构化日报；
+     * 6. 模型成功则更新为 SUCCESS 并解析行动项幂等插入；模型失败则更新为 FAILED 并跳过邮件；
+     * 7. sendEmail=true 时调用 JobMailSenderService 发送纯文本邮件，失败仅记录不抛出。</p>
+     *
+     * @param userId     当前用户 ID
+     * @param reportDate 日报日期，null 表示今天，会被标准化为当天 00:00
+     * @param sendEmail  是否发送邮件，false 时仅生成日报
+     * @return 日报 VO，包含生成状态、邮件状态与日报内容
+     * @throws IllegalArgumentException 用户不存在时抛出
+     * @throws RuntimeException         AI 日报生成失败时抛出，状态已落库为 FAILED
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentDailyReportVO generateForUser(Long userId, Date reportDate, boolean sendEmail) {
@@ -128,6 +172,13 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
         return toVO(record);
     }
 
+    /**
+     * 查询当前用户最近的日报记录，按 reportDate 倒序最多返回 limit 条。
+     *
+     * @param userId 当前用户 ID
+     * @param limit  期望返回的最大条数，会被裁剪到 [1,20]
+     * @return 日报 VO 列表，按 reportDate 倒序
+     */
     @Override
     public List<AgentDailyReportVO> listRecent(Long userId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 20));
@@ -144,11 +195,25 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
                 .toList();
     }
 
+    /**
+     * 查询当前用户的日报订阅配置，不存在时自动创建默认配置。
+     *
+     * @param userId 当前用户 ID
+     * @return 日报订阅 VO，包含启用状态、发送时间与邮件开关
+     */
     @Override
     public AgentDailyReportSubscriptionVO getSubscription(Long userId) {
         return toSubscriptionVO(getOrCreateSubscription(userId));
     }
 
+    /**
+     * 保存用户日报订阅配置，包括启用状态、邮件开关与发送时间。
+     *
+     * @param userId 当前用户 ID
+     * @param dto    订阅保存 DTO，包含 enabled、emailEnabled、sendTime
+     * @return 更新后的订阅 VO
+     * @throws IllegalArgumentException sendTime 格式不符合 HH:mm 时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentDailyReportSubscriptionVO saveSubscription(Long userId, AgentDailyReportSubscriptionSaveDTO dto) {
@@ -161,6 +226,18 @@ public class AgentDailyReportServiceImpl implements AgentDailyReportService {
         return toSubscriptionVO(subscription);
     }
 
+    /**
+     * 批量生成到期的日报订阅，供定时任务调用。
+     *
+     * <p>核心处理流程：
+     * 1. 取当前时间 HH:mm，作为查询 sendTime 的过滤条件；
+     * 2. 查询启用且 sendTime 等于当前时间的订阅，限制最多 500 条避免单批过大；
+     * 3. 跳过今日已生成日报的订阅，保证幂等；
+     * 4. 调用 generateForUser 生成日报并发送邮件；
+     * 5. 单个用户失败不阻断整批调度，失败日报在 generateForUser 内已落库为 FAILED。</p>
+     *
+     * @return 本批成功生成的日报数量
+     */
     @Override
     public int generateDueSubscriptions() {
         String currentTime = LocalTime.now().format(SEND_TIME_FORMATTER);

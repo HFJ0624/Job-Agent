@@ -11,9 +11,14 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:Agent 长期记忆服务
- * 日期:2026/6/20
+ * Agent 长期记忆服务接口。
+ *
+ * <p>核心职责：管理 Agent 与用户交互过程中产生的长期记忆，包括记忆的持久化、向量检索、版本追踪及生命周期管理。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 长期记忆（Long-Term Memory）</p>
+ *
+ * <p>主要调用链：
+ * AgentChatService / AgentMemoryCaptureService / AgentMemoryExtractionService -&gt; AgentMemoryService -&gt; AgentMemoryServiceImpl -&gt; 向量数据库 / MySQL</p>
  */
 public interface AgentMemoryService {
 

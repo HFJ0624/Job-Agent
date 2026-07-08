@@ -25,9 +25,35 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:后台 AI Prompt 管理服务实现
- * 日期:2026/6/21
+ * 后台 AI Prompt 管理服务实现。
+ *
+ * <p>核心职责：为后台运营人员提供 AI Prompt 模板及版本的 CRUD 管理能力，
+ * 支持模板按场景编码和状态检索、版本迭代、发布与归档，
+ * 保证线上模型路由始终命中稳定可用的 Prompt 版本。</p>
+ *
+ * <p>所属业务模块：AI 基础设施 - Prompt 管理</p>
+ *
+ * <p>主要调用链：
+ * AdminAiPromptController → {@link AdminAiPromptServiceImpl} →
+ * AiPromptTemplateMapper / AiPromptVersionMapper → 返回模板或版本 VO</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link AiPromptTemplateMapper} 管理 Prompt 模板 CRUD</li>
+ *   <li>依赖 {@link AiPromptVersionMapper} 管理 Prompt 版本迭代、发布与归档</li>
+ *   <li>发布的 Prompt 版本会被 {@link AdminAiModelServiceImpl} 中的模型路由引用</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>Prompt 编码全局唯一，创建和修改时做唯一性校验。</li>
+ *   <li>版本号在单个模板下唯一，支持同一模板的多版本并行管理。</li>
+ *   <li>发布版本时会自动将同模板下其它已发布版本归档，确保路由只会命中一个稳定版本。</li>
+ *   <li>版本支持灰度百分比和 AB 分组，用于线上渐进式验证新 Prompt 效果。</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/21
  */
 @Service
 @RequiredArgsConstructor
@@ -71,10 +97,13 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
     }
 
     /**
-     * 新增 Prompt 模板。
+     * 创建 Prompt 模板。
      *
-     * @param request 模板表单
-     * @return 保存后的模板
+     * <p>创建前校验 Prompt 编码全局唯一性。</p>
+     *
+     * @param request 模板保存表单
+     * @return 创建后的模板 VO
+     * @throws BizException 当 Prompt 编码已存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -97,9 +126,12 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
     /**
      * 修改 Prompt 模板。
      *
+     * <p>修改前校验 Prompt 编码全局唯一性（排除自身）。</p>
+     *
      * @param id 模板 ID
-     * @param request 模板表单
-     * @return 修改后的模板
+     * @param request 模板保存表单
+     * @return 修改后的模板 VO
+     * @throws BizException 当模板不存在或编码已存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -120,6 +152,7 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
      * 逻辑删除 Prompt 模板。
      *
      * @param id 模板 ID
+     * @throws BizException 当模板不存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -132,10 +165,11 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
     }
 
     /**
-     * 查询某个模板下的全部版本。
+     * 查询某个模板下的全部版本列表。
      *
      * @param templateId 模板 ID
-     * @return 版本列表
+     * @return 该模板下的版本列表，按发布时间倒序、创建时间倒序排列
+     * @throws BizException 当模板不存在时抛出
      */
     @Override
     public List<AiPromptVersionVO> listVersions(Long templateId) {
@@ -151,10 +185,13 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
     }
 
     /**
-     * 新增 Prompt 版本。
+     * 创建 Prompt 版本。
      *
-     * @param request 版本表单
-     * @return 保存后的版本
+     * <p>创建前校验所属模板存在，且版本号在该模板下唯一。</p>
+     *
+     * @param request 版本保存表单
+     * @return 创建后的版本 VO
+     * @throws BizException 当模板不存在或版本号已存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -178,9 +215,12 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
     /**
      * 修改 Prompt 版本。
      *
+     * <p>修改前校验所属模板存在，且版本号在该模板下唯一（排除自身）。</p>
+     *
      * @param id 版本 ID
-     * @param request 版本表单
-     * @return 修改后的版本
+     * @param request 版本保存表单
+     * @return 修改后的版本 VO
+     * @throws BizException 当版本、模板不存在或版本号已存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -201,13 +241,16 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
     /**
      * 发布 Prompt 版本。
      *
-     * 方法步骤:
-     * 1. 查询待发布版本，并确认所属模板可用。
-     * 2. 将同模板下其它已发布版本归档，保证默认路由只会命中一个稳定版本。
-     * 3. 将当前版本置为 PUBLISHED，并记录发布时间。
+     * <p>方法步骤：</p>
+     * <ol>
+     *   <li>查询待发布版本，并确认所属模板可用。</li>
+     *   <li>将同模板下其它已发布版本归档，保证默认路由只会命中一个稳定版本。</li>
+     *   <li>将当前版本置为 PUBLISHED，并记录发布时间。</li>
+     * </ol>
      *
      * @param id 版本 ID
-     * @return 发布后的版本
+     * @return 发布后的版本 VO
+     * @throws BizException 当版本或模板不存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -241,7 +284,8 @@ public class AdminAiPromptServiceImpl implements AdminAiPromptService {
      * 归档 Prompt 版本。
      *
      * @param id 版本 ID
-     * @return 归档后的版本
+     * @return 归档后的版本 VO
+     * @throws BizException 当版本不存在时抛出
      */
     @Override
     @Transactional(rollbackFor = Exception.class)

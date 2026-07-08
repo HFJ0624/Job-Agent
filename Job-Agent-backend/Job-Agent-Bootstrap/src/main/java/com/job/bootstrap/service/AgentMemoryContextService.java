@@ -4,9 +4,14 @@ import com.job.common.vo.agent.AgentMemoryContextVO;
 import com.job.common.vo.agent.AgentUserMemoryProfileVO;
 
 /**
- * 作者: hfj
- * 功能: Agent 长期记忆上下文服务
- * 日期: 2026/6/23
+ * Agent 长期记忆上下文服务接口。
+ *
+ * <p>核心职责：基于用户当前问题检索相关长期记忆，并构造符合 Token 预算的 Prompt 上下文片段，同时维护用户画像摘要。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 长期记忆（Long-Term Memory）</p>
+ *
+ * <p>主要调用链：
+ * AgentPlanningService / AgentChatService -&gt; AgentMemoryContextService -&gt; AgentMemoryContextServiceImpl -&gt; AgentMemoryService / VectorStore</p>
  */
 public interface AgentMemoryContextService {
 

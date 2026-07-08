@@ -5,9 +5,14 @@ import com.job.common.dto.agent.AgentPlanQueryDTO;
 import com.job.common.vo.agent.AgentPlanVO;
 
 /**
- * 作者:hfj
- * 功能:后台 Agent 计划查询服务
- * 日期:2026/6/19
+ * 后台 Agent 计划查询服务接口。
+ *
+ * <p>核心职责：为运营和研发人员提供 Agent 生成计划的分页查询和详情查看能力，支持问题排查和效果分析。</p>
+ *
+ * <p>所属业务模块：后台管理 - Agent 运维</p>
+ *
+ * <p>主要调用链：
+ * AdminAgentPlanController -&gt; AdminAgentPlanService -&gt; AdminAgentPlanServiceImpl -&gt; AgentPlanRepository / AgentTraceLogRepository</p>
  */
 public interface AdminAgentPlanService {
 

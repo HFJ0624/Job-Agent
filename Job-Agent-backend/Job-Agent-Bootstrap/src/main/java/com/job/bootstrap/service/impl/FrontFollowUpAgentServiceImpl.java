@@ -23,7 +23,31 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 用户端求职跟进 Agent 聚合服务实现。
+ * 用户端求职跟进 Agent 聚合服务实现，负责把投递记录与提醒聚合成统一跟进中心视图。
+ *
+ * <p>核心职责：
+ * 复用 JobApplicationService 与 JobReminderService 的分页查询能力，按 applicationId 把待处理提醒
+ * 归属到对应投递记录上，并根据投递状态、提醒类型与时间生成建议动作（如“准备面试”“跟进 HR”），
+ * 让前端只负责展示与跳转，不再自己拼接业务判断逻辑。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent FollowUp 子模块（用户端跟进中心）。</p>
+ *
+ * <p>主要调用链：
+ * 前端跟进中心 -> FrontFollowUpAgentService.getCenter
+ * -> JobApplicationService.pageApplications（投递分页）
+ * -> JobReminderService.pageReminders（待处理提醒分页）
+ * -> 按 applicationId 分组后聚合
+ * -> buildSuggestedActions / fillPriority 生成建议动作与优先级</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>复用现有求职记录分页，避免新增一套投递查询逻辑；</li>
+ *   <li>复用现有提醒分页，只取待处理提醒并按 applicationId 分组；</li>
+ *   <li>按投递状态、提醒类型和时间生成建议动作，前端只展示不拼接；</li>
+ *   <li>建议动作 targetPath 指向已有页面，不引入新路由。</li>
+ * </ul></p>
+ *
+ * 作者: hfj
  */
 @Service
 @RequiredArgsConstructor
@@ -36,13 +60,16 @@ public class FrontFollowUpAgentServiceImpl implements FrontFollowUpAgentService 
     private final JobReminderService jobReminderService;
 
     /**
-     * 查询用户端求职跟进中心。
+     * 查询用户端求职跟进中心聚合视图。
      *
-     * 步骤：
-     * 1. 复用现有求职记录分页，避免新增一套投递查询逻辑。
-     * 2. 复用现有提醒分页，只取待处理提醒并按 applicationId 分组。
-     * 3. 按投递状态、提醒类型和时间生成建议动作。
-     * 4. 返回聚合后的视图，前端只负责展示和跳转，不再自己拼接业务判断。
+     * <p>核心处理流程：
+     * 1. 复用现有求职记录分页，避免新增一套投递查询逻辑；
+     * 2. 复用现有提醒分页，只取待处理提醒并按 applicationId 分组；
+     * 3. 按投递状态、提醒类型和时间生成建议动作；
+     * 4. 返回聚合后的视图，前端只负责展示和跳转，不再自己拼接业务判断。</p>
+     *
+     * @param userId 当前用户 ID
+     * @return 跟进中心 VO，包含投递统计、提醒统计、投递列表（含提醒与建议动作）
      */
     @Override
     public FrontFollowUpCenterVO getCenter(Long userId) {

@@ -5,9 +5,14 @@ import com.job.common.entity.resume.JobResumeScoreRecord;
 import com.job.common.vo.resume.ResumeScoreVO;
 
 /**
- * 作者:hfj
- * 功能:简历评分业务服务接口
- * 日期:2026/6/6
+ * 简历评分业务服务接口。
+ *
+ * <p>核心职责：基于用户简历内容与求职方向，调用 AI 模型进行多维度评分，并管理评分记录。</p>
+ *
+ * <p>所属业务模块：求职辅助 - 简历评估</p>
+ *
+ * <p>主要调用链：
+ * ResumeController / JobApplicationController -&gt; JobResumeScoreService -&gt; JobResumeScoreServiceImpl -&gt; AiModelGatewayService / JobResumeService / JobResumeScoreRecordRepository</p>
  */
 public interface JobResumeScoreService extends IService<JobResumeScoreRecord> {
 

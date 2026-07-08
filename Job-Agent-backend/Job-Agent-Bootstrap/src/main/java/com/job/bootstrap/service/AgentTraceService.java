@@ -1,12 +1,22 @@
 package com.job.bootstrap.service;
 
 /**
- * 作者:hfj
- * 功能:Agent Trace 记录服务
- * 设计说明:
- * 1. Trace 用于记录 Agent 每一次对话和工具调用过程。
- * 2. 后台可以根据 traceId 查看本轮对话调用了哪些工具、输入是什么、输出是什么、是否失败、耗时多久。
- * 3. 这是企业级 Agent 项目非常重要的可观测能力。
+ * Agent Trace 记录服务接口。
+ *
+ * <p>核心职责：在 Agent 全生命周期中记录每一次对话、工具调用及内部状态变更，为可观测性提供结构化 Trace 数据。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 可观测性（Observability）</p>
+ *
+ * <p>主要调用链：
+ * AgentChatService / AgentPlanExecutorService / AgentPlanningService -&gt; AgentTraceService -&gt; AgentTraceServiceImpl -&gt; AgentTraceLogRepository / AgentObservationService</p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>Trace 用于记录 Agent 每一次对话和工具调用过程。</li>
+ *   <li>后台可根据 traceId 查看本轮对话调用了哪些工具、输入是什么、输出是什么、是否失败、耗时多久。</li>
+ *   <li>这是企业级 Agent 项目非常重要的可观测能力。</li>
+ * </ol>
+ * </p>
  */
 public interface AgentTraceService {
 

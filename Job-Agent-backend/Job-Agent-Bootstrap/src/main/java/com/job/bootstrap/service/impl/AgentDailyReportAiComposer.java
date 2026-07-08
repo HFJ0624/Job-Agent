@@ -14,12 +14,36 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Agent AI 日报生成器。
+ * Agent AI 日报生成器，负责将 Agent Inbox 快照转换为结构化日报。
  *
- * 设计说明：
+ * <p>核心职责：
+ * 接收 AgentDailyReportServiceImpl 传入的 Inbox 快照，构造 Prompt 变量与 UserMessage，
+ * 调用 AiModelGatewayService 统一模型网关，要求模型严格输出 JSON 并解析为 AiComposeResult。
+ * 解析失败直接抛异常，不使用规则日报兜底，保证用户看到的就是模型真实输出。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Daily Report 子模块（AI 日报生成层）。</p>
+ *
+ * <p>主要调用链：
+ * AgentDailyReportServiceImpl.generateForUser -> AgentDailyReportAiComposer.compose
+ * -> buildInboxSnapshot（构造 Inbox 快照）
+ * -> AiModelGatewayService.chat（sceneCode=AGENT_DAILY_REPORT）
+ * -> parseResponse（JSON 解析与字段校验）
+ * -> 返回 AiComposeResult 给日报 Service 落库</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>第二版日报由模型生成，但仍然把 Agent Inbox 作为事实输入，避免模型凭空编造待办；</li>
+ *   <li>模型必须返回 JSON，服务端解析后再保存；解析失败直接失败，不使用规则日报兜底；</li>
+ *   <li>sceneCode 固定为 AGENT_DAILY_REPORT，由后台模型与 Prompt 管理页面配置具体模板和模型；</li>
+ *   <li>变量 Map 同时提供驼峰与下划线两种命名，兼容不同 Prompt 模板风格。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 第二版日报由模型生成，但仍然把 Agent Inbox 作为事实输入，避免模型凭空编造待办。
  * 2. 模型必须返回 JSON，服务端解析后再保存；解析失败直接失败，不使用规则日报兜底。
- * 3. sceneCode 固定为 AGENT_DAILY_REPORT，由后台模型与 Prompt 管理页面配置具体模板和模型。
+ * 3. sceneCode 固定为 AGENT_DAILY_REPORT，由后台模型与 Prompt 管理页面配置具体模板和模型。</p>
+ *
+ * 作者: hfj
  */
 @Component
 @RequiredArgsConstructor
@@ -31,11 +55,19 @@ public class AgentDailyReportAiComposer {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 生成 AI 日报。
+     * 生成 AI 日报，覆盖快照构造、模型调用与 JSON 解析全流程。
      *
-     * @param userId 用户 ID
-     * @param inbox 今日 Inbox 快照
-     * @return AI 生成后的日报内容
+     * <p>核心处理流程：
+     * 1. 兜底处理 inbox 为空的情况，避免后续 NPE；
+     * 2. 构造 Inbox 快照 JSON 与 Prompt 变量 Map（同时提供驼峰与下划线命名）；
+     * 3. 构造 UserMessage，明确要求模型只能基于输入数据总结，输出 JSON；
+     * 4. 调用统一模型网关 AiModelGatewayService.chat，sceneCode 固定为 AGENT_DAILY_REPORT；
+     * 5. 解析模型返回 JSON，缺失必填字段或解析失败时抛 IllegalArgumentException。</p>
+     *
+     * @param userId 当前用户 ID，作为 @MemoryId 传入模型网关
+     * @param inbox  今日 Inbox 快照，作为模型事实输入
+     * @return AI 生成后的日报内容，包含 title、summary、content 与 contentJson
+     * @throws IllegalArgumentException 模型返回为空、JSON 解析失败或必填字段缺失时抛出
      */
     public AiComposeResult compose(Long userId, AgentInboxVO inbox) {
         AgentInboxVO safeInbox = inbox == null ? new AgentInboxVO() : inbox;

@@ -10,8 +10,14 @@ import com.job.common.vo.application.JobApplicationVO;
 import java.util.Date;
 
 /**
- * 作者:hfj
- * 功能:求职投递记录服务
+ * 求职投递记录服务接口。
+ *
+ * <p>核心职责：管理用户从投递到录用全生命周期的求职记录，包括增删改查、状态流转、进度统计及面试日程同步。</p>
+ *
+ * <p>所属业务模块：求职管理 - 投递跟踪</p>
+ *
+ * <p>主要调用链：
+ * JobApplicationController -&gt; JobApplicationService -&gt; JobApplicationServiceImpl -&gt; JobApplicationRepository / JobReminderService / JobCommunicationRecordService</p>
  */
 public interface JobApplicationService {
 
@@ -59,10 +65,13 @@ public interface JobApplicationService {
      */
     JobApplicationStatsVO getStats(Long userId);
 
-    /***
+    /**
+     * 同步面试进度信息到求职记录。
      *
-     * @param userId 用户id
-     * @param applicationId 面试求职id
+     * <p>场景：用户确认面试邀约后，将面试时间和下次跟进时间回写到对应求职记录，并触发提醒创建。</p>
+     *
+     * @param userId 当前用户 ID
+     * @param applicationId 求职记录 ID
      * @param interviewTime 面试时间
      * @param nextFollowTime 下次跟进时间
      */

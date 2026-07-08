@@ -48,6 +48,34 @@ import java.util.Date;
 
 /**
  * 后台首页看板聚合服务实现。
+ *
+ * <p>核心职责：为后台首页提供一站式数据聚合能力，
+ * 汇总用户增长、岗位发布、简历解析、Agent 调用、RAG 知识库、AI 模型、Prompt 版本、模拟面试及求职跟进等全链路核心指标，
+ * 帮助管理员在单页内掌握平台整体运行状况。</p>
+ *
+ * <p>所属业务模块：Admin 后台 - 首页看板</p>
+ *
+ * <p>主要调用链：
+ * AdminDashboardController → {@link AdminDashboardServiceImpl#getOverview} →
+ * 多个 Mapper 聚合查询 → 返回 AdminDashboardOverviewVO</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 JobUserMapper、JobPositionMapper、JobResumeMapper 等基础业务 Mapper 获取用户、岗位、简历数据</li>
+ *   <li>依赖 AgentTraceLogMapper、AiModelCallLogMapper 获取 AI 调用与模型调用日志</li>
+ *   <li>依赖 RagDocumentMapper、RagChunkMapper 获取 RAG 知识库状态</li>
+ *   <li>依赖 AiModelConfigMapper、AiPromptVersionMapper 获取模型与 Prompt 配置状态</li>
+ *   <li>依赖 MockInterviewSessionMapper 获取模拟面试统计</li>
+ *   <li>依赖 JobApplicationRecordMapper、JobReminderMapper、WorkflowTaskMapper 获取求职跟进 Agent 数据</li>
+ *   <li>依赖 AgentObservationAlertRecordMapper 获取未处理告警数量</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>采用纯内存聚合第一版，避免引入额外统计宽表和同步任务。</li>
+ *   <li>所有"今日"指标复用同一组时间边界（startOfToday / startOfTomorrow），保证数据一致性。</li>
+ *   <li>betweenCreateTime 作为通用时间范围拼接工具，减少重复代码。</li>
+ * </ul></p>
  */
 @Service
 @RequiredArgsConstructor
@@ -204,24 +232,44 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         return modelCallLogMapper.selectCount(wrapper);
     }
 
+    /**
+     * 统计处于 ACTIVE 状态的 RAG 文档数量。
+     *
+     * @return 有效文档数
+     */
     private long countActiveRagDocuments() {
         return ragDocumentMapper.selectCount(new LambdaQueryWrapper<RagDocument>()
                 .eq(RagDocument::getIsDeleted, NOT_DELETED)
                 .eq(RagDocument::getStatus, STATUS_ACTIVE));
     }
 
+    /**
+     * 统计处于 ACTIVE 状态的 RAG 文本切片数量。
+     *
+     * @return 有效切片数
+     */
     private long countActiveRagChunks() {
         return ragChunkMapper.selectCount(new LambdaQueryWrapper<RagChunk>()
                 .eq(RagChunk::getIsDeleted, NOT_DELETED)
                 .eq(RagChunk::getStatus, STATUS_ACTIVE));
     }
 
+    /**
+     * 统计处于 ACTIVE 状态的 AI 模型配置数量。
+     *
+     * @return 启用模型数
+     */
     private long countActiveModels() {
         return modelConfigMapper.selectCount(new LambdaQueryWrapper<AiModelConfig>()
                 .eq(AiModelConfig::getIsDeleted, NOT_DELETED)
                 .eq(AiModelConfig::getStatus, STATUS_ACTIVE));
     }
 
+    /**
+     * 统计已发布（PUBLISHED）的 Prompt 版本数量。
+     *
+     * @return 已发布版本数
+     */
     private long countPublishedPromptVersions() {
         return promptVersionMapper.selectCount(new LambdaQueryWrapper<AiPromptVersion>()
                 .eq(AiPromptVersion::getIsDeleted, NOT_DELETED)
@@ -334,6 +382,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         return workflowTaskMapper.selectCount(wrapper);
     }
 
+    /**
+     * 统计未处理（OPEN）的 Agent 观测告警数量。
+     *
+     * @return 未处理告警数
+     */
     private long countOpenAlerts() {
         return alertRecordMapper.selectCount(new LambdaQueryWrapper<AgentObservationAlertRecord>()
                 .eq(AgentObservationAlertRecord::getIsDeleted, NOT_DELETED)
@@ -363,10 +416,20 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         }
     }
 
+    /**
+     * 获取今日零点时间，用于统一"今日"指标的时间边界。
+     *
+     * @return 今日开始时间
+     */
     private Date startOfToday() {
         return Date.from(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant());
     }
 
+    /**
+     * 获取明日零点时间，与 {@link #startOfToday} 构成半开区间 [today, tomorrow)。
+     *
+     * @return 明日开始时间
+     */
     private Date startOfTomorrow() {
         return Date.from(LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant());
     }

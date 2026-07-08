@@ -4,9 +4,14 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.job.common.entity.address.JobUserAddress;
 
 /**
- * 作者:hfj
- * 功能:用户地址业务服务接口，定义家庭地址查询和保存能力
- * 日期:2026/6/4 11:00
+ * 用户地址业务服务接口。
+ *
+ * <p>核心职责：管理用户家庭地址的查询与保存，支持默认地址的自动维护。</p>
+ *
+ * <p>所属业务模块：用户中心 - 地址管理</p>
+ *
+ * <p>主要调用链：
+ * UserAddressController / JobApplicationService -&gt; JobUserAddressService -&gt; JobUserAddressServiceImpl -&gt; JobUserAddressRepository</p>
  */
 public interface JobUserAddressService extends IService<JobUserAddress> {
 

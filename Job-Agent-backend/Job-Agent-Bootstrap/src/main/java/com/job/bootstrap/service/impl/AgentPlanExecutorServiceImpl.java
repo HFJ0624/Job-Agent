@@ -38,8 +38,44 @@ import java.util.List;
 import java.util.Map;
 
 /**
+ * Agent 计划执行服务实现，是 Agent 链路中 Tool Calling 与 Observation 的核心编排者。
+ *
+ * <p>核心职责：
+ * 1. 加载计划与步骤，按 stepNo 顺序确定性执行，不依赖模型自主决策。
+ * 2. 对每一步执行 Guardrails 校验，防止计划外工具被越权调用。
+ * 3. 通过 AgentToolInvoker 调用真实工具，并回写步骤状态（RUNNING/COMPLETED/FAILED/SKIPPED）。
+ * 4. 任一步骤失败则终止后续步骤，并更新计划状态为 FAILED。
+ * 5. 每一步都写入 Executor 观测事件（Observation），便于后台排障。
+ * 6. 执行完成后调用 AgentMemoryExtractionService 沉淀长期记忆。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Service 层（Executor 阶段）。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl.chat -> AgentPlanExecutorServiceImpl.executePlan
+ * -> loadUserPlan / loadPlanSteps (加载计划)
+ * -> executeToolStep (循环执行步骤)
+ *    -> AgentGuardrailService.assertToolExecutionAllowed (Guardrails 校验)
+ *    -> AgentToolInvoker.invoke (调用真实工具 + 写 Tool Trace)
+ *    -> markStepCompleted / markStepFailed (回写步骤状态)
+ *    -> AgentObservationService.recordEvent (写 Observation)
+ * -> updatePlanStatus (更新计划状态)
+ * -> AgentMemoryExtractionService.extractFromExecution (沉淀长期记忆)</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AgentToolInvoker 统一调用工具，复用现有 Tool 实现，不绕过 Tool Guard 与 Tool Trace；</li>
+ *   <li>AgentGuardrailService 校验工具是否在计划允许范围内，防止越权；</li>
+ *   <li>AgentObservationService 记录 EXECUTOR 观测事件，与工具内部 TOOL 事件互补；</li>
+ *   <li>AgentMemoryExtractionService 在执行完成后沉淀偏好与工具结果记忆；</li>
+ *   <li>AgentRuntimeContext 通过 ThreadLocal 暴露 planId/stepId 给工具内部 Trace。</li>
+ * </ul></p>
+ *
+ * <p>Agent 执行阶段说明：
+ * 计划加载 -> 幂等校验 -> 步骤循环 (Guardrails -> Tool Calling -> Observation -> 状态回写)
+ * -> 计划状态更新 -> 长期记忆沉淀
+ * 终止条件：所有步骤执行完毕，或某一步骤失败则跳过后续步骤。</p>
+ *
  * 作者:hfj
- * 功能:Agent 计划执行服务实现
  * 日期:2026/6/20
  */
 @Slf4j

@@ -32,9 +32,38 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 作者:hfj
- * 功能:公司业务服务实现，处理公司分页、表单保存、逻辑删除和 Excel 导入
- * 日期:2026/6/6 10:30
+ * 公司业务服务实现类。
+ *
+ * <p>核心职责：负责公司（JobCompany）全生命周期管理，包括分页查询、新增/修改、逻辑删除
+ * 以及基于 Excel 的批量导入。提供公司名称唯一性校验与多维度模糊搜索能力。</p>
+ *
+ * <p>所属业务模块：公司管理模块（Company Management）</p>
+ *
+ * <p>主要调用链：
+ * <pre>
+ * JobCompanyController -&gt; JobCompanyService -&gt; JobCompanyServiceImpl
+ *                                    |
+ *                                    v
+ *                              JobCompanyMapper
+ * </pre></p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>继承 {@link ServiceImpl}，依赖 {@link JobCompanyMapper} 进行公司持久化操作</li>
+ *   <li>被 {@link JobPositionServiceImpl} 依赖，用于岗位保存/发布时的公司存在性校验</li>
+ *   <li>通过 {@link MultipartFile} 接收前端 Excel 文件，使用 Apache POI 进行解析</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>所有写操作均使用 {@link Transactional} 保证事务一致性</li>
+ *   <li>Excel 导入采用“按公司名称 upsert”策略，避免管理端出现同名重复数据</li>
+ *   <li>公司名称全局唯一，新增和修改时均做重复性校验</li>
+ *   <li>逻辑删除时同步禁用公司状态，保证数据一致性</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/6
  */
 @Service
 @RequiredArgsConstructor
@@ -112,6 +141,8 @@ public class JobCompanyServiceImpl extends ServiceImpl<JobCompanyMapper, JobComp
     /**
      * 新增公司。
      *
+     * <p>保存前校验公司名称是否已存在，避免重复数据入库；状态为空时默认正常。</p>
+     *
      * @param request 公司表单请求参数
      * @return 返回保存后的公司实体
      */
@@ -137,6 +168,8 @@ public class JobCompanyServiceImpl extends ServiceImpl<JobCompanyMapper, JobComp
     /**
      * 修改公司。
      *
+     * <p>根据公司 ID 查询并更新信息，修改时排除自身后校验公司名称唯一性。</p>
+     *
      * @param companyId 公司 ID
      * @param request 公司表单请求参数
      * @return 返回修改后的公司实体
@@ -160,6 +193,8 @@ public class JobCompanyServiceImpl extends ServiceImpl<JobCompanyMapper, JobComp
     /**
      * 逻辑删除公司。
      *
+     * <p>将公司标记为已删除，并同步将状态置为禁用，避免已删除公司继续被岗位引用。</p>
+     *
      * @param companyId 公司 ID
      */
     @Override
@@ -173,7 +208,9 @@ public class JobCompanyServiceImpl extends ServiceImpl<JobCompanyMapper, JobComp
     }
 
     /**
-     * 根据 ID 查询公司。
+     * 根据 ID 查询未删除的公司。
+     *
+     * <p>若公司不存在或已被逻辑删除，则抛出 {@link BizException}。</p>
      *
      * @param companyId 公司 ID
      * @return 返回公司实体

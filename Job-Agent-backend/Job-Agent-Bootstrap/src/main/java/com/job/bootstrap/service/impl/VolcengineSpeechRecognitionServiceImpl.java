@@ -19,12 +19,36 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 功能: 火山引擎/豆包语音 ASR 语音识别实现。
+ * 火山引擎/豆包语音 ASR 语音识别实现。
  *
- * 说明:
- * 1. 优先支持新版豆包语音 API Key，匹配新版控制台“API Key 接入”。
- * 2. 保留旧版 submit 接口，兼容之前 appId/token/cluster 的配置。
- * 3. 新版接口的字段名、模型名和返回文本路径都做成配置，减少后续因文档差异改代码的概率。
+ * <p>核心职责：接收音频字节流，调用火山引擎语音识别服务返回文本结果，支持新版豆包语音 API Key 和旧版 submit 两种接入模式。</p>
+ *
+ * <p>所属业务模块：基础设施模块（infrastructure）/ AI 能力模块（ai）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>业务模块调用 {@link #recognize} 传入音频数据和文件信息；</li>
+ *   <li>根据配置自动选择新版豆包语音 API Key 模式或旧版 submit 模式；</li>
+ *   <li>构造 HTTP 请求并发送，解析响应体中的识别文本；</li>
+ *   <li>返回统一的结果对象 {@link SpeechRecognitionResult}。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link VolcengineAsrProperties} 获取 endpoint、apiKey、模型名等配置；</li>
+ *   <li>依赖 {@link ObjectMapper} 构造请求体和解析响应 JSON。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>优先支持新版豆包语音 API Key，匹配新版控制台“API Key 接入”；</li>
+ *   <li>保留旧版 submit 接口，兼容之前 appId/token/cluster 的配置；</li>
+ *   <li>新版接口的字段名、模型名和返回文本路径均做成配置，减少后续因文档差异改代码的概率；</li>
+ *   <li>所有外部调用异常均在内部捕获，返回失败的 SpeechRecognitionResult，避免向上抛异常中断业务。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -58,6 +82,15 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         }
     }
 
+    /**
+     * 使用新版豆包语音 API Key 模式进行语音识别。
+     *
+     * @param audioBytes       音频字节数组
+     * @param contentType      音频内容类型
+     * @param originalFilename 原始文件名
+     * @return 识别结果
+     * @throws Exception 请求或解析异常
+     */
     private SpeechRecognitionResult recognizeByDoubaoApiKey(byte[] audioBytes, String contentType, String originalFilename) throws Exception {
 
         System.out.println("=== 进入新版豆包ASR逻辑，endpoint=" + properties.getEndpoint() + " model=" + properties.getModel());
@@ -105,6 +138,14 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return SpeechRecognitionResult.success(PROVIDER, text.trim());
     }
 
+    /**
+     * 根据 requestStyle 配置构建豆包语音请求体。
+     *
+     * @param audioBytes       音频字节数组
+     * @param contentType      音频内容类型
+     * @param originalFilename 原始文件名
+     * @return 请求体 Map
+     */
     private Map<String, Object> buildDoubaoRequestBody(byte[] audioBytes, String contentType, String originalFilename) {
         if (REQUEST_STYLE_FLASH.equalsIgnoreCase(properties.getRequestStyle())) {
             return buildFlashRequestBody(audioBytes, contentType, originalFilename);
@@ -112,6 +153,14 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return buildFlatRequestBody(audioBytes, contentType, originalFilename);
     }
 
+    /**
+     * 构建 flash 录音文件识别的嵌套 JSON 请求体。
+     *
+     * @param audioBytes       音频字节数组
+     * @param contentType      音频内容类型
+     * @param originalFilename 原始文件名
+     * @return 请求体 Map
+     */
     private Map<String, Object> buildFlashRequestBody(byte[] audioBytes, String contentType, String originalFilename) {
         Map<String, Object> requestBody = new LinkedHashMap<>();
 
@@ -135,6 +184,14 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return requestBody;
     }
 
+    /**
+     * 构建扁平化请求体，适用于非 flash 模式的新版 API Key 接口。
+     *
+     * @param audioBytes       音频字节数组
+     * @param contentType      音频内容类型
+     * @param originalFilename 原始文件名
+     * @return 请求体 Map
+     */
     private Map<String, Object> buildFlatRequestBody(byte[] audioBytes, String contentType, String originalFilename) {
         Map<String, Object> requestBody = new LinkedHashMap<>();
         if (StringUtils.hasText(properties.getModel())) {
@@ -146,6 +203,15 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return requestBody;
     }
 
+    /**
+     * 使用旧版 submit 接口进行语音识别。
+     *
+     * @param audioBytes       音频字节数组
+     * @param contentType      音频内容类型
+     * @param originalFilename 原始文件名
+     * @return 识别结果
+     * @throws Exception 请求或解析异常
+     */
     private SpeechRecognitionResult recognizeByLegacySubmit(byte[] audioBytes, String contentType, String originalFilename) throws Exception {
         if (!StringUtils.hasText(properties.getAppId()) || !StringUtils.hasText(properties.getToken())) {
             return SpeechRecognitionResult.failed(PROVIDER, "旧版 ASR appId/token 未配置；如果你使用新版豆包语音，请配置 api-key");
@@ -185,6 +251,13 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return SpeechRecognitionResult.success(PROVIDER, text.trim());
     }
 
+    /**
+     * 发送 HTTP 请求并校验状态码，返回响应体字符串。
+     *
+     * @param request HTTP 请求
+     * @return 响应体
+     * @throws Exception 请求失败或状态码异常时抛出
+     */
     private String send(HttpRequest request) throws Exception {
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
@@ -196,6 +269,11 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return response.body();
     }
 
+    /**
+     * 判断是否使用新版豆包语音 API Key 模式。
+     *
+     * @return true 表示使用新版模式，false 表示使用旧版 submit 模式
+     */
     private boolean useDoubaoApiKeyMode() {
         if (StringUtils.hasText(properties.getMode())) {
             return MODE_DOUBAO_API_KEY.equalsIgnoreCase(properties.getMode());
@@ -203,6 +281,11 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return StringUtils.hasText(properties.getApiKey()) && !MODE_LEGACY_SUBMIT.equalsIgnoreCase(properties.getMode());
     }
 
+    /**
+     * 为 HTTP 请求 Builder 添加 API Key 鉴权头。
+     *
+     * @param builder HTTP 请求 Builder
+     */
     private void applyApiKeyHeader(HttpRequest.Builder builder) {
         String headerName = StringUtils.hasText(properties.getApiKeyHeaderName())
                 ? properties.getApiKeyHeaderName()
@@ -214,6 +297,13 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         builder.header(headerName, value);
     }
 
+    /**
+     * 根据 contentType 和文件名解析音频格式。
+     *
+     * @param contentType      音频内容类型
+     * @param originalFilename 原始文件名
+     * @return 音频格式标识（wav、mp3、ogg、webm 等）
+     */
     private String resolveAudioFormat(String contentType, String originalFilename) {
         String lowerContentType = contentType == null ? "" : contentType.toLowerCase();
         String lowerFilename = originalFilename == null ? "" : originalFilename.toLowerCase();
@@ -233,6 +323,13 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return "wav";
     }
 
+    /**
+     * 从响应 JSON 中按配置路径提取识别文本。
+     *
+     * @param body 响应体
+     * @return 识别文本，未找到返回 null
+     * @throws Exception JSON 解析异常
+     */
     private String extractText(String body) throws Exception {
         JsonNode root = objectMapper.readTree(body);
         for (String path : properties.getTextJsonPaths().split(",")) {
@@ -244,6 +341,13 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return null;
     }
 
+    /**
+     * 按点号分隔的路径从 JSON 节点中读取值，支持数组下标。
+     *
+     * @param root JSON 根节点
+     * @param path 路径表达式，如 "result.text" 或 "result.utterances[0].text"
+     * @return 节点文本值，不存在返回 null
+     */
     private String readJsonPath(JsonNode root, String path) {
         if (!StringUtils.hasText(path)) {
             return null;
@@ -258,6 +362,13 @@ public class VolcengineSpeechRecognitionServiceImpl implements SpeechRecognition
         return current.isTextual() ? current.asText() : current.toString();
     }
 
+    /**
+     * 读取单个路径段，支持数组下标语法（如 "utterances[0]"）。
+     *
+     * @param node    当前 JSON 节点
+     * @param segment 路径段
+     * @return 下一级节点，不存在或下标越界返回 null
+     */
     private JsonNode readPathSegment(JsonNode node, String segment) {
         int arrayStart = segment.indexOf('[');
         if (arrayStart < 0) {

@@ -8,9 +8,14 @@ import java.io.InputStream;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:简历业务服务接口，定义简历上传和当前用户简历列表查询能力
- * 日期:2026/6/4 10:30
+ * 简历业务服务接口。
+ *
+ * <p>核心职责：管理用户简历的全生命周期，包括上传、解析、重命名、默认设置、删除及列表查询。</p>
+ *
+ * <p>所属业务模块：用户中心 - 简历管理</p>
+ *
+ * <p>主要调用链：
+ * ResumeController / JobApplicationService / JobResumeScoreService -&gt; JobResumeService -&gt; JobResumeServiceImpl -&gt; JobResumeRepository / FileStorageService / ResumeParser</p>
  */
 public interface JobResumeService extends IService<JobResume> {
 

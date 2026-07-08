@@ -56,12 +56,36 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 功能: 模拟面试服务实现。
+ * 模拟面试核心服务实现。
  *
- * 说明:
- * 1. 保留原来的求职记录模拟面试能力，兼容已有页面。
- * 2. 新增按“简历 + 岗位”直接启动 AI 语音面试，适合用户主动练习。
- * 3. 音频答题先保存原始文件和 ASR 结果，再复用文本答题评分链路，保证数据可追溯。
+ * <p>核心职责：管理模拟面试全生命周期，包括会话启动、题目推送、文本/语音答题、AI 评分、会话结束及错题自动收录。
+ *
+ * <p>所属业务模块：面试训练中心 - 模拟面试（Mock Interview）。
+ *
+ * <p>主要调用链：
+ * <ul>
+ *   <li>用户端：{@code startSession / startAiInterview} → {@code getCurrentQuestion} →
+ *       {@code submitAnswer / submitAudioAnswer} → {@code finishSession}</li>
+ *   <li>评分链路：{@code createAnswerAndAdvance} → {@code evaluateAnswer} →
+ *       {@code evaluateAnswerWithStandardAnswer}（模型优先）→ 规则兜底 → {@code saveWrongQuestionIfNeeded}</li>
+ * </ul>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link InterviewPrepareService}：旧流程依赖面试准备记录生成题目种子。</li>
+ *   <li>{@link InterviewQuestionSelectorService}：新流程通过 RAG + 题库召回匹配题目。</li>
+ *   <li>{@link AiModelGatewayService}：统一模型网关，负责答题评分和复盘 Prompt 调用。</li>
+ *   <li>{@link SpeechRecognitionService} + {@link FileStorageService}：语音答题链路（ASR + 文件存储）。</li>
+ *   <li>{@link MockInterviewWrongQuestionService}：读取薄弱知识点，用于个性化出题。</li>
+ * </ul>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>兼容双入口：保留基于求职记录的旧流程，同时新增“简历 + 岗位”直接启动的 AI 面试流程。</li>
+ *   <li>评分双保险：优先调用 LLM 做语义评分，模型不可用时自动降级为规则评分，避免单点故障。</li>
+ *   <li>语音答题复用文本链路：先存原始音频和 ASR 结果，再用 ASR 文本走统一评分逻辑，保证数据一致性。</li>
+ *   <li>错题自动沉淀：每题评分后按得分、判错标志、缺失要点综合决策是否进入错题本，支撑后续学习计划和复测。</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -99,6 +123,21 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final AiModelGatewayService aiModelGatewayService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 基于求职记录启动模拟面试会话（旧流程兼容入口）。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>校验求职记录归属。</li>
+     *   <li>复用或自动生成面试准备记录。</li>
+     *   <li>按准备记录中的技术/项目/HR 题构建题目种子。</li>
+     *   <li>创建会话及题目，返回会话详情。</li>
+     * </ol>
+     *
+     * @param userId 用户 ID
+     * @param dto    启动参数，包含 applicationId、resumeId、questionCount
+     * @return 新建会话的完整详情
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewSessionVO startSession(Long userId, MockInterviewStartDTO dto) {
@@ -128,6 +167,21 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return getSessionDetail(userId, session.getId());
     }
 
+    /**
+     * 基于“简历 + 岗位”直接启动 AI 模拟面试会话（新流程入口）。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>校验简历归属并解析文本。</li>
+     *   <li>校验岗位状态（仅允许已发布岗位）。</li>
+     *   <li>通过题库 + RAG 召回题目，不足时由规则题兜底。</li>
+     *   <li>创建会话及题目，返回会话详情。</li>
+     * </ol>
+     *
+     * @param userId 用户 ID
+     * @param dto    启动参数，包含 resumeId、jobId、questionCount、excludeRecentHours
+     * @return 新建会话的完整详情
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewSessionVO startAiInterview(Long userId, AiInterviewStartDTO dto) {
@@ -173,6 +227,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return getSessionDetail(userId, session.getId());
     }
 
+    /**
+     * 获取模拟面试会话完整详情。
+     *
+     * <p>聚合会话、题目、回答、音频媒体记录，按时间/排序号组织后返回。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 会话详情 VO
+     */
     @Override
     public MockInterviewSessionVO getSessionDetail(Long userId, Long sessionId) {
         MockInterviewSession session = getUserSessionRequired(userId, sessionId);
@@ -202,6 +265,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return vo;
     }
 
+    /**
+     * 获取当前会话下一道待回答题目。
+     *
+     * <p>若会话已结束，返回 {@code null}。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 下一题 VO，或会话结束时的 {@code null}
+     */
     @Override
     public MockInterviewQuestionVO getCurrentQuestion(Long userId, Long sessionId) {
         MockInterviewSession session = getUserSessionRequired(userId, sessionId);
@@ -219,6 +291,16 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return MockInterviewQuestionVO.from(question);
     }
 
+    /**
+     * 提交文本回答并评分。
+     *
+     * <p>调用链：校验会话与题目 → 创建回答 → AI 评分 → 推进会话进度 → 自动结束（最后一题）。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @param dto       回答内容
+     * @return 评分后的回答 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewAnswerVO submitAnswer(Long userId, Long sessionId, MockInterviewAnswerDTO dto) {
@@ -228,6 +310,23 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return MockInterviewAnswerVO.from(answer);
     }
 
+    /**
+     * 提交语音回答并评分。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>保存原始音频文件到对象存储，生成媒体记录。</li>
+     *   <li>调用 ASR 将语音转文本。</li>
+     *   <li>ASR 成功后复用文本答题评分链路，并回填 answerId 到媒体记录。</li>
+     * </ol>
+     *
+     * @param userId          用户 ID
+     * @param sessionId       会话 ID
+     * @param questionId      题目 ID
+     * @param audio           音频文件
+     * @param durationSeconds 音频时长（秒）
+     * @return 评分后的回答 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewAnswerVO submitAudioAnswer(Long userId, Long sessionId, Long questionId, MultipartFile audio, Integer durationSeconds) {
@@ -291,6 +390,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         }
     }
 
+    /**
+     * 手动结束模拟面试会话。
+     *
+     * <p>强制将会话标记为结束，计算本轮平均分并生成总结，返回完整会话详情。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 结束后的会话详情 VO
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MockInterviewSessionVO finishSession(Long userId, Long sessionId) {
@@ -299,6 +407,14 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return getSessionDetail(userId, sessionId);
     }
 
+    /**
+     * 创建会话并按种子批量插入题目。
+     *
+     * <p>题目按 sortNo 递增排序，初始状态均为未回答。
+     *
+     * @param session 会话实体
+     * @param seeds   题目种子列表
+     */
     private void createSessionAndQuestions(MockInterviewSession session, List<QuestionSeed> seeds) {
         if (seeds.isEmpty()) {
             throw mockInterviewException(MockInterviewErrorCode.NO_AVAILABLE_QUESTION, "没有可用的面试题，请检查岗位或简历内容");
@@ -326,6 +442,17 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         }
     }
 
+    /**
+     * 校验题目是否可用于当前会话回答。
+     *
+     * <p>校验项：会话未结束、题目存在且归属正确、题目未被重复回答。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @param questionId 题目 ID
+     * @param session   当前会话
+     * @return 校验通过的题目实体
+     */
     private MockInterviewQuestion getQuestionForAnswer(Long userId, Long sessionId, Long questionId, MockInterviewSession session) {
         if (STATUS_FINISHED.equals(session.getStatus())) {
             throw mockInterviewException(MockInterviewErrorCode.QUESTION_NOT_AVAILABLE, "本轮模拟面试已经结束");
@@ -341,6 +468,21 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return question;
     }
 
+    /**
+     * 创建回答、评分并推进会话进度。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>调用评分引擎（模型优先，规则兜底）生成评价结果。</li>
+     *   <li>保存回答记录，按需沉淀错题本。</li>
+     *   <li>标记题目已答，推进会话索引；最后一题自动触发会话结束。</li>
+     * </ol>
+     *
+     * @param session       当前会话
+     * @param question      当前题目
+     * @param answerContent 用户回答内容（文本）
+     * @return 保存后的回答实体
+     */
     private MockInterviewAnswer createAnswerAndAdvance(MockInterviewSession session, MockInterviewQuestion question, String answerContent) {
         AnswerEvaluation evaluation = evaluateAnswer(question, answerContent);
 
@@ -380,6 +522,14 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return answer;
     }
 
+    /**
+     * 判断当前回答是否需要进入错题本。
+     *
+     * <p>规则：明确判错、得分低于 70、或存在缺失要点，任一条件满足即入库。
+     *
+     * @param evaluation 评分结果
+     * @return true 表示需要收录错题
+     */
     private boolean shouldSaveWrongQuestion(AnswerEvaluation evaluation) {
         /*
          * 1. 明确判错的题进入错题本。
@@ -391,6 +541,16 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 || !evaluation.missingPoints().isEmpty();
     }
 
+    /**
+     * 按评分结果将题目沉淀到错题本。
+     *
+     * <p>同一道题重复答错时覆盖最新表现并累加错误次数，用于后续复练优先级排序。
+     *
+     * @param session    当前会话
+     * @param question   当前题目
+     * @param answer     用户回答
+     * @param evaluation 评分结果
+     */
     private void saveWrongQuestionIfNeeded(
             MockInterviewSession session,
             MockInterviewQuestion question,
@@ -536,6 +696,16 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return result;
     }
 
+    /**
+     * 对用户回答进行评分。
+     *
+     * <p>优先使用 LLM 语义评分（需题库题有标准答案）；模型失败或无标准答案时降级为规则评分，
+     * 从回答长度、结构化表达、量化描述、技术关键词等维度打分。
+     *
+     * @param question      当前题目
+     * @param answerContent 用户回答内容
+     * @return 评分结果
+     */
     private AnswerEvaluation evaluateAnswer(MockInterviewQuestion question, String answerContent) {
         if (StringUtils.hasText(question.getStandardAnswer())) {
             AnswerEvaluation llmEvaluation = evaluateAnswerWithStandardAnswer(question, answerContent);
@@ -618,6 +788,16 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         );
     }
 
+    /**
+     * 调用 LLM 对用户回答与标准答案进行语义匹配评分。
+     *
+     * <p>通过统一模型网关调用评分场景 Prompt；若模型配置缺失、超时或 JSON 解析失败，返回 {@code null}，
+     * 由上层自动降级到规则评分。
+     *
+     * @param question      当前题目
+     * @param answerContent 用户回答内容
+     * @return 模型评分结果，失败时返回 {@code null}
+     */
     private AnswerEvaluation evaluateAnswerWithStandardAnswer(MockInterviewQuestion question, String answerContent) {
         try {
             /*
@@ -803,6 +983,11 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 + UUID.randomUUID();
     }
 
+    /**
+     * 结束会话并计算本轮平均分与总结。
+     *
+     * @param session 当前会话
+     */
     private void finishAndScoreSession(MockInterviewSession session) {
         List<MockInterviewAnswer> answers = answerMapper.selectList(new LambdaQueryWrapper<MockInterviewAnswer>()
                 .eq(MockInterviewAnswer::getSessionId, session.getId())
@@ -835,6 +1020,13 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return "本轮模拟面试表现偏弱，建议先整理简历项目话术，再进行下一轮模拟。";
     }
 
+    /**
+     * 获取并校验用户会话归属与有效性。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 校验通过的会话实体
+     */
     private MockInterviewSession getUserSessionRequired(Long userId, Long sessionId) {
         MockInterviewSession session = sessionMapper.selectById(sessionId);
         if (session == null || !userId.equals(session.getUserId()) || (session.getIsDeleted() != null && session.getIsDeleted() == 1)) {

@@ -31,8 +31,36 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
+ * Agent 长期记忆服务实现，是 Memory 模块的主表读写入口。
+ *
+ * <p>核心职责：
+ * 1. 提供长期记忆的保存或更新（按 userId + memoryType + memoryKey 唯一）。
+ * 2. 提供基于关键词的相关性检索（第一版用 Java 内存打分，后续可替换为向量召回）。
+ * 3. 记录记忆变更历史（CREATE/UPDATE/STATUS_CHANGE），并标记同 key 覆盖冲突。
+ * 4. 支持后台人工更新状态、按 key 归档，保证记忆可审计、可回滚。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Memory Service 层。</p>
+ *
+ * <p>主要调用链：
+ * AgentMemoryCaptureServiceImpl (用户消息捕获) -> saveOrUpdateMemory
+ * AgentMemoryExtractionServiceImpl (工具结果沉淀) -> saveOrUpdateMemory
+ * AgentMemoryContextServiceImpl (上下文召回) -> searchMemories
+ * AgentChatServiceImpl (画像重建触发) -> archiveActiveMemoriesByKeys</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AgentMemoryCaptureService 负责从用户消息捕获记忆，本服务负责落库；</li>
+ *   <li>AgentMemoryExtractionService 负责从工具结果提取记忆，本服务负责落库；</li>
+ *   <li>AgentMemoryContextService 调用 searchMemories 召回相关记忆并控制 Prompt token；</li>
+ *   <li>AgentMemoryHistoryMapper 记录变更历史，支持后台审计与冲突排查。</li>
+ * </ul></p>
+ *
+ * <p>Memory 读写逻辑说明：
+ * 写入：按 key 查找已有记忆，存在则覆盖并写历史，不存在则新增；
+ * 召回：先按重要性 + 时间取候选 100 条，再在 Java 内按关键词打分排序，取 limit 条；
+ * 归档：按 key 把 ACTIVE 记忆改为 ARCHIVED，写 STATUS_CHANGE 历史。</p>
+ *
  * 作者: hfj
- * 功能: Agent 长期记忆服务实现
  * 日期: 2026/6/20
  */
 @Slf4j

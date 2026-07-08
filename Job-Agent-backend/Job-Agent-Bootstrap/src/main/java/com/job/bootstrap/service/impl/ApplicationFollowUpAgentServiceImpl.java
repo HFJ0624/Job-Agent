@@ -30,7 +30,31 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 求职跟进 Agent 事件服务。
+ * 求职跟进 Agent 事件服务实现，负责响应“面试已约”等求职生命周期事件。
+ *
+ * <p>核心职责：
+ * 监听 JobApplicationRecord 状态变化产生的关键事件（如 INTERVIEW_SCHEDULED），
+ * 按后台配置的 AgentFollowUpRule 创建面试准备提醒、生成面试准备材料、
+ * 创建异步邮件通知工作流任务，让“事件 -> 提醒 -> 准备 -> 邮件”形成自动化闭环。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent FollowUp 子模块（求职跟进事件层）。</p>
+ *
+ * <p>主要调用链：
+ * JobApplicationService 更新状态 -> ApplicationFollowUpAgentService.onInterviewScheduled
+ * -> loadInterviewScheduledRule（读取后台规则）
+ * -> createOrUpdateInterviewPrepareReminder（创建/更新面试提醒）
+ * -> tryGenerateInterviewPrepare（生成面试准备材料，失败不影响主流程）
+ * -> createInterviewEmailTask（创建异步邮件工作流任务）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>规则可配置：提醒时间、文案、邮件开关、重试次数都来自 agent_follow_up_rule；</li>
+ *   <li>幂等设计：面试提醒按 applicationId+reminderType 复用，邮件任务按 bizId+taskType 防重；</li>
+ *   <li>面试准备材料生成失败不阻断主流程，真实失败原因留给用户手动重试时暴露；</li>
+ *   <li>邮件发送、重试、失败记录由 WorkflowTaskService 统一负责，本服务只创建任务。</li>
+ * </ul></p>
+ *
+ * 作者: hfj
  */
 @Service
 @RequiredArgsConstructor
@@ -50,13 +74,16 @@ public class ApplicationFollowUpAgentServiceImpl implements ApplicationFollowUpA
     private final ObjectMapper objectMapper;
 
     /**
-     * 面试已确认事件入口。
+     * 面试已确认事件入口，按规则创建提醒、生成准备材料并发送邮件任务。
      *
-     * 步骤：
-     * 1. 读取后台启用的 INTERVIEW_SCHEDULED 规则，让提醒时间、文案、邮件开关可配置。
-     * 2. 创建或更新面试准备提醒，避免用户重复改面试时间后生成多条提醒。
-     * 3. 尝试生成面试准备材料，失败不阻断主流程。
-     * 4. 按规则创建异步邮件任务，让工作流负责发送、重试和失败记录。
+     * <p>核心处理流程：
+     * 1. 校验 application 与 interviewTime 非空，避免无效事件继续；
+     * 2. 读取后台启用的 INTERVIEW_SCHEDULED 规则，让提醒时间、文案、邮件开关可配置；
+     * 3. 创建或更新面试准备提醒，避免用户重复改面试时间后生成多条提醒；
+     * 4. 尝试生成面试准备材料，失败不阻断主流程；
+     * 5. 按规则创建异步邮件任务，让工作流负责发送、重试和失败记录。</p>
+     *
+     * @param application 当前求职申请记录，提供 userId、applicationId、interviewTime 等上下文
      */
     @Override
     @Transactional(rollbackFor = Exception.class)

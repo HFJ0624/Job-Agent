@@ -16,12 +16,36 @@ import org.springframework.stereotype.Service;
 import java.util.UUID;
 
 /**
- * 作者:hfj
- * 功能:Agent Trace 记录服务实现
- * 设计说明:
+ * Agent Trace 记录服务实现，是 Agent 主链路与工具调用的统一 Trace 落库入口。
+ *
+ * <p>核心职责：
+ * 1. 提供 saveTrace / saveToolTrace 两个入口，统一写入 agent_trace_log 表。
+ * 2. 对 input/output 做 PII 脱敏，避免 Trace 暴露手机号、邮箱、token。
+ * 3. 同步写入 AgentObservationService，把 Trace 转换为 Observation 事件，
+ *    方便后台按 TRACE/TOOL/GUARDRAIL 三类事件筛选。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Trace Service 层。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl (主链路 Trace) -> AgentTraceServiceImpl.saveTrace
+ * AgentToolInvoker / 各 Tool (工具 Trace) -> AgentTraceServiceImpl.saveToolTrace
+ * -> AgentGuardrailService.maskSensitiveData (脱敏)
+ * -> agent_trace_log 落库
+ * -> AgentObservationService.recordEvent (同步写 Observation)</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>AgentRuntimeContext 通过 ThreadLocal 暴露 traceId，工具内部 saveToolTrace 自动复用；</li>
+ *   <li>AgentGuardrailService.maskSensitiveData 对 input/output 做统一脱敏；</li>
+ *   <li>AgentObservationService 接收转换后的 Observation 事件，与 Trace 形成互补。</li>
+ * </ul></p>
+ *
+ * <p>设计说明:
  * 1. 所有 Agent 对话和工具调用都通过本类落库。
  * 2. 不建议在 AgentChatServiceImpl、Tool 类中重复写 agentTraceLogMapper.insert。
- * 3. 这样做可以保证 trace 日志格式统一，也方便后续扩展 token 成本、模型名称、异常栈等字段。
+ * 3. 这样做可以保证 trace 日志格式统一，也方便后续扩展 token 成本、模型名称、异常栈等字段。</p>
+ *
+ * 作者:hfj
  * 日期: 2026/6/8 20:13
  */
 @Service

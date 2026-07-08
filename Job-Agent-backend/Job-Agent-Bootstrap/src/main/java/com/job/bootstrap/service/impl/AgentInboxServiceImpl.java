@@ -39,12 +39,36 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Agent Inbox 聚合服务实现。
+ * Agent Inbox 聚合服务实现，负责把分散业务表中的待办聚合成统一收件箱视图。
  *
- * 设计说明：
+ * <p>核心职责：
+ * 从提醒、HR 回复识别、面试中岗位、面试准备、错题、学习计划等多张业务表抽取待处理项，
+ * 叠加用户处理记录（DONE/IGNORED/SNOOZED）后排序输出，让用户在一个入口看到所有需要处理的事情。
+ * markDone 时联动对应业务服务更新源表状态，避免 Inbox 与原业务表形成双写不一致。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Inbox 子模块（待办聚合层）。</p>
+ *
+ * <p>主要调用链：
+ * 前端首页 -> AgentInboxService.getTodayInbox
+ * -> build*Items 聚合多张业务表
+ * -> filterByActionRecords 叠加用户处理记录
+ * -> itemComparator 排序输出
+ * markDone -> completeSourceBusiness（联动业务服务）-> saveAction（记录用户动作）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>第一版只做聚合，不新增 inbox_task 表，避免和提醒、学习计划、HR 确认记录形成双写；</li>
+ *   <li>每类业务最多取少量数据，保证首页待办加载足够轻；</li>
+ *   <li>排序统一按优先级 + 到期时间 + 创建时间，用户先看到最该处理的事情；</li>
+ *   <li>markDone 复用 JobReminderService / MockInterviewLearningPlanService / MockInterviewWrongQuestionService 的状态更新逻辑。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 第一版只做聚合，不新增 inbox_task 表，避免和提醒、学习计划、HR 确认记录形成双写。
  * 2. 每类业务最多取少量数据，保证首页待办加载足够轻。
- * 3. 排序统一按优先级 + 到期时间 + 创建时间，用户先看到最该处理的事情。
+ * 3. 排序统一按优先级 + 到期时间 + 创建时间，用户先看到最该处理的事情。</p>
+ *
+ * 作者: hfj
  */
 @Service
 @RequiredArgsConstructor
@@ -70,6 +94,22 @@ public class AgentInboxServiceImpl implements AgentInboxService {
     private final MockInterviewLearningPlanService learningPlanService;
     private final MockInterviewWrongQuestionService wrongQuestionService;
 
+    /**
+     * 获取当前用户今日 Agent Inbox 待办聚合视图。
+     *
+     * <p>核心处理流程：
+     * 1. 聚合提醒：面试提醒、跟进提醒、自定义提醒都来自 job_reminder；
+     * 2. 聚合 HR 回复识别待确认项：这是最需要用户确认的 Agent 动作；
+     * 3. 聚合面试中岗位：如果已经进入面试阶段，提示用户去准备或查看 AI 面试；
+     * 4. 聚合最近面试准备记录：提示用户复习已生成材料；
+     * 5. 聚合错题本：未掌握和复习中的错题需要持续处理；
+     * 6. 聚合学习计划：进行中的学习计划如果有未完成 item，也进入 Inbox；
+     * 7. 叠加用户处理记录：DONE / IGNORED 不再展示，SNOOZED 未到期前不展示；
+     * 8. 按优先级 + 到期时间 + 创建时间排序，回填总数、高优先级数、到期数等汇总字段。</p>
+     *
+     * @param userId 当前用户 ID
+     * @return 今日 Inbox 聚合 VO，包含 items 列表与汇总统计
+     */
     @Override
     public AgentInboxVO getTodayInbox(Long userId) {
         List<AgentInboxVO.Item> items = new ArrayList<>();
@@ -124,6 +164,14 @@ public class AgentInboxServiceImpl implements AgentInboxService {
         return vo;
     }
 
+    /**
+     * 标记 Inbox 待办为已完成，先联动业务服务更新源表状态，再记录用户动作。
+     *
+     * @param userId  当前用户 ID
+     * @param itemKey 待办唯一 key，格式为 {itemType}_{sourceId}
+     * @param dto     动作 DTO，包含 note、businessStatus 等附加信息
+     * @throws IllegalArgumentException itemKey 为空或源业务记录不存在时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void markDone(Long userId, String itemKey, AgentInboxActionDTO dto) {
@@ -131,12 +179,27 @@ public class AgentInboxServiceImpl implements AgentInboxService {
         saveAction(userId, itemKey, ACTION_DONE, null, dto);
     }
 
+    /**
+     * 忽略 Inbox 待办，仅记录用户动作，不联动业务服务。
+     *
+     * @param userId  当前用户 ID
+     * @param itemKey 待办唯一 key
+     * @param dto     动作 DTO，包含 note 等附加信息
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void ignore(Long userId, String itemKey, AgentInboxActionDTO dto) {
         saveAction(userId, itemKey, ACTION_IGNORED, null, dto);
     }
 
+    /**
+     * 推迟 Inbox 待办到指定时间后再展示。
+     *
+     * @param userId  当前用户 ID
+     * @param itemKey 待办唯一 key
+     * @param dto     动作 DTO，必须包含 snoozeUntil
+     * @throws IllegalArgumentException snoozeUntil 为空时抛出
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void snooze(Long userId, String itemKey, AgentInboxActionDTO dto) {

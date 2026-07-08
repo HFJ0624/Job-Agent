@@ -19,15 +19,40 @@ import org.springframework.util.StringUtils;
 import java.util.*;
 import java.util.stream.Collectors;
 /**
- * 作者:hfj
- * 功能:HR 打招呼语生成服务实现
+ * HR 打招呼语生成服务实现。
  *
- * 设计说明:
- * 1. 第一版先使用规则模板生成，不依赖大模型，保证功能稳定可用。
- * 2. 优先复用岗位匹配结果中的 matchedSkills。
- * 3. 如果没有匹配记录，则从岗位技能关键词和简历原文中做一次简单命中。
- * 4. 后续接入 LLM 时，只需要替换 buildGreetingContent 方法即可。
- * 日期: 2026/6/8 13:59
+ * <p>核心职责：根据用户简历、岗位信息和匹配技能，生成适合发送给 HR 的打招呼语，并自动创建沟通记录。</p>
+ *
+ * <p>所属业务模块：求职沟通模块（communication）/ 打招呼语模块（greeting）</p>
+ *
+ * <p>主要调用链：
+ * <ol>
+ *   <li>前端调用 {@link #generateGreeting} 传入简历、岗位和语气风格；</li>
+ *   <li>服务优先读取岗位匹配结果中的 matchedSkills，无匹配记录则从简历文本与岗位 skillKeywords 中简单命中；</li>
+ *   <li>按风格模板生成话术正文，保存到 job_greeting_record；</li>
+ *   <li>自动生成沟通记录，保证用户复制话术后业务链路不断裂。</li>
+ * </ol>
+ * </p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>依赖 {@link JobResumeService} 获取并解析简历文本；</li>
+ *   <li>依赖 {@link JobPositionService} 获取岗位信息；</li>
+ *   <li>依赖 {@link JobMatchService} 获取最近一次岗位匹配结果；</li>
+ *   <li>依赖 {@link JobCompanyService} 查询公司名称；</li>
+ *   <li>调用 {@link JobCommunicationRecordService} 自动创建沟通记录。</li>
+ * </ul>
+ * </p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>第一版先使用规则模板生成，不依赖大模型，保证功能稳定可用；</li>
+ *   <li>优先复用岗位匹配结果中的 matchedSkills，提升话术与岗位的相关性；</li>
+ *   <li>如果没有匹配记录，则从岗位技能关键词和简历原文中做一次简单命中；</li>
+ *   <li>支持多种语气风格（正式、自然、自信、实习生风格、社招风格、简洁直达）；</li>
+ *   <li>后续接入 LLM 时，只需替换 {@link #buildGreetingContent} 方法即可，上游逻辑无需改动。</li>
+ * </ol>
+ * </p>
  */
 @Service
 @RequiredArgsConstructor

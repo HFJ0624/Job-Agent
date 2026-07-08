@@ -26,14 +26,39 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 作者: hfj
- * 功能: Agent 长期记忆捕获服务实现
- * 日期: 2026/6/23
+ * Agent 长期记忆捕获服务实现，负责从用户自然语言消息中抽取长期事实并写入记忆库。
  *
- * 说明:
+ * <p>核心职责：
+ * 在用户消息入库后立即识别其中隐含的记忆动作（SET/UPDATE/DELETE/ASK/NORMAL_CHAT），
+ * 通过规则抽取 + LLM 抽取合并候选记忆，再经写入策略校验后落库，最后触发用户画像重建。
+ * 让称呼、偏好、求职目标等关键事实能够跨会话生效。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Memory 子模块（用户消息记忆捕获层）。</p>
+ *
+ * <p>主要调用链：
+ * AgentChatServiceImpl.chat -> AgentMemoryCaptureService.captureFromUserMessage
+ * -> AgentMemoryActionClassifier（动作分类）
+ * -> AgentMemoryRuleExtractor + AgentMemoryLlmExtractor（双轨抽取）
+ * -> AgentMemoryWritePolicy（写入策略校验）
+ * -> AgentMemoryService.saveOrUpdateMemory（落库）
+ * -> AgentMemoryContextService.rebuildProfile（画像重建）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>由 AgentChatServiceImpl 在 Planner 执行前调用，捕获失败不影响主流程；</li>
+ *   <li>规则抽取优先于 LLM 抽取，相同 key 不会被 LLM 覆盖，保证可解释性；</li>
+ *   <li>ASK_MEMORY / NORMAL_CHAT 直接跳过写入，避免“你记得我叫什么吗”被误存为事实；</li>
+ *   <li>DELETE_MEMORY 仅归档明确识别到 key 的记忆，未识别 key 时不执行删除，防止误删求职偏好；</li>
+ *   <li>画像重建失败不回滚原始事实，因为派生摘要可由后台手动重建，原始事实不可恢复。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 第一版长期记忆只从工具结果沉淀，普通聊天里的“以后叫你xxx”不会入库。
  * 2. 第二版在用户消息入库后立即捕获自然语言事实，让称呼、偏好、目标能跨会话生效。
- * 3. 捕获结果仍然要走写入策略，避免把低价值、敏感或疑问句写成长期事实。
+ * 3. 捕获结果仍然要走写入策略，避免把低价值、敏感或疑问句写成长期事实。</p>
+ *
+ * 作者: hfj
+ * 日期: 2026/6/23
  */
 @Slf4j
 @Service
@@ -48,21 +73,22 @@ public class AgentMemoryCaptureServiceImpl implements AgentMemoryCaptureService 
     private final AgentMemoryContextService agentMemoryContextService;
 
     /**
-     * 从用户消息中捕获长期记忆。
+     * 从用户消息中捕获长期记忆，覆盖动作分类、双轨抽取、写入校验与画像重建全流程。
      *
-     * 方法步骤:
-     * 1. 先判断用户输入对长期记忆库的动作: 设置、修改、删除、询问或普通聊天。
-     * 2. DELETE_MEMORY 只归档明确识别到的记忆 key，不做抽取和写入。
-     * 3. ASK_MEMORY 和 NORMAL_CHAT 直接跳过写入，避免“你记得我叫什么吗”被误存。
-     * 4. SET_MEMORY 和 UPDATE_MEMORY 才进入规则抽取与可选 LLM 抽取。
-     * 5. 每条候选记忆仍然要通过写入策略校验后才保存。
-     * 6. 只要本轮写入或归档了记忆，就重建用户画像摘要。
+     * <p>核心处理流程：
+     * 1. 校验用户 ID 与消息非空，避免无效请求进入分类器；
+     * 2. 调用动作分类器判定本轮输入属于 SET/UPDATE/DELETE/ASK/NORMAL_CHAT 中的哪一种；
+     * 3. DELETE_MEMORY 仅归档明确识别到 key 的记忆，未识别 key 时直接跳过；
+     * 4. ASK_MEMORY 与 NORMAL_CHAT 直接跳过写入，避免把疑问句或闲聊误存为长期事实；
+     * 5. SET_MEMORY / UPDATE_MEMORY 才进入规则抽取 + LLM 抽取，按 memoryType:key 合并去重；
+     * 6. 每条候选记忆必须通过写入策略校验后才落库，过滤低价值、敏感、置信度低的数据；
+     * 7. 本轮只要写入或归档了记忆，就触发用户画像重建，保证后续 Prompt 上下文是最新的。</p>
      *
-     * @param userId 当前用户 ID
-     * @param conversationId 当前会话 ID
-     * @param traceId 当前链路 ID
-     * @param message 已脱敏用户输入
-     * @return 本轮保存的记忆
+     * @param userId          当前求职用户唯一标识，用于绑定长期记忆归属
+     * @param conversationId  当前会话 ID，作为记忆来源 conversationId 写入，便于溯源
+     * @param traceId         当前链路 ID，用于跨组件日志关联与问题排查
+     * @param message         已脱敏的用户输入文本，作为记忆抽取的原始语料
+     * @return 本轮实际保存的记忆 VO 列表，未写入时返回空列表，调用方不可据此判断主流程成败
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -130,6 +156,18 @@ public class AgentMemoryCaptureServiceImpl implements AgentMemoryCaptureService 
         return saved;
     }
 
+    /**
+     * 处理 DELETE_MEMORY 动作，仅归档明确识别到 key 的记忆，未识别 key 时跳过。
+     *
+     * <p>核心处理流程：
+     * 1. 校验分类器是否识别出目标 memoryKey，未识别时直接返回避免误删求职偏好；
+     * 2. 调用 AgentMemoryService.archiveActiveMemoriesByKeys 批量归档有效记忆；
+     * 3. 归档成功后触发画像重建，保证下次 Prompt 上下文不再包含已遗忘的事实。</p>
+     *
+     * @param userId          当前用户 ID
+     * @param actionDecision  动作分类结果，包含识别到的目标 memoryKey 列表
+     * @return 始终返回空列表，DELETE_MEMORY 不产生新的记忆 VO，仅用于表达“本轮未写入新事实”
+     */
     private List<AgentMemoryVO> handleDeleteMemory(Long userId, AgentMemoryActionDecision actionDecision) {
         if (CollectionUtils.isEmpty(actionDecision.getTargetMemoryKeys())) {
             /*
@@ -158,6 +196,13 @@ public class AgentMemoryCaptureServiceImpl implements AgentMemoryCaptureService 
         return List.of();
     }
 
+    /**
+     * 合并规则抽取与 LLM 抽取的候选记忆，按 memoryType:key 去重且规则优先。
+     *
+     * @param ruleCandidates 规则抽取得到的候选记忆，可解释性强、召回有限
+     * @param llmCandidates  LLM 抽取得到的候选记忆，召回更广但可能存在幻觉
+     * @return 合并去重后的候选列表，相同 key 时保留规则抽取结果
+     */
     private List<AgentMemoryCandidate> mergeCandidates(
             List<AgentMemoryCandidate> ruleCandidates,
             List<AgentMemoryCandidate> llmCandidates
@@ -168,6 +213,12 @@ public class AgentMemoryCaptureServiceImpl implements AgentMemoryCaptureService 
         return new ArrayList<>(merged.values());
     }
 
+    /**
+     * 将候选记忆按 memoryType:key 写入合并 Map，已存在 key 时不覆盖（规则优先）。
+     *
+     * @param merged     合并后的目标 Map，key 为 memoryType:memoryKey
+     * @param candidates 待合并的候选记忆列表，可为空
+     */
     private void putCandidates(Map<String, AgentMemoryCandidate> merged, List<AgentMemoryCandidate> candidates) {
         if (CollectionUtils.isEmpty(candidates)) {
             return;

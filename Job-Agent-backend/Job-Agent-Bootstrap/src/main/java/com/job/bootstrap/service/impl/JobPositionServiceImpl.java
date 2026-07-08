@@ -35,9 +35,38 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 作者:hfj
- * 功能:岗位业务服务实现，处理岗位分页、表单保存、发布下架、逻辑删除和 Excel 导入
- * 日期:2026/6/6 15:20
+ * 岗位业务服务实现类。
+ *
+ * <p>核心职责：负责岗位（JobPosition）全生命周期管理，包括分页查询、新增/修改、发布/下架、
+ * 逻辑删除以及基于 Excel 的批量导入。同时提供岗位与公司之间的关联校验能力。</p>
+ *
+ * <p>所属业务模块：岗位管理模块（Position Management）</p>
+ *
+ * <p>主要调用链：
+ * <pre>
+ * JobPositionController -&gt; JobPositionService -&gt; JobPositionServiceImpl
+ *                                    |
+ *                                    v
+ *                        JobPositionMapper / JobCompanyMapper
+ * </pre></p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>继承 {@link ServiceImpl}，依赖 {@link JobPositionMapper} 进行岗位持久化操作</li>
+ *   <li>依赖 {@link JobCompanyMapper} 进行公司信息校验与模糊查询</li>
+ *   <li>通过 {@link MultipartFile} 接收前端 Excel 文件，使用 Apache POI 进行解析</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>所有写操作均使用 {@link Transactional} 保证事务一致性</li>
+ *   <li>Excel 导入采用“逐行解析 + upsert”策略，支持中英文表头，单行失败不影响其他行</li>
+ *   <li>关键词搜索同时覆盖岗位字段和公司名称，提升搜索召回率</li>
+ *   <li>岗位状态仅维护“草稿（0）”和“已发布（1）”两种，简化状态机</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/6
  */
 @Service
 @RequiredArgsConstructor
@@ -183,8 +212,11 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     /**
      * 新增岗位。
      *
+     * <p>保存前会校验公司是否存在以及薪资区间是否合法；若请求中未指定状态则默认为草稿，
+     * 状态为已发布时自动填充发布时间。</p>
+     *
      * @param request 岗位表单参数
-     * @return 返回新增后的岗位
+     * @return 返回新增后的岗位实体
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -208,9 +240,12 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     /**
      * 修改岗位。
      *
+     * <p>根据岗位 ID 查询并更新岗位信息，重新校验公司与薪资合法性；
+     * 若从草稿变为已发布且此前无发布时间，则自动填充当前时间；若状态回退为草稿，则清空发布时间。</p>
+     *
      * @param positionId 岗位ID
      * @param request 岗位表单参数
-     * @return 返回修改后的岗位
+     * @return 返回修改后的岗位实体
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -237,6 +272,8 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     /**
      * 逻辑删除岗位。
      *
+     * <p>将岗位标记为已删除，并同步将状态置为草稿，避免已删除岗位仍在列表展示。</p>
+     *
      * @param positionId 岗位ID
      */
     @Override
@@ -252,8 +289,10 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     /**
      * 发布岗位。
      *
+     * <p>将岗位状态置为已发布并填充发布时间，同时校验关联公司是否存在。</p>
+     *
      * @param positionId 岗位ID
-     * @return 返回发布后的岗位
+     * @return 返回发布后的岗位实体
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -272,8 +311,10 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     /**
      * 下架岗位。
      *
+     * <p>将岗位状态回退为草稿并清空发布时间，实现岗位下架。</p>
+     *
      * @param positionId 岗位ID
-     * @return 返回下架后的岗位
+     * @return 返回下架后的岗位实体
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -287,7 +328,9 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     }
 
     /**
-     * 根据 ID 查询岗位。
+     * 根据 ID 查询未删除的岗位。
+     *
+     * <p>若岗位不存在或已被逻辑删除，则抛出 {@link BizException}。</p>
      *
      * @param positionId 岗位ID
      * @return 返回岗位实体
@@ -526,10 +569,12 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     }
 
     /**
-     * 根据公司名称模糊查询公司ID。
+     * 根据公司名称模糊查询公司ID列表。
+     *
+     * <p>用于岗位关键词搜索时扩展召回范围，使搜索关键词命中公司名称时也能返回对应岗位。</p>
      *
      * @param keyword 搜索关键词
-     * @return 返回匹配公司ID列表
+     * @return 返回匹配公司ID列表，未匹配到则返回空列表
      */
     private List<Long> findCompanyIdsByName(String keyword) {
         return jobCompanyMapper.selectList(new LambdaQueryWrapper<JobCompany>()
@@ -542,7 +587,9 @@ public class JobPositionServiceImpl extends ServiceImpl<JobPositionMapper, JobPo
     }
 
     /**
-     * 根据 ID 查询公司。
+     * 根据 ID 查询未删除的公司。
+     *
+     * <p>若公司不存在或已被逻辑删除，则抛出 {@link BizException}，用于岗位保存/发布前的关联校验。</p>
      *
      * @param companyId 公司ID
      * @return 返回公司实体

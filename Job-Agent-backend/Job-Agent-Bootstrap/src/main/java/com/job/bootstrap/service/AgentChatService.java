@@ -5,8 +5,14 @@ import com.job.common.vo.agent.AgentChatVO;
 import java.util.List;
 
 /**
- * 作者:hfj
- * 功能:AI 助手聊天服务
+ * AI 助手聊天服务接口。
+ *
+ * <p>核心职责：承接用户与 AI 助手的多轮对话，完成意图识别、计划生成/执行、工具调用确认及最终回复组装。</p>
+ *
+ * <p>所属业务模块：AI 助手 - 对话（Chat）</p>
+ *
+ * <p>主要调用链：
+ * AgentChatController -&gt; AgentChatService -&gt; AgentChatServiceImpl -&gt; AgentPlanningService / AgentPlanExecutorService / AgentMemoryCaptureService / AiModelGatewayService</p>
  */
 public interface AgentChatService {
 

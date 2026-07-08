@@ -27,13 +27,32 @@ import java.math.RoundingMode;
 import java.util.*;
 
 /**
- * 作者:hfj
- * 功能:模拟面试复盘报告服务实现
- * 设计思路:
- * 1. 从 mock_interview_session 读取本轮会话。
- * 2. 从 mock_interview_answer 读取所有回答评分。
- * 3. 从 mock_interview_question 读取题目内容。
- * 4. 根据分数、问题、建议生成复盘报告。
+ * 模拟面试复盘报告服务实现。
+ *
+ * <p>核心职责：基于单轮模拟面试的所有题目、回答和评分，调用 LLM 生成总体复盘报告，并提供补课清单（学习计划）。
+ *
+ * <p>所属业务模块：面试训练中心 - 模拟面试复盘（Mock Interview Review）。
+ *
+ * <p>主要调用链：
+ * <ul>
+ *   <li>用户端：{@code generateReview} → {@code getLatestReview} 查看复盘报告。</li>
+ *   <li>补课清单：{@code buildStudyPlan} → RAG 检索学习材料 → 返回结构化学习计划。</li>
+ * </ul>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>{@link AiModelGatewayService}：统一模型网关，负责生成总体复盘报告的 LLM 调用。</li>
+ *   <li>{@link RagRetrievalService}：为补课清单检索相关学习材料和标准答案。</li>
+ *   <li>{@link MockInterviewSessionMapper} / {@link MockInterviewAnswerMapper} / {@link MockInterviewQuestionMapper}：读取会话、回答、题目原始数据。</li>
+ * </ul>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>复盘报告必须由真实 AI 生成，不使用规则拼接兜底，确保评价具有针对性和可读性。</li>
+ *   <li>单题评价在答题阶段已生成并持久化，复盘阶段直接复用，避免重复调用模型。</li>
+ *   <li>补课清单基于复盘中的薄弱知识点和错题，通过 RAG 召回对应 chunk 作为学习材料。</li>
+ *   <li>所有模型调用异常统一收敛为 {@code REVIEW_GENERATE_FAILED}，方便前端提示用户重试。</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -118,6 +137,20 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
         return toReviewVO(record, questions, answers);
     }
 
+    /**
+     * 基于复盘报告生成补课清单（学习计划）。
+     *
+     * <p>步骤：
+     * <ol>
+     *   <li>校验会话归属并读取最新复盘记录。</li>
+     *   <li>从复盘报告中提取薄弱知识点和能力标签。</li>
+     *   <li>每个知识点通过 RAG 检索学习材料，组装成结构化学习计划。</li>
+     * </ol>
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 学习计划 VO
+     */
     @Override
     public MockInterviewStudyPlanVO buildStudyPlan(Long userId, Long sessionId) {
         MockInterviewSession session = sessionMapper.selectById(sessionId);
@@ -213,7 +246,13 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
     }
 
     /**
-     * 查询最近一次复盘报告。
+     * 查询指定会话最近一次复盘报告。
+     *
+     * <p>若该会话尚未生成复盘，返回 {@code null}。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 复盘报告 VO，或 {@code null}
      */
     @Override
     public MockInterviewReviewVO getLatestReview(Long userId, Long sessionId) {
@@ -365,6 +404,18 @@ public class MockInterviewReviewServiceImpl implements MockInterviewReviewServic
                 .toList();
     }
 
+    /**
+     * 调用 LLM 生成总体复盘报告。
+     *
+     * <p>将本轮所有题目、标准答案、用户回答及单题评分组装为 Prompt，通过模型网关请求 AI 生成总体评价。
+     * 模型调用和 JSON 解析异常统一收敛，避免不同失败场景返回不同错误码。
+     *
+     * @param userId     用户 ID
+     * @param session    当前会话
+     * @param answers    本轮所有回答
+     * @param questionMap 题目 ID 到题目的映射
+     * @return LLM 复盘结果
+     */
     private LlmReviewResult generateLlmReview(
             Long userId,
             MockInterviewSession session,

@@ -10,12 +10,34 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 功能:Agent Eval 用例质量检查器。
+ * Agent Eval 用例质量检查器，负责在回归运行前检查用例配置是否合理。
  *
- * 设计说明:
+ * <p>核心职责：
+ * 按 evalType 分发到不同规则（TOOL_CALL、RAG_RETRIEVAL、ANSWER_QUALITY、GUARDRAIL、JSON_OUTPUT、END_TO_END），
+ * 检查输入是否为空、核心断言是否齐全、关键词是否缺失等质量问题。
+ * 只返回问题报告，不修改用例，修复动作仍交给管理员确认。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Bootstrap 模块下的 Agent Eval 子模块（用例质量检查层）。</p>
+ *
+ * <p>主要调用链：
+ * 后台 -> AgentEvalService.checkCaseQuality
+ * -> AgentEvalCaseQualityChecker.check
+ * -> checkCase（按 evalType 分发）
+ * -> addIssue（记录问题，不修改用例）</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>质量检查发生在回归运行前，用来减少“用例配置不合理”导致的无效失败；</li>
+ *   <li>第一版全部使用确定性规则，不调用模型，保证检查结果稳定；</li>
+ *   <li>检查器只返回问题，不修改用例；修复动作仍交给管理员确认。</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
  * 1. 质量检查发生在回归运行前，用来减少“用例配置不合理”导致的无效失败。
  * 2. 第一版全部使用确定性规则，不调用模型，保证检查结果稳定。
- * 3. 检查器只返回问题，不修改用例；修复动作仍交给管理员确认。
+ * 3. 检查器只返回问题，不修改用例；修复动作仍交给管理员确认。</p>
+ *
+ * 作者: hfj
  */
 @Component
 public class AgentEvalCaseQualityChecker {

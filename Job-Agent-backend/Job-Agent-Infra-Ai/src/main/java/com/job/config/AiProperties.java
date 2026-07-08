@@ -4,8 +4,25 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 /**
+ * AI 模型配置属性。
+ *
+ * <p>核心职责：
+ * 绑定 application.yml 中 job.ai.* 配置项，为历史 LangChain4j 链路提供 API Key、模型地址、
+ * 模型名称、温度、超时等参数。</p>
+ *
+ * <p>所属业务模块：Job-Agent-Infra-Ai 模块下的配置层。</p>
+ *
+ * <p>主要调用链：
+ * application.yml -> AiProperties -> LangChain4jConfig -> ChatModel -> AI Service</p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>被 LangChain4jConfig 注入用于构建 ChatModel；</li>
+ *   <li>legacyEnabled=false 时本配置仅作兼容保留，模型调用统一走 AiModelGatewayService 数据库网关；</li>
+ *   <li>resumeScoreTimeoutSeconds / resumeScoreMaxTokens 专用于简历评分，避免长简历超时。</li>
+ * </ul></p>
+ *
  * 作者:hfj
- * 功能:AI 模型配置属性
  * 日期: 2026/6/8 14:59
  */
 @Data

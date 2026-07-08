@@ -3,11 +3,21 @@ package com.job.bootstrap.service;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 功能: 文件对象存储服务。
+ * 文件对象存储服务接口。
  *
- * 说明:
- * 1. Controller 和业务服务不直接拼 MinIO objectName，统一从这里上传。
- * 2. 后续如果从 MinIO 换成 OSS/COS，只需要替换这个实现。
+ * <p>核心职责：为全站提供统一的文件上传、存储路径管理和 URL 生成能力，屏蔽底层对象存储实现差异。</p>
+ *
+ * <p>所属业务模块：基础设施 - 文件存储</p>
+ *
+ * <p>主要调用链：
+ * ResumeController / PositionController / AvatarController -&gt; FileStorageService -&gt; MinioFileStorageServiceImpl / OssFileStorageServiceImpl</p>
+ *
+ * <p>设计说明：
+ * <ol>
+ *   <li>Controller 和业务服务不直接拼接 MinIO objectName，统一由本服务生成并上传。</li>
+ *   <li>后续若从 MinIO 迁移至 OSS/COS，仅需替换实现类，上层无感。</li>
+ * </ol>
+ * </p>
  */
 public interface FileStorageService {
 

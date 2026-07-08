@@ -29,9 +29,40 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * 作者:hfj
- * 功能:简历业务服务实现，处理简历查重、MinIO 上传和数据库保存
- * 日期:2026/6/4 10:30
+ * 简历业务服务实现类。
+ *
+ * <p>核心职责：负责简历（JobResume）全生命周期管理，包括文件上传、MinIO 对象存储、
+ * 简历列表查询、名称修改、逻辑删除、默认简历设置以及基于 Apache Tika 的文本解析。
+ * 提供文件类型校验、内容抽取质量检测与乱码识别能力。</p>
+ *
+ * <p>所属业务模块：用户简历模块（Resume Management）</p>
+ *
+ * <p>主要调用链：
+ * <pre>
+ * JobResumeController -&gt; JobResumeService -&gt; JobResumeServiceImpl
+ *                                |
+ *                                v
+ *                    JobResumeMapper / MinioClient / Tika
+ * </pre></p>
+ *
+ * <p>与其他核心组件的关系：
+ * <ul>
+ *   <li>继承 {@link ServiceImpl}，依赖 {@link JobResumeMapper} 进行简历元数据持久化</li>
+ *   <li>通过 {@link MinioClient} 与 {@link MinioProperties} 对接 MinIO 对象存储服务</li>
+ *   <li>使用 {@link Tika} 进行 PDF、DOC、DOCX 等格式的文本抽取</li>
+ * </ul></p>
+ *
+ * <p>设计说明：
+ * <ul>
+ *   <li>所有写操作均使用 {@link Transactional} 保证事务一致性</li>
+ *   <li>文件上传采用“先存 MinIO，再写数据库”的顺序，失败时通过异常回滚</li>
+ *   <li>默认简历唯一：同一用户仅允许一份默认简历，删除默认简历后自动降级最新简历</li>
+ *   <li>文本解析后执行空文本、乱码、控制字符等多维度质量检测，确保 rawText 可用性</li>
+ *   <li>rawText 长度上限 60,000 字符，超长自动截断，避免数据库和前端性能问题</li>
+ * </ul></p>
+ *
+ * @author hfj
+ * @since 2026/6/4
  */
 @Service
 @RequiredArgsConstructor
@@ -112,7 +143,9 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
 
     /**
      * 上传简历。
-     * P表示参数描述，文件会存入 MinIO 的 resume 目录，和 avatar 头像目录分开。
+     *
+     * <p>校验文件大小、格式与简历名称唯一性后，将文件上传至 MinIO 的 resume 目录，
+     * 再把文件元数据（URL、大小、类型等）写入数据库。同一用户的简历名称不可重复。</p>
      *
      * @param userId 当前登录用户 ID
      * @param resumeName 简历名称
@@ -178,6 +211,8 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
     /**
      * 查询当前用户的简历列表。
      *
+     * <p>只查询当前用户未删除的简历，按默认标记优先、创建时间倒序展示。</p>
+     *
      * @param userId 当前登录用户 ID
      * @return 返回该用户未删除的简历列表
      */
@@ -193,7 +228,9 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
 
     /**
      * 修改简历名称。
-     * P表示参数描述，先校验简历归属，再判断新名称是否与其它简历重复。
+     *
+     * <p>先校验简历归属（防止越权修改），再判断新名称是否与其它简历重复；
+     * 名称未变更时直接返回当前记录，避免无意义更新。</p>
      *
      * @param userId 当前登录用户 ID
      * @param resumeId 简历 ID
@@ -234,7 +271,9 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
 
     /**
      * 逻辑删除简历。
-     * P表示参数描述，删除时只改 isDeleted，不真正删除 MinIO 文件。
+     *
+     * <p>将简历标记为已删除并清除默认标记；若删除的是默认简历且用户还有其它简历，
+     * 则自动将最新一份设为默认，保证默认简历不会悬空。</p>
      *
      * @param userId 当前登录用户 ID
      * @param resumeId 简历 ID
@@ -262,7 +301,8 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
 
     /**
      * 设置默认简历。
-     * P表示参数描述，同一个用户只允许一份默认简历。
+     *
+     * <p>将指定简历设为默认，并取消该用户下其它简历的默认标记，保证默认简历唯一性。</p>
      *
      * @param userId 当前登录用户 ID
      * @param resumeId 简历 ID
@@ -292,7 +332,9 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
 
     /**
      * 解析简历文本。
-     * P表示参数描述，解析结果写入 rawText 字段，解析状态写入 status 字段。
+     *
+     * <p>通过 Apache Tika 从 MinIO 读取文件并抽取文本，随后进行空文本、乱码、控制字符等
+     * 质量检测；解析结果写入 rawText 字段，状态同步更新为解析成功或解析失败。</p>
      *
      * @param userId 当前登录用户 ID
      * @param resumeId 简历 ID
@@ -339,6 +381,9 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
     /**
      * 查询当前用户的指定简历。
      *
+     * <p>查询条件固定带上 userId，防止用户通过篡改 ID 读取他人简历；
+     * 若简历不存在或已被逻辑删除，则抛出 {@link BizException}。</p>
+     *
      * @param userId 当前登录用户 ID
      * @param resumeId 简历 ID
      * @return 返回简历实体，不存在或不属于当前用户时抛出业务异常
@@ -358,6 +403,8 @@ public class JobResumeServiceImpl extends ServiceImpl<JobResumeMapper, JobResume
 
     /**
      * 从 MinIO 打开简历文件流。
+     *
+     * <p>根据数据库保存的文件地址解析出 MinIO 对象名，再调用 MinIO 获取文件输入流。</p>
      *
      * @param resume 数据库中的简历实体
      * @return 返回简历文件输入流，由 Controller 交给浏览器读取
