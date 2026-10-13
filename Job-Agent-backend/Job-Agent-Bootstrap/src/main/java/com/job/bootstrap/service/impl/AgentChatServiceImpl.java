@@ -164,6 +164,21 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final ObjectMapper objectMapper;
 
     /**
+     * 兼容旧调用方的对话入口，等价于 retry=false（不恢复失败计划）。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentChatVO chat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames
+    ) {
+        return chat(userId, conversationId, planId, message, confirmedToolNames, false);
+    }
+
+    /**
      * 执行一次 AI 对话，是 Agent 主链路的统一入口。
      *
      * <p>核心处理流程：
@@ -186,6 +201,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param planId 已存在的计划 ID，为空表示新建计划；非空表示继续执行（如用户确认工具后再次请求）
      * @param message 用户原始输入文本，会按原样保存到聊天记录，但进入模型上下文前会脱敏
      * @param confirmedToolNames 本轮用户已确认允许执行的工具名列表，用于放行需要确认的副作用工具
+     * @param retry 是否恢复上次失败的计划；true 时 Executor 从第一个未完成步骤继续，已完成步骤不重复执行
      * @return Agent 回复，包含会话 ID、计划 ID、回复正文、是否需要用户确认及待确认工具名
      */
     @Override
@@ -195,7 +211,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             Long conversationId,
             Long planId,
             String message,
-            List<String> confirmedToolNames
+            List<String> confirmedToolNames,
+            Boolean retry
     ) {
         long start = System.currentTimeMillis();
 
@@ -380,8 +397,13 @@ public class AgentChatServiceImpl implements AgentChatService {
              * - 之前是“模型看到计划后自己决定是否调用工具”。
              * - 现在是“后端 Executor 按 agent_plan_step 顺序确定性执行工具”。
              * - 每一步都会回写 step.status/resultSummary/errorMsg。
+             * - retry=true 时允许恢复上次失败的计划，已完成的步骤会采用历史结果，不会重复调用工具。
              */
-            AgentPlanExecutionResult executionResult = agentPlanExecutorService.executePlan(userId, plan.getId());
+            AgentPlanExecutionResult executionResult = agentPlanExecutorService.executePlan(
+                    userId,
+                    plan.getId(),
+                    Boolean.TRUE.equals(retry)
+            );
 
             /*
              * 7.1 召回长期记忆。

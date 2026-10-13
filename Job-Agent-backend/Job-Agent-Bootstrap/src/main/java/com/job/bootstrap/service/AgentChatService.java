@@ -33,4 +33,30 @@ public interface AgentChatService {
             String message,
             List<String> confirmedToolNames
     );
+
+    /**
+     * 和 AI 助手对话，并显式控制是否恢复上次失败的计划。
+     *
+     * 方法步骤:
+     * 1. retry=false 时保持原有语义：已失败的计划直接返回历史失败结果，不重复执行。
+     * 2. retry=true 且传回 planId 时，Executor 会从第一个未完成步骤继续执行，
+     *    已完成的步骤采用历史结果，副作用工具不会重复执行。
+     * 3. 恢复执行同样经过用户确认校验，confirmedToolNames 需要原样传回。
+     *
+     * @param userId 当前用户ID
+     * @param conversationId 会话ID，可以为空
+     * @param planId 已存在的计划ID，可以为空
+     * @param message 用户消息
+     * @param confirmedToolNames 本轮用户已确认允许执行的工具名
+     * @param retry 是否恢复上次失败的计划
+     * @return 助手回复
+     */
+    AgentChatVO chat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry
+    );
 }

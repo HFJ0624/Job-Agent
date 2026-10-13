@@ -5,12 +5,15 @@ import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiPromptVersionMapper;
+import com.job.bootstrap.mapper.JobApplicationRecordMapper;
 import com.job.bootstrap.mapper.JobPositionMapper;
+import com.job.bootstrap.mapper.JobReminderMapper;
 import com.job.bootstrap.mapper.JobResumeMapper;
 import com.job.bootstrap.mapper.JobUserMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.mapper.RagChunkMapper;
 import com.job.bootstrap.mapper.RagDocumentMapper;
+import com.job.bootstrap.mapper.WorkflowTaskMapper;
 import com.job.bootstrap.service.impl.AdminDashboardServiceImpl;
 import com.job.common.vo.admin.AdminDashboardOverviewVO;
 import org.junit.jupiter.api.Test;
@@ -34,6 +37,10 @@ class AdminDashboardServiceImplTest {
         JobUserMapper userMapper = mock(JobUserMapper.class);
         JobPositionMapper positionMapper = mock(JobPositionMapper.class);
         JobResumeMapper resumeMapper = mock(JobResumeMapper.class);
+        // 以下三个 Mapper 供看板底部的“求职跟进 Agent”区域使用，返回默认 0 即可，本用例不断言该区域
+        JobApplicationRecordMapper applicationRecordMapper = mock(JobApplicationRecordMapper.class);
+        JobReminderMapper reminderMapper = mock(JobReminderMapper.class);
+        WorkflowTaskMapper workflowTaskMapper = mock(WorkflowTaskMapper.class);
         AgentTraceLogMapper traceLogMapper = mock(AgentTraceLogMapper.class);
         AiModelCallLogMapper modelCallLogMapper = mock(AiModelCallLogMapper.class);
         RagDocumentMapper ragDocumentMapper = mock(RagDocumentMapper.class);
@@ -60,6 +67,9 @@ class AdminDashboardServiceImplTest {
                 userMapper,
                 positionMapper,
                 resumeMapper,
+                applicationRecordMapper,
+                reminderMapper,
+                workflowTaskMapper,
                 traceLogMapper,
                 modelCallLogMapper,
                 ragDocumentMapper,

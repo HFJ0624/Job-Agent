@@ -48,6 +48,14 @@ public class AgentPlanStepExecutionResult {
     private String errorMsg;
 
     /**
+     * 是否为幂等命中。
+     *
+     * true 表示该步骤本轮没有真实调用工具，直接采用了历史执行结果，
+     * 用于失败恢复时跳过已完成的步骤，避免副作用工具重复执行。
+     */
+    private Boolean idempotentHit;
+
+    /**
      * 工具执行结果。
      */
     private AgentToolExecutionResult toolResult;

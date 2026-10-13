@@ -25,5 +25,15 @@ public enum AgentPlanStatus {
     /**
      * 计划失败。
      */
-    FAILED
+    FAILED,
+
+    /**
+     * 正在执行中。
+     *
+     * 说明:
+     * 1. 该状态由 Executor 执行前通过条件更新抢占设置，用于防止同一计划被并发重复执行。
+     * 2. status 列是字符串，新增枚举值不需要修改表结构。
+     * 3. 如果进程崩溃导致计划一直停留在 RUNNING，Executor 会按 update_time 超时判定为残留并允许重新抢占。
+     */
+    RUNNING
 }

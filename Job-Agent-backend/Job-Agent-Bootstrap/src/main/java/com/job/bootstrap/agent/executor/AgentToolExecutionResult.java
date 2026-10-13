@@ -39,6 +39,14 @@ public class AgentToolExecutionResult {
     private String dataJson;
 
     /**
+     * 是否为幂等命中。
+     *
+     * true 表示本次没有真实调用工具，而是直接采用了历史执行结果，
+     * 用于步骤级幂等和失败恢复场景，方便 Trace 和后台区分真实执行与结果复用。
+     */
+    private Boolean idempotentHit;
+
+    /**
      * 耗时，单位毫秒。
      */
     private Long costTime;

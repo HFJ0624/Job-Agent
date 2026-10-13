@@ -42,12 +42,16 @@ public class AgentController {
          */
         Long userId = StpUtil.getLoginIdAsLong();
 
+        /*
+         * retry 为 true 表示用户要恢复上次失败的计划，需同时传回 planId 和 confirmedToolNames。
+         */
         AgentChatVO result = agentChatService.chat(
                 userId,
                 request.getConversationId(),
                 request.getPlanId(),
                 request.getMessage(),
-                request.getConfirmedToolNames()
+                request.getConfirmedToolNames(),
+                request.getRetry()
         );
 
         return Result.build(result, ResultCodeEnum.SUCCESS);
