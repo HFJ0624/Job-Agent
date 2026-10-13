@@ -28,8 +28,12 @@ public class PiiMasker {
     //中国大陆居民身份证号码正则表达式
     private static final Pattern CN_ID_CARD = Pattern.compile("(?<![0-9Xx])(\\d{6})\\d{8}(\\d{3}[0-9Xx])(?![0-9Xx])");
 
-    //Token类敏感信息正则表达式
-    private static final Pattern TOKEN_LIKE = Pattern.compile("(?i)(token|api[_-]?key|secret|password|passwd|pwd)([\"'\\s:=]+)([^\\s,\"'}]{4,})");
+    //Token类敏感信息正则表达式（键 = 值 / 键: 值 形式）
+    //覆盖 token / api_key / access_key / secret / password / passwd / pwd / credential 等键
+    private static final Pattern TOKEN_LIKE = Pattern.compile("(?i)(token|api[_-]?key|access[_-]?key|secret|password|passwd|pwd|credentials?)([\"'\\s:=]+)([^\\s,\"'}]{4,})");
+
+    //Bearer 令牌：Authorization: Bearer eyJhbGci...  ->  Bearer ***
+    private static final Pattern BEARER_TOKEN = Pattern.compile("(?i)(bearer\\s+)([^\\s,;\"'}]{4,})");
 
     /***
      * 脱敏任意类型的对象
@@ -97,7 +101,8 @@ public class PiiMasker {
      * 1. 手机号保留前三后四。
      * 2. 邮箱保留前 1 到 3 位和域名。
      * 3. 身份证保留前六后三。
-     * 4. token/password/apiKey 这类键值对直接隐藏值。
+     * 4. token/password/apiKey/accessKey/credential 这类键值对直接隐藏值。
+     * 5. Bearer 令牌（Authorization 头）掩掉令牌本体。
      */
     public String maskText(String text) {
         if (!StringUtils.hasText(text)) {
@@ -109,6 +114,7 @@ public class PiiMasker {
         masked = EMAIL.matcher(masked).replaceAll("$1***$2");
         masked = CN_ID_CARD.matcher(masked).replaceAll("$1********$2");
         masked = TOKEN_LIKE.matcher(masked).replaceAll("$1$2***");
+        masked = BEARER_TOKEN.matcher(masked).replaceAll("$1***");
         return masked;
     }
 
@@ -116,7 +122,7 @@ public class PiiMasker {
      * 判断Map的键是否为敏感键
      *
      * @param key Map的键名
-     * @return true表示是敏感键，false表示是非敏感键
+     * @return true表示是敏感键，false表示非敏感键
      */
     private boolean isSensitiveKey(String key) {
         if (!StringUtils.hasText(key)) {
@@ -133,6 +139,9 @@ public class PiiMasker {
                 || lower.contains("token")
                 || lower.contains("secret")
                 || lower.contains("apikey")
-                || lower.contains("api_key");
+                || lower.contains("api_key")
+                || lower.contains("accesskey")
+                || lower.contains("access_key")
+                || lower.contains("credential");
     }
 }

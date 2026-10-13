@@ -156,6 +156,17 @@
             <groupId>com.job</groupId>
             <artifactId>Job-Agent-Mcp-Tools</artifactId>
         </dependency>
+
+        <!-- Flyway：数据库 Schema 版本化管理（任务4）。版本由 Spring Boot BOM 统一管理。
+             迁移脚本目录：src/main/resources/db/migration，命名 V{n}__desc.sql -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

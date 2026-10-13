@@ -90,7 +90,7 @@ public class AgentTraceServiceImpl implements AgentTraceService {
         log.setInputData(toJson(input));
         log.setOutputData(toJson(output));
         log.setStatus(status);
-        log.setErrorMsg(errorMsg);
+        log.setErrorMsg(maskError(errorMsg));
         log.setCostTime(costTime);
         log.setIsDeleted(NOT_DELETED);
 
@@ -163,6 +163,20 @@ public class AgentTraceServiceImpl implements AgentTraceService {
      */
     private String newTraceId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * 脱敏 errorMsg，避免异常信息里携带 token、手机号等敏感数据落库。
+     *
+     * 复用与 input/output 一致的 {@link AgentGuardrailService#maskSensitiveData}，
+     * 保证 Trace 与同步写入的 Observation 都不泄露敏感信息。
+     */
+    private String maskError(String errorMsg) {
+        if (!hasText(errorMsg)) {
+            return errorMsg;
+        }
+        Object masked = agentGuardrailService.maskSensitiveData(errorMsg);
+        return masked == null ? null : String.valueOf(masked);
     }
 
     /**

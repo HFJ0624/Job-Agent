@@ -3,13 +3,14 @@ server:
   port: 8500
 
 # 配置数据库连接信息 url需要改成自己的虚拟机ip地址192.168.10.100
+# 安全：口令等敏感配置改为环境变量注入，不在仓库保留明文；已泄露口令需轮换（改配置不够）。
 spring:
   datasource:
     type: com.zaxxer.hikari.HikariDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://192.168.10.100:3306/job_agent?characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: root
-    password: 1234
+    password: ${DB_PASSWORD:}
 
   servlet:
     multipart:
@@ -21,14 +22,23 @@ spring:
     redis:
       host: 192.168.10.100
       port: 6379
-  #  password: 1234
+  #  password: ${REDIS_PASSWORD:}
+
+  # Flyway：数据库 Schema 版本化管理（任务4）
+  flyway:
+    enabled: true
+    # 现有库首次启动自动打基线（不执行历史脚本）；全新库从 V1__baseline.sql 重建
+    baseline-on-migrate: true
+    baseline-version: 1
+    # 迁移脚本目录：Job-Agent-Bootstrap/src/main/resources/db/migration，命名 V{n}__desc.sql
+    locations: classpath:db/migration
 
 # 自定义配置 访问权限路由配置
 job:
   minio:
     endpointUrl: http://192.168.10.100:9001
-    accessKey: admin
-    secreKey: admin123456
+    accessKey: ${MINIO_ACCESS_KEY:}
+    secreKey: ${MINIO_SECRET_KEY:}
     bucketName: job-agent-bucket
 
   agent:
