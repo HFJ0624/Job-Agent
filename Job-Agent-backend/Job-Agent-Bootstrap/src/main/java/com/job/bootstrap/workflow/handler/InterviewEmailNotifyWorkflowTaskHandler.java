@@ -107,6 +107,7 @@ public class InterviewEmailNotifyWorkflowTaskHandler implements WorkflowTaskHand
                     "INFO",
                     null
             );
+            // 已发送过：返回跳过结果（sent=false），不再调用邮件服务；任务仍按成功收尾
             Map<String, Object> skipped = new LinkedHashMap<>();
             skipped.put("to", user.getEmail());
             skipped.put("applicationId", application.getId());

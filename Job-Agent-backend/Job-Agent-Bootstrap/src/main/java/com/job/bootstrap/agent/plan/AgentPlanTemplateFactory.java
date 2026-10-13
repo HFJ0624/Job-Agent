@@ -149,6 +149,8 @@ public class AgentPlanTemplateFactory {
     }
 
     private AgentPlanTemplate generalChatPlan() {
+        // 知识检索已上移到 chat() 的 RAG 预检索（retrieveRagContext）统一完成，
+        // 这里不再挂 RagSearchTool 步骤，避免同一轮对话重复召回、双倍 embedding 成本。
         return new AgentPlanTemplate(
                 "通用求职问答计划",
                 "基于计划执行前统一检索到的用户知识库或通用求职经验回答；知识检索已由后端预检索完成，不再作为计划步骤重复调用。",

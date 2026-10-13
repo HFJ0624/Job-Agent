@@ -90,6 +90,7 @@ public class AgentTraceServiceImpl implements AgentTraceService {
         log.setInputData(toJson(input));
         log.setOutputData(toJson(output));
         log.setStatus(status);
+        // errorMsg 也可能携带 token、手机号等敏感信息，落库前统一脱敏，与 input/output 保持一致
         log.setErrorMsg(maskError(errorMsg));
         log.setCostTime(costTime);
         log.setIsDeleted(NOT_DELETED);

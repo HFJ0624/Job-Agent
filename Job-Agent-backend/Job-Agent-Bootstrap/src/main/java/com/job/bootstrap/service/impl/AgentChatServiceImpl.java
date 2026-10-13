@@ -445,6 +445,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     executionResult,
                     retrievedMemories,
                     executionMemoryContext.getPromptContext(),
+                    // 传入 RAG 增强消息（含召回知识、引用与防注入声明），让总结基于真实知识回答
                     ragContext.enhancedMessage()
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
@@ -892,6 +893,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param plan Agent 计划
      * @param executionResult Executor 执行结果
      * @param retrievedMemories 已召回长期记忆
+     * @param ragEnhancedMessage RAG 预检索增强消息（含召回知识与引用；未启用时为空）
      * @return 模型总结文本
      */
     private String summarizeExecutorResult(
@@ -1018,6 +1020,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("currentUserInput", safeMessage);
         variables.put("current_user_input", safeMessage);
+        // RAG 增强消息：未启用预检索时为空字符串，启用时含召回知识与引用，供总结 Prompt 使用
         variables.put("ragContextMessage", StringUtils.hasText(ragEnhancedMessage) ? ragEnhancedMessage : "");
         variables.put("rag_context_message", variables.get("ragContextMessage"));
         variables.put("planJson", toJson(buildPlanSnapshot(plan)));
