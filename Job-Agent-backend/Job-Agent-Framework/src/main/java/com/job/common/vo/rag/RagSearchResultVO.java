@@ -95,10 +95,15 @@ public class RagSearchResultVO {
      */
     private Double keywordScore;
 
-    /**
-     * 重排序得分。
-     */
-    private Double rerankScore;
+        /**
+         * 重排序得分。
+         */
+        private Double rerankScore;
+
+        /**
+         * 交叉打分得分：query 向量与“标题+首句”文档向量的余弦相似度，rerank 的一路信号。
+         */
+        private Double crossScore;
 
     /**
      * 召回来源: VECTOR、KEYWORD 或 HYBRID。

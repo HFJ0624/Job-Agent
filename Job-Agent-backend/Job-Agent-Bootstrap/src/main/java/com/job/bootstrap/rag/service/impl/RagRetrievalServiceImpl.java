@@ -84,7 +84,7 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
                 candidateLimit
         );
 
-        return mergeAndRerank(query.trim(), vectorResults, keywordResults, actualLimit);
+        return mergeAndRerank(query.trim(), queryVector, vectorResults, keywordResults, actualLimit);
     }
 
     /**
@@ -122,6 +122,7 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
 
     private List<RagSearchResultVO> mergeAndRerank(
             String query,
+            float[] queryVector,
             List<RagSearchResultVO> vectorResults,
             List<RagSearchResultVO> keywordResults,
             int limit
@@ -151,11 +152,18 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             double vectorScore = candidate.vectorScore == null ? 0D : clamp(candidate.vectorScore);
             double semanticScore = vectorScore > 0D ? vectorScore : keywordScore * 0.85D;
             boolean hybridHit = vectorScore > 0D && candidate.keywordHit;
-            double rerankScore = clamp(semanticScore * 0.65D + keywordScore * 0.35D + (hybridHit ? 0.08D : 0D));
+            // 规则分：语义×0.65 + 关键词×0.35 + 混合命中加成（第一版确定性规则）
+            double ruleScore = clamp(semanticScore * 0.65D + keywordScore * 0.35D + (hybridHit ? 0.08D : 0D));
+            // 交叉分：query 向量 vs “标题+首句”文档向量的余弦，作为语义重排的第二路信号；
+            // 单条文档向量化失败则退化为 0，不影响整体（此时只剩规则分）。
+            double crossScore = crossScoreEnabled() ? safeCrossScore(queryVector, result) : 0D;
+            // 最终分 = (1-w)×规则分 + w×交叉分（w 可配）；未启用交叉打分时 w 视作 0。
+            double rerankScore = fuseScore(ruleScore, crossScore);
 
             result.setVectorScore(vectorScore);
             result.setKeywordScore(keywordScore);
             result.setRerankScore(rerankScore);
+            result.setCrossScore(crossScore);
             result.setScore(rerankScore);
             result.setRetrievalSource(hybridHit ? "HYBRID" : (vectorScore > 0D ? "VECTOR" : "KEYWORD"));
             reranked.add(result);
@@ -410,6 +418,66 @@ public class RagRetrievalServiceImpl implements RagRetrievalService {
             return 0D;
         }
         return Math.max(0D, Math.min(1D, score));
+    }
+
+    // 是否启用交叉打分（读配置，默认开）
+    private boolean crossScoreEnabled() {
+        return Boolean.TRUE.equals(ragProperties.getRetrieval().getCrossScoreEnabled());
+    }
+
+    // 交叉打分权重 w（0~1），异常值兜底为 0
+    private double crossScoreWeight() {
+        Double weight = ragProperties.getRetrieval().getCrossScoreWeight();
+        if (weight == null || weight.isNaN() || weight < 0D) {
+            return 0D;
+        }
+        return Math.min(weight, 1D);
+    }
+
+    // 融合规则分与交叉分：最终分 = (1-w)×规则分 + w×交叉分
+    private double fuseScore(double ruleScore, double crossScore) {
+        double weight = crossScoreWeight();
+        return clamp((1D - weight) * clamp(ruleScore) + weight * clamp(crossScore));
+    }
+
+    // 计算 query 与单个候选的交叉余弦分；向量化失败或向量为空时返回 0（退化为规则分）
+    private double safeCrossScore(float[] queryVector, RagSearchResultVO result) {
+        if (queryVector == null || queryVector.length == 0) {
+            return 0D;
+        }
+        try {
+            float[] docVector = ragEmbeddingService.embed(docRepresentation(result));
+            return clamp(cosine(queryVector, docVector));
+        } catch (Exception exception) {
+            return 0D;
+        }
+    }
+
+    // 文档表示：标题 + 首句（截取前 N 字符），用于交叉打分的文档侧向量化，控制成本
+    private String docRepresentation(RagSearchResultVO result) {
+        Integer configured = ragProperties.getRetrieval().getCrossScoreDocPreviewChars();
+        int maxChars = configured == null || configured <= 0 ? 200 : configured;
+        String text = (nullToEmpty(result.getTitle()) + "\n" + nullToEmpty(result.getContent())).trim();
+        return text.length() <= maxChars ? text : text.substring(0, maxChars);
+    }
+
+    // 余弦相似度：点积 / (范数乘积)；维度不一致或任一零向量返回 0
+    private double cosine(float[] a, float[] b) {
+        if (a == null || b == null || a.length != b.length || a.length == 0) {
+            return 0D;
+        }
+        double dot = 0D;
+        double normA = 0D;
+        double normB = 0D;
+        for (int i = 0; i < a.length; i++) {
+            dot += (double) a[i] * b[i];
+            normA += (double) a[i] * a[i];
+            normB += (double) b[i] * b[i];
+        }
+        if (normA <= 0D || normB <= 0D) {
+            return 0D;
+        }
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     private static class SearchCandidate {

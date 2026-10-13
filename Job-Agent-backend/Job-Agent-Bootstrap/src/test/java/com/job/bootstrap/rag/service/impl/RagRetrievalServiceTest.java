@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -86,6 +87,64 @@ class RagRetrievalServiceTest {
     @Test
     void blankQueryShouldThrow() {
         assertThatThrownBy(() -> service.search(100L, "  ", 5)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void crossScoreShouldDriveOrderWhenRuleTied() {
+        // query 与两篇文档都无关键词命中 → 规则分打平时，靠交叉分（余弦）定胜负
+        RagSearchResultVO a = vo(1L, 0L, "RESUME", 10L, 0, "Alpha", "aaaa");
+        RagSearchResultVO b = vo(2L, 0L, "JOB", 20L, 0, "Beta", "bbbb");
+        when(ragVectorStoreService.search(anyLong(), any(), anyInt(), anyDouble())).thenReturn(List.of());
+        when(ragKnowledgeService.filterAndEnrichSearchResults(anyLong(), any(), anyInt())).thenReturn(List.of());
+        when(ragKnowledgeService.searchKeywordChunks(anyLong(), anyString(), anyInt())).thenReturn(List.of(a, b));
+        // query 向量 [1,0]；文档 Alpha 向量 [1,0]（余弦 1.0），文档 Beta 向量 [0,1]（余弦 0）
+        when(ragEmbeddingService.embed(anyString())).thenAnswer(invocation -> {
+            String text = invocation.getArgument(0);
+            return text.contains("Beta") ? new float[]{0f, 1f} : new float[]{1f, 0f};
+        });
+
+        List<RagSearchResultVO> results = service.search(100L, "xyz", 5);
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).getTitle()).isEqualTo("Alpha");
+        assertThat(results.get(0).getCrossScore()).isGreaterThan(results.get(1).getCrossScore());
+    }
+
+    @Test
+    void docEmbedFailureShouldFallbackToRuleScore() {
+        RagSearchResultVO a = vo(1L, 0L, "RESUME", 10L, 0, "Alpha", "aaaa");
+        RagSearchResultVO b = vo(2L, 0L, "JOB", 20L, 0, "Beta", "bbbb");
+        when(ragVectorStoreService.search(anyLong(), any(), anyInt(), anyDouble())).thenReturn(List.of());
+        when(ragKnowledgeService.filterAndEnrichSearchResults(anyLong(), any(), anyInt())).thenReturn(List.of());
+        when(ragKnowledgeService.searchKeywordChunks(anyLong(), anyString(), anyInt())).thenReturn(List.of(a, b));
+        // query 向量化成功，文档向量化抛异常 → 交叉分退化为 0，不影响整体排序
+        when(ragEmbeddingService.embed(anyString())).thenAnswer(invocation -> {
+            String text = invocation.getArgument(0);
+            if (text.contains("Alpha") || text.contains("Beta")) {
+                throw new RuntimeException("embed 挂了");
+            }
+            return new float[]{1f, 0f};
+        });
+
+        List<RagSearchResultVO> results = service.search(100L, "xyz", 5);
+
+        assertThat(results).hasSize(2);
+        assertThat(results).allMatch(r -> r.getCrossScore() == 0D);
+    }
+
+    @Test
+    void crossScoreDisabledShouldNotEmbedDocs() {
+        ragProperties.getRetrieval().setCrossScoreEnabled(false);
+        RagSearchResultVO a = vo(1L, 0L, "RESUME", 10L, 0, "Alpha", "aaaa");
+        when(ragVectorStoreService.search(anyLong(), any(), anyInt(), anyDouble())).thenReturn(List.of());
+        when(ragKnowledgeService.filterAndEnrichSearchResults(anyLong(), any(), anyInt())).thenReturn(List.of());
+        when(ragKnowledgeService.searchKeywordChunks(anyLong(), anyString(), anyInt())).thenReturn(List.of(a));
+        when(ragEmbeddingService.embed(anyString())).thenReturn(new float[]{1f, 0f});
+
+        service.search(100L, "xyz", 5);
+
+        // 关闭交叉打分后，只向量化 query 一次，不再向量化文档
+        verify(ragEmbeddingService, times(1)).embed(anyString());
     }
 
     private RagSearchResultVO vo(Long id, Long userId, String docType, Long bizId, int chunkIndex, String title, String content) {
