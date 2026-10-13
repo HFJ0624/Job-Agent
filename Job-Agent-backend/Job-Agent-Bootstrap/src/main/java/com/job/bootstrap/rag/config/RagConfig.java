@@ -1,12 +1,16 @@
 package com.job.bootstrap.rag.config;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.util.StringUtils;
+
+import javax.sql.DataSource;
 
 /**
  * 作者:hfj
@@ -21,30 +25,44 @@ public class RagConfig {
     private final RagProperties ragProperties;
 
     /**
-     * 创建 RAG 专用 JdbcTemplate。
+     * 创建 RAG 专用 pgvector 数据源（HikariCP 连接池）。
      *
-     * @return 只连接 pgvector 库的 JdbcTemplate
+     * <p>原实现使用 DriverManagerDataSource（每次新建连接、无池化），
+     * 在高并发检索下会频繁建连。改为 HikariCP，复用连接、提升检索稳定性。</p>
+     *
+     * @return 只连接 pgvector 库的连接池数据源
      */
-    @Bean("ragJdbcTemplate")
-    public JdbcTemplate ragJdbcTemplate() {
+    @Bean(name = "ragDataSource", destroyMethod = "close")
+    public HikariDataSource ragDataSource() {
         //1.获取pgvector数据库的专用配置节点和pgvector数据源的详细配置
         RagProperties.Pgvector pgvector = ragProperties.getPgvector();
         RagProperties.DataSource datasourceProperties = pgvector.getDatasource();
 
-        //2.使用DriverManagerDataSource创建临时数据源（非连接池实现）
-        DriverManagerDataSource dataSource = new DriverManagerDataSource();
-        dataSource.setDriverClassName(defaultIfBlank(
+        //2.使用 HikariCP 连接池（替代原来的 DriverManagerDataSource 非池化实现）
+        HikariConfig config = new HikariConfig();
+        config.setPoolName("rag-pgvector-pool");
+        config.setJdbcUrl(resolveJdbcUrl(pgvector, datasourceProperties));
+        config.setUsername(defaultIfBlank(datasourceProperties.getUsername(), pgvector.getUser()));
+        config.setPassword(defaultIfBlank(datasourceProperties.getPassword(), ""));
+        config.setDriverClassName(defaultIfBlank(
                 datasourceProperties.getDriverClassName(),
                 "org.postgresql.Driver"
         ));
+        config.setMaximumPoolSize(datasourceProperties.getMaximumPoolSize());
+        config.setMinimumIdle(datasourceProperties.getMinimumIdle());
 
-        //3.配置数据库用户名：优先使用datasource显式配置，未配置则使用pgvector全局用户名
-        dataSource.setUrl(resolveJdbcUrl(pgvector, datasourceProperties));
-        dataSource.setUsername(defaultIfBlank(datasourceProperties.getUsername(), pgvector.getUser()));
-        dataSource.setPassword(defaultIfBlank(datasourceProperties.getPassword(), ""));
+        return new HikariDataSource(config);
+    }
 
-        //4.返回基于pgvector专用数据源创建JdbcTemplate实例
-        return new JdbcTemplate(dataSource);
+    /**
+     * 创建 RAG 专用 JdbcTemplate。
+     *
+     * @param ragDataSource pgvector 连接池数据源
+     * @return 只连接 pgvector 库的 JdbcTemplate
+     */
+    @Bean("ragJdbcTemplate")
+    public JdbcTemplate ragJdbcTemplate(@Qualifier("ragDataSource") DataSource ragDataSource) {
+        return new JdbcTemplate(ragDataSource);
     }
 
     /***
@@ -63,7 +81,7 @@ public class RagConfig {
 
     /***
      *
-     * @param value 待检查的字符串值
+     * @param value 待检查的字符串
      * @param defaultValue 字符串为空时的默认值
      * @return 简化的字符串空值处理工具方法
      */

@@ -151,13 +151,10 @@ public class AgentPlanTemplateFactory {
     private AgentPlanTemplate generalChatPlan() {
         return new AgentPlanTemplate(
                 "通用求职问答计划",
-                "先检索用户知识库，再基于召回知识或通用求职经验回答。",
+                "基于计划执行前统一检索到的用户知识库或通用求职经验回答；知识检索已由后端预检索完成，不再作为计划步骤重复调用。",
                 List.of(),
                 List.of(
-                        step("检索知识库", "检索当前用户简历、岗位、公司和沟通记录。", "RagSearchTool.searchKnowledge",
-                                schema("RagSearchTool.searchKnowledge"),
-                                "获得可用于回答的相关知识片段。"),
-                        step("生成回答", "基于知识片段回答用户问题，知识不足时明确说明。", null,
+                        step("生成回答", "基于已检索的知识片段回答用户问题，知识不足时明确说明。", null,
                                 Map.of("answerLanguage", "中文"),
                                 "输出清晰、可信、不过度编造的求职建议。")
                 )

@@ -375,6 +375,16 @@ public class AgentChatServiceImpl implements AgentChatService {
             }
 
             /*
+             * 4.5 RAG 预检索（任务2）：
+             *     在计划执行前，按意图门控调用 retrieveRagContext，把召回知识注入总结阶段。
+             *     RAG 失败不中断聊天（retrieveRagContext 内部降级为 ragStatus=FAILED）。
+             *     RAG 可观测性由 retrieveRagContext 自己写入的 Tool Trace 承载。
+             */
+            RagContext ragContext = ragEnabledFor(activeIntentCode)
+                    ? retrieveRagContext(userId, conversation.getId(), activeIntentCode, safeMessage)
+                    : new RagContext(false, "DISABLED", null, List.of(), null);
+
+            /*
              * 5. 设置 Agent 运行时上下文。
              *    重点:
              *    - userId 不让大模型传
@@ -434,7 +444,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     plan,
                     executionResult,
                     retrievedMemories,
-                    executionMemoryContext.getPromptContext()
+                    executionMemoryContext.getPromptContext(),
+                    ragContext.enhancedMessage()
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
 
@@ -572,6 +583,24 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 2. 检索结果会进入本轮提示词，帮助模型基于真实简历、岗位、公司和沟通记录回答。
      * 3. 检索结果同时写入 Agent Trace，后台管理员可以看到回答依据。
      */
+    /**
+     * 判断当前意图是否启用 RAG 预检索。
+     *
+     * 设计说明:
+     * - GENERAL_CHAT / JOB_MATCH / RESUME_ANALYZE 需要用户知识库（简历、岗位、公司、沟通记录）支撑回答，启用预检索。
+     * - JOB_SEARCH / INTERVIEW_PREPARE / MOCK_INTERVIEW / GREETING_GENERATE / JOB_FAVORITE 走结构化工具，
+     *   不依赖向量知识库，跳过预检索以节省 embedding 成本。
+     */
+    private boolean ragEnabledFor(String intentCode) {
+        if (!StringUtils.hasText(intentCode)) {
+            return false;
+        }
+        return switch (intentCode) {
+            case "GENERAL_CHAT", "JOB_MATCH", "RESUME_ANALYZE" -> true;
+            default -> false;
+        };
+    }
+
     private RagContext retrieveRagContext(Long userId, Long conversationId, String intentCode, String message) {
         long start = System.currentTimeMillis();
 
@@ -872,20 +901,22 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
-            String memoryPromptContext
+            String memoryPromptContext,
+            String ragEnhancedMessage
     ) {
         String executorSummaryMessage = buildExecutorSummaryMessage(
                 safeMessage,
                 plan,
                 executionResult,
                 retrievedMemories,
-                memoryPromptContext
+                memoryPromptContext,
+                ragEnhancedMessage
         );
 
         try {
             return aiModelGatewayService.chat(
                 AI_SCENE_AGENT_SUMMARY,
-                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext),
+                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage),
                 executorSummaryMessage,
                 userId,
                 traceId
@@ -981,11 +1012,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
-            String memoryPromptContext
+            String memoryPromptContext,
+            String ragEnhancedMessage
     ) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("currentUserInput", safeMessage);
         variables.put("current_user_input", safeMessage);
+        variables.put("ragContextMessage", StringUtils.hasText(ragEnhancedMessage) ? ragEnhancedMessage : "");
+        variables.put("rag_context_message", variables.get("ragContextMessage"));
         variables.put("planJson", toJson(buildPlanSnapshot(plan)));
         variables.put("plan_json", toJson(buildPlanSnapshot(plan)));
         variables.put("executionResultJson", toJson(executionResult));
@@ -1012,11 +1046,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
-            String memoryPromptContext
+            String memoryPromptContext,
+            String ragEnhancedMessage
     ) {
         StringBuilder builder = new StringBuilder();
+        // RAG 启用时，用注入检索知识后的增强消息作为总结基底；否则用原始用户输入。
         builder.append("【当前用户输入】\n")
-                .append(originalMessage)
+                .append(StringUtils.hasText(ragEnhancedMessage) ? ragEnhancedMessage : originalMessage)
                 .append("\n\n");
 
         builder.append("【长期记忆上下文】\n");

@@ -99,6 +99,16 @@ public class RagProperties {
          * PostgreSQL JDBC 驱动类名。
          */
         private String driverClassName = "org.postgresql.Driver";
+
+        /**
+         * HikariCP 连接池最大连接数。
+         */
+        private Integer maximumPoolSize = 10;
+
+        /**
+         * HikariCP 连接池最小空闲连接数。
+         */
+        private Integer minimumIdle = 2;
     }
 
     @Data
