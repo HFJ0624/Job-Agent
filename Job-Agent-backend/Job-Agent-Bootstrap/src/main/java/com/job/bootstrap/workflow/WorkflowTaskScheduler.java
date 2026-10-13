@@ -22,7 +22,6 @@ public class WorkflowTaskScheduler {
 
     private static final int POLL_LIMIT = 5;
     private static final int RUNNING_TIMEOUT_MINUTES = 30;
-    private static final long POLL_FIXED_DELAY_MS = 60 * 60 * 1000L;
 
     private final WorkflowTaskService workflowTaskService;
     private final WorkflowTaskProgressService workflowTaskProgressService;
@@ -43,12 +42,15 @@ public class WorkflowTaskScheduler {
     /**
      * 定时扫描并执行到期任务。
      *
+     * 轮询间隔通过 {@code job.workflow.poll-interval-ms} 配置（毫秒，默认 5000）。
+     * 原为硬编码 1 小时，任务延迟过高；现改为可配置，兼顾开发体验与生产可控。
+     *
      * 步骤:
      * 1. 先恢复超时 RUNNING 任务，解决服务重启或线程异常导致的卡死。
      * 2. 抢占到期任务，抢占成功后才在当前节点执行。
      * 3. handler 正常返回则标记成功，抛异常则交给任务服务计算重试状态。
      */
-    @Scheduled(fixedDelay = POLL_FIXED_DELAY_MS)
+    @Scheduled(fixedDelayString = "${job.workflow.poll-interval-ms:5000}")
     public void dispatchDueTasks() {
         try {
             workflowTaskService.recoverTimeoutRunningTasks(RUNNING_TIMEOUT_MINUTES);

@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -25,9 +26,16 @@ import java.util.Map;
  * 执行步骤：
  * 1. 根据任务 userId 查询用户邮箱。
  * 2. 根据任务 bizId 查询求职记录，重新读取数据库最新状态，避免使用过期快照。
- * 3. 拼接邮件标题和正文。
- * 4. 调用统一邮件服务发送邮件。
+ * 3. 幂等抢占：通过求职记录上的 interview_email_sent_at 状态位做原子条件更新，
+ *    只有抢占成功（影响 1 行）的本次执行才真正发送，确保同一求职记录只发一封邮件。
+ * 4. 拼接邮件标题和正文，调用统一邮件服务发送邮件。
  * 5. 返回 JSON 结果，方便 admin 工作流页面查看执行结果。
+ *
+ * 幂等设计说明：
+ * - 任务被 markFailure 置为 FAILED_RETRYABLE 后会重新执行同一任务行，
+ *   若 handler 无幂等，会重复发信；这里用业务状态位 interview_email_sent_at 兜底。
+ * - 采用“先抢占后发送”，发送失败时回滚状态位（clearInterviewEmailNotify），
+ *   让下次重试能重新发送，避免“标记了却没发出去”的漏发。
  */
 @Component
 @RequiredArgsConstructor
@@ -87,9 +95,36 @@ public class InterviewEmailNotifyWorkflowTaskHandler implements WorkflowTaskHand
                 user.getEmail()
         );
 
+        // 幂等抢占：把 interview_email_sent_at 从 NULL 原子置为当前时间，
+        // 只有更新成功（影响 1 行）的本次执行才拿到发送权，其余直接跳过。
+        int claimed = jobApplicationRecordMapper.claimInterviewEmailNotify(task.getBizId(), new Date());
+        if (claimed <= 0) {
+            workflowTaskProgressService.recordProgress(
+                    task.getId(),
+                    "跳过发送",
+                    100,
+                    "该求职记录已发送过面试通知邮件，跳过重复发送",
+                    "INFO",
+                    null
+            );
+            Map<String, Object> skipped = new LinkedHashMap<>();
+            skipped.put("to", user.getEmail());
+            skipped.put("applicationId", application.getId());
+            skipped.put("sent", false);
+            skipped.put("skipped", true);
+            skipped.put("reason", "already_notified");
+            return toJson(skipped);
+        }
+
         String subject = buildSubject(application);
         String content = buildContent(user, application);
-        jobMailSenderService.sendText(user.getEmail(), subject, content);
+        try {
+            jobMailSenderService.sendText(user.getEmail(), subject, content);
+        } catch (Exception exception) {
+            // 发送失败：回滚幂等状态位，允许下次重试重新发送，避免漏发。
+            jobApplicationRecordMapper.clearInterviewEmailNotify(task.getBizId(), new Date());
+            throw exception;
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("to", user.getEmail());
