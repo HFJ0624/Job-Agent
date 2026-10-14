@@ -3,6 +3,7 @@ package com.job.bootstrap.service.impl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.context.AgentContextBuilder;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
@@ -163,6 +164,11 @@ public class AgentChatServiceImpl implements AgentChatService {
      * Agent 安全护栏。
      */
     private final AgentGuardrailService agentGuardrailService;
+
+    /**
+     * 多轮上下文构建器：组装最近 N 轮历史 + 滚动摘要，并按预算裁剪（任务6）。
+     */
+    private final AgentContextBuilder agentContextBuilder;
 
     /**
      * 统一 JSON 工具。
@@ -437,6 +443,12 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<AgentMemoryVO> retrievedMemories = executionMemoryContext.getMemories();
 
             /*
+             * 6.5 构建多轮上下文（任务6）：最近 N 轮历史 + 滚动摘要，
+             *      放在执行后、总结前；历史与工具结果会在 Builder 内脱敏并按预算裁剪。
+             */
+            AgentContextBuilder.BuiltContext contextBundle = agentContextBuilder.build(userId, traceId, conversation);
+
+            /*
              * 7. 总结执行结果。
              *
              * 注意:
@@ -453,7 +465,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     retrievedMemories,
                     executionMemoryContext.getPromptContext(),
                     // 传入 RAG 增强消息（含召回知识、引用与防注入声明），让总结基于真实知识回答
-                    ragContext.enhancedMessage()
+                    ragContext.enhancedMessage(),
+                    contextBundle
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
 
@@ -911,7 +924,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
             String memoryPromptContext,
-            String ragEnhancedMessage
+            String ragEnhancedMessage,
+            AgentContextBuilder.BuiltContext contextBundle
     ) {
         String executorSummaryMessage = buildExecutorSummaryMessage(
                 safeMessage,
@@ -919,13 +933,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                 executionResult,
                 retrievedMemories,
                 memoryPromptContext,
-                ragEnhancedMessage
+                ragEnhancedMessage,
+                contextBundle
         );
 
         try {
             return aiModelGatewayService.chat(
                 AI_SCENE_AGENT_SUMMARY,
-                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage),
+                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
                 executorSummaryMessage,
                 userId,
                 traceId
@@ -1022,7 +1037,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
             String memoryPromptContext,
-            String ragEnhancedMessage
+            String ragEnhancedMessage,
+            AgentContextBuilder.BuiltContext contextBundle
     ) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("currentUserInput", safeMessage);
@@ -1030,6 +1046,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         // RAG 增强消息：未启用预检索时为空字符串，启用时含召回知识与引用，供总结 Prompt 使用
         variables.put("ragContextMessage", StringUtils.hasText(ragEnhancedMessage) ? ragEnhancedMessage : "");
         variables.put("rag_context_message", variables.get("ragContextMessage"));
+        // 多轮历史与滚动摘要（任务6）
+        variables.put("historyText", contextBundle == null ? "" : contextBundle.historyText());
+        variables.put("rollingSummary", contextBundle == null ? "" : contextBundle.rollingSummary());
         variables.put("planJson", toJson(buildPlanSnapshot(plan)));
         variables.put("plan_json", toJson(buildPlanSnapshot(plan)));
         variables.put("executionResultJson", toJson(executionResult));
@@ -1057,7 +1076,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
             String memoryPromptContext,
-            String ragEnhancedMessage
+            String ragEnhancedMessage,
+            AgentContextBuilder.BuiltContext contextBundle
     ) {
         StringBuilder builder = new StringBuilder();
         // RAG 启用时，用注入检索知识后的增强消息作为总结基底；否则用原始用户输入。
@@ -1092,6 +1112,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             builder.append("\n");
         }
 
+        // 多轮历史与滚动摘要（任务6）：让总结看到上下文，而非只有当前轮
+        if (contextBundle != null && StringUtils.hasText(contextBundle.historyText())) {
+            builder.append("【最近多轮对话历史】\n").append(contextBundle.historyText()).append("\n\n");
+        }
+        if (contextBundle != null && StringUtils.hasText(contextBundle.rollingSummary())) {
+            builder.append("【更早历史的滚动摘要】\n").append(contextBundle.rollingSummary()).append("\n\n");
+        }
+
         builder.append("【计划原始目标】\n")
                 .append(plan.getUserGoal())
                 .append("\n\n");
@@ -1103,7 +1131,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         builder.append("意图: ").append(nullToDash(plan.getIntentCode())).append("\n\n");
 
         builder.append("【Executor 执行结果】\n");
-        builder.append(toJson(executionResult)).append("\n\n");
+        builder.append(agentContextBuilder.previewExecution(executionResult)).append("\n\n");
 
         builder.append("【总结要求】\n");
         builder.append("1. 只总结 Executor 已经完成的步骤和工具结果。\n");

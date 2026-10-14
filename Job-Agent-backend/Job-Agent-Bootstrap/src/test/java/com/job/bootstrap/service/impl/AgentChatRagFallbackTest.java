@@ -1,6 +1,7 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.context.AgentContextBuilder;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
@@ -60,13 +61,14 @@ class AgentChatRagFallbackTest {
     private final AgentMemoryContextService agentMemoryContextService = mock(AgentMemoryContextService.class);
     private final AgentToolSchemaRegistry agentToolSchemaRegistry = mock(AgentToolSchemaRegistry.class);
     private final AgentGuardrailService agentGuardrailService = mock(AgentGuardrailService.class);
+    private final AgentContextBuilder agentContextBuilder = mock(AgentContextBuilder.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AgentChatServiceImpl service = new AgentChatServiceImpl(
             aiConversationMapper, aiMessageMapper, aiModelGatewayService, agentTraceService,
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
-            agentGuardrailService, objectMapper);
+            agentGuardrailService, agentContextBuilder, objectMapper);
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {
@@ -85,6 +87,9 @@ class AgentChatRagFallbackTest {
         when(aiModelGatewayService.chat(any(), any(), any(), any(), any())).thenReturn("已基于通用求职知识回答");
         // 关键：RAG 检索抛异常，触发降级
         when(ragRetrievalService.search(anyLong(), anyString(), any())).thenThrow(new RuntimeException("pgvector 连接失败"));
+        when(agentContextBuilder.build(any(), any(), any()))
+                .thenReturn(new AgentContextBuilder.BuiltContext("1. 用户: 之前的问题", "", false, 5));
+        when(agentContextBuilder.previewExecution(any())).thenReturn("执行结果预览");
 
         AgentChatVO vo = service.chat(USER_ID, null, null, "帮我分析简历", null, false);
 
