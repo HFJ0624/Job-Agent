@@ -1,9 +1,14 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.ai.AiGatewayProperties;
 import com.job.bootstrap.ai.AiModelCallResponse;
+import com.job.bootstrap.ai.AiModelHttpClient;
+import com.job.bootstrap.ai.AiModelRateLimiter;
+import com.job.bootstrap.ai.AiRetryPolicy;
 import com.job.bootstrap.ai.AiRenderedPrompt;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelCircuitStateMapper;
@@ -33,6 +38,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -89,6 +95,7 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@EnableConfigurationProperties(AiGatewayProperties.class)
 public class AiModelGatewayServiceImpl implements AiModelGatewayService {
 
     private static final int NOT_DELETED = 0;
@@ -102,6 +109,10 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
     private final AiPromptRuntimeService aiPromptRuntimeService;
     private final AgentObservationService agentObservationService;
     private final ObjectMapper objectMapper;
+    private final AiModelHttpClient aiModelHttpClient;
+    private final AiModelRateLimiter aiModelRateLimiter;
+    private final AiRetryPolicy aiRetryPolicy;
+    private final AiGatewayProperties aiGatewayProperties;
 
     /**
      * 按业务场景调用模型。
@@ -126,6 +137,14 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
         AiRenderedPrompt renderedPrompt = aiPromptRuntimeService.renderPrompt(route, variables);
         List<AiModelConfig> modelCandidates = resolveModelCandidates(route);
 
+        /*
+         * 限流（任务8）：场景 + 用户双维度令牌桶，拿不到许可即快速失败，
+         * 由调用方走降级（如确定性兜底摘要），避免请求堆积打爆供应商。
+         */
+        if (!aiModelRateLimiter.tryAcquireScene(sceneCode) || !aiModelRateLimiter.tryAcquireUser(userId)) {
+            throw new BizException("触发模型网关限流，请稍后重试");
+        }
+
         Exception lastException = null;
         for (int modelIndex = 0; modelIndex < modelCandidates.size(); modelIndex++) {
             AiModelConfig model = modelCandidates.get(modelIndex);
@@ -149,7 +168,7 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 long start = System.currentTimeMillis();
                 try {
-                    AiModelCallResponse response = callOpenAiCompatibleModel(model, renderedPrompt.systemPrompt(), userMessage);
+                    AiModelCallResponse response = aiModelHttpClient.chat(model, renderedPrompt.systemPrompt(), userMessage);
                     recordCallLog(
                             traceId,
                             userId,
@@ -184,18 +203,36 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
                     );
                     openCircuitIfNeeded(model, exception);
 
-                    /*
-                     * 同一个模型还有重试次数时继续尝试。
-                     * 当前模型重试用完后，外层循环才会切换到备用模型。
-                     */
-                    if (attempt < maxAttempts) {
-                        log.warn("AI 模型调用失败，准备重试，modelCode={}, attempt={}/{}", model.getModelCode(), attempt, maxAttempts, exception);
+                    boolean retryable = aiRetryPolicy.isRetryable(exception);
+                    if (attempt < maxAttempts && retryable) {
+                        // 可重试错误（429/5xx/超时）：指数退避后重试
+                        long backoffMs = aiRetryPolicy.backoffDelayMs(attempt);
+                        log.warn("AI 模型调用失败，退避后重试，modelCode={}, attempt={}/{}, backoffMs={}, error={}",
+                                model.getModelCode(), attempt, maxAttempts, backoffMs, exception.getMessage());
+                        sleep(backoffMs);
+                    } else if (attempt < maxAttempts) {
+                        // 4xx 等不可重试错误：不重试，直接结束本模型，切备用模型
+                        log.warn("AI 模型调用失败且不可重试，切换备用模型，modelCode={}, attempt={}/{}, error={}",
+                                model.getModelCode(), attempt, maxAttempts, exception.getMessage());
+                        break;
                     }
                 }
             }
         }
 
         throw new BizException("AI 模型调用失败：" + (lastException == null ? "没有可用模型" : lastException.getMessage()));
+    }
+
+    // 退避 sleep：被中断时恢复中断标记，避免吞掉中断信号
+    private void sleep(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -258,77 +295,6 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
             models.add(getActiveModel(route.getFallbackModelCode()));
         }
         return models;
-    }
-
-    /**
-     * 调用 OpenAI 兼容模型接口。
-     *
-     * @param model 模型配置
-     * @param systemPrompt 系统提示词
-     * @param userMessage 用户消息
-     * @return 调用结果
-     */
-    private AiModelCallResponse callOpenAiCompatibleModel(AiModelConfig model, String systemPrompt, String userMessage) {
-        if (!StringUtils.hasText(model.getApiKey())) {
-            throw new BizException("模型 API Key 为空：" + model.getModelCode());
-        }
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", model.getModelIdentifier());
-        body.put("temperature", model.getTemperature());
-        body.put("max_tokens", model.getMaxTokens());
-        body.put("messages", List.of(
-                Map.of("role", "system", "content", safeText(systemPrompt)),
-                Map.of("role", "user", "content", safeText(userMessage))
-        ));
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(model.getApiKey());
-
-        RestTemplate restTemplate = buildRestTemplate(model);
-        ResponseEntity<String> response = restTemplate.exchange(
-                buildChatUrl(model),
-                HttpMethod.POST,
-                new HttpEntity<>(body, headers),
-                String.class
-        );
-
-        return parseModelResponse(response.getBody(), systemPrompt, userMessage);
-    }
-
-    /**
-     * 解析 OpenAI 兼容响应。
-     *
-     * @param responseBody 响应 JSON
-     * @param systemPrompt 系统提示词
-     * @param userMessage 用户消息
-     * @return 模型调用结果
-     */
-    private AiModelCallResponse parseModelResponse(String responseBody, String systemPrompt, String userMessage) {
-        if (!StringUtils.hasText(responseBody)) {
-            throw new BizException("模型响应为空");
-        }
-
-        try {
-            JsonNode root = objectMapper.readTree(responseBody);
-            String content = root.path("choices").path(0).path("message").path("content").asText();
-            if (!StringUtils.hasText(content)) {
-                throw new BizException("模型响应没有 content");
-            }
-
-            int inputTokens = root.path("usage").path("prompt_tokens").asInt(estimateTokens(systemPrompt + "\n" + userMessage));
-            int outputTokens = root.path("usage").path("completion_tokens").asInt(estimateTokens(content));
-            return new AiModelCallResponse(content, inputTokens, outputTokens);
-        } catch (BizException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new BizException(
-                    ResultCodeEnum.SYSTEM_ERROR.getCode(),
-                    "模型响应解析失败：" + exception.getMessage(),
-                    exception
-            );
-        }
     }
 
     /**
@@ -499,24 +465,33 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
         }
 
         AiModelCircuitState state = getCircuitState(model.getModelCode());
-        if (state == null || !AiCircuitStatus.OPEN.name().equals(state.getCircuitStatus())) {
+        if (state == null || AiCircuitStatus.CLOSED.name().equals(state.getCircuitStatus())) {
             return false;
         }
+        // 已有请求在探测（HALF_OPEN），其余请求继续被拒，避免并发探测
+        if (AiCircuitStatus.HALF_OPEN.name().equals(state.getCircuitStatus())) {
+            return true;
+        }
 
+        // OPEN：冷却时间未过则保持打开
         Date now = new Date();
         if (state.getOpenedUntil() != null && state.getOpenedUntil().after(now)) {
             return true;
         }
 
         /*
-         * 冷却时间已过，关闭熔断并允许本次请求试探恢复。
-         * 第一版不单独实现 HALF_OPEN 状态，先用简单闭环保证主流程可靠。
+         * 冷却已过：条件更新 OPEN -> HALF_OPEN，只有 1 个请求抢到探测资格（放行），
+         * 其余请求因没抢到而继续被拒；探测结果由 closeCircuit（成功）/ openCircuitIfNeeded（失败）落地。
          */
-        state.setCircuitStatus(AiCircuitStatus.CLOSED.name());
-        state.setFailureCount(0);
-        state.setUpdateTime(now);
-        aiModelCircuitStateMapper.updateById(state);
-        return false;
+        int probed = aiModelCircuitStateMapper.update(null, new UpdateWrapper<AiModelCircuitState>()
+                .set("circuit_status", AiCircuitStatus.HALF_OPEN.name())
+                .eq("id", state.getId())
+                .eq("circuit_status", AiCircuitStatus.OPEN.name()));
+        if (probed > 0) {
+            log.info("AI 模型熔断进入 HALF_OPEN，放行 1 个探测请求，modelCode={}", model.getModelCode());
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -564,12 +539,15 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
         state.setLastFailureTime(now);
         state.setUpdateTime(now);
 
-        if (failureCount >= safeInt(model.getFailureThreshold(), 3)) {
+        // HALF_OPEN 探测失败：立即重新打开（不必等失败累计到阈值）
+        boolean halfOpenProbeFailed = AiCircuitStatus.HALF_OPEN.name().equals(state.getCircuitStatus());
+        if (halfOpenProbeFailed || failureCount >= safeInt(model.getFailureThreshold(), 3)) {
             state.setCircuitStatus(AiCircuitStatus.OPEN.name());
             state.setOpenedUntil(new Date(now.getTime() + safeInt(model.getCooldownSeconds(), 60) * 1000L));
-            log.warn("AI 模型熔断打开，modelCode={}, failureCount={}, reason={}",
+            log.warn("AI 模型熔断打开，modelCode={}, failureCount={}, halfOpenProbeFailed={}, reason={}",
                     model.getModelCode(),
                     failureCount,
+                    halfOpenProbeFailed,
                     exception.getMessage());
         }
 
@@ -595,26 +573,6 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
             throw new BizException("模型不存在或未启用：" + modelCode);
         }
         return model;
-    }
-
-    private RestTemplate buildRestTemplate(AiModelConfig model) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        Duration timeout = Duration.ofSeconds(safeInt(model.getTimeoutSeconds(), 45));
-        factory.setConnectTimeout(timeout);
-        factory.setReadTimeout(timeout);
-        return new RestTemplate(factory);
-    }
-
-    private String buildChatUrl(AiModelConfig model) {
-        String baseUrl = model.getBaseUrl().trim();
-        String chatPath = StringUtils.hasText(model.getChatPath()) ? model.getChatPath().trim() : DEFAULT_CHAT_PATH;
-        if (baseUrl.endsWith("/")) {
-            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
-        }
-        if (!chatPath.startsWith("/")) {
-            chatPath = "/" + chatPath;
-        }
-        return baseUrl + chatPath;
     }
 
     private BigDecimal calculateCost(int tokens, BigDecimal pricePer1k) {
@@ -644,10 +602,6 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
 
     private int safeInt(Integer value, int defaultValue) {
         return value == null ? defaultValue : value;
-    }
-
-    private String safeText(String value) {
-        return value == null ? "" : value;
     }
 
     private String limitText(String value, int maxLength) {
