@@ -109,4 +109,12 @@ public interface AgentMemoryService {
      * @return 实际归档数量
      */
     int archiveActiveMemoriesByKeys(Long userId, List<String> memoryKeys);
+
+    /**
+     * 归档已过期的 ACTIVE 记忆（TTL 治理）。
+     * 由每日定时任务调用，批量处理。
+     *
+     * @return 本次归档数量
+     */
+    int archiveExpiredMemories();
 }

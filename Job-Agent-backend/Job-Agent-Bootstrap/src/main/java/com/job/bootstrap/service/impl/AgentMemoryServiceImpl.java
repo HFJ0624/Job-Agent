@@ -1,8 +1,10 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.job.bootstrap.agent.memory.AgentMemoryProperties;
 import com.job.bootstrap.mapper.AgentLongTermMemoryMapper;
 import com.job.bootstrap.mapper.AgentMemoryHistoryMapper;
 import com.job.bootstrap.service.AgentMemoryService;
@@ -11,6 +13,7 @@ import com.job.common.entity.agent.AgentLongTermMemory;
 import com.job.common.entity.agent.AgentMemoryHistory;
 import com.job.common.vo.agent.AgentMemoryHistoryVO;
 import com.job.common.vo.agent.AgentMemoryVO;
+import com.job.enums.AgentMemorySourceType;
 import com.job.enums.AgentMemoryStatus;
 import com.job.enums.AgentMemoryType;
 import com.job.exception.BizException;
@@ -29,6 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Agent 长期记忆服务实现，是 Memory 模块的主表读写入口。
@@ -72,6 +76,8 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
     private static final int DELETED = 1;
     private static final int CONFLICT_NO = 0;
     private static final int CONFLICT_YES = 1;
+    private static final int NEED_CONFIRM_NO = 0;
+    private static final int NEED_CONFIRM_YES = 1;
 
     private static final String CHANGE_CREATE = "CREATE";
     private static final String CHANGE_UPDATE = "UPDATE";
@@ -82,12 +88,14 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
     private static final int DEFAULT_SEARCH_LIMIT = 5;
     private static final int MAX_SEARCH_LIMIT = 20;
     private static final int MEMORY_SCAN_LIMIT = 100;
+    private static final int ARCHIVE_BATCH_LIMIT = 500;
 
     private static final BigDecimal DEFAULT_CONFIDENCE = new BigDecimal("0.80");
     private static final BigDecimal DEFAULT_IMPORTANCE = new BigDecimal("0.50");
 
     private final AgentLongTermMemoryMapper agentLongTermMemoryMapper;
     private final AgentMemoryHistoryMapper agentMemoryHistoryMapper;
+    private final AgentMemoryProperties agentMemoryProperties;
 
     /**
      * 保存或更新长期记忆。
@@ -122,10 +130,27 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         }
 
         Date now = new Date();
-        AgentLongTermMemory memory = findUpdatableMemory(userId, memoryType, memoryKey);
-        AgentLongTermMemory oldSnapshot = copyMemory(memory);
-        boolean insert = memory == null;
+        AgentLongTermMemory existing = findUpdatableMemory(userId, memoryType, memoryKey);
+        boolean insert = existing == null;
+        AgentLongTermMemory oldSnapshot = copyMemory(existing);
 
+        /*
+         * 冲突裁决（任务9）：同 key 且要写入新值时——
+         * - 新来源置信度更高 → 覆盖旧值，并清除待确认标记；
+         * - 新来源置信度不高于旧来源 → 不覆盖，保留旧值、打待确认标记、记冲突历史，直接返回旧记忆。
+         * 避免低置信度提取（如工具结果）静默覆盖用户明确表达的事实。
+         */
+        if (!insert && isValueChanged(existing, memoryValue) && !outranks(sourceType, existing.getSourceType())) {
+            existing.setNeedConfirm(NEED_CONFIRM_YES);
+            existing.setUpdateTime(now);
+            agentLongTermMemoryMapper.updateById(existing);
+            AgentLongTermMemory attempted = copyMemory(existing);
+            attempted.setMemoryValue(memoryValue.trim());
+            recordMemoryHistory(oldSnapshot, attempted, CHANGE_UPDATE, sourceType, sourceId, OPERATOR_SYSTEM);
+            return existing;
+        }
+
+        AgentLongTermMemory memory = existing;
         if (insert) {
             memory = new AgentLongTermMemory();
             memory.setUserId(userId);
@@ -133,6 +158,9 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             memory.setMemoryKey(trimToNull(memoryKey));
             memory.setCreateTime(now);
             memory.setIsDeleted(NOT_DELETED);
+            memory.setNeedConfirm(NEED_CONFIRM_NO);
+        } else {
+            memory.setNeedConfirm(NEED_CONFIRM_NO); // 高置信度覆盖后清除待确认标记
         }
 
         memory.setMemoryValue(memoryValue.trim());
@@ -142,6 +170,7 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         memory.setConfidence(normalizeScore(confidence, DEFAULT_CONFIDENCE));
         memory.setImportance(normalizeScore(importance, DEFAULT_IMPORTANCE));
         memory.setStatus(AgentMemoryStatus.ACTIVE.name());
+        memory.setExpireTime(resolveExpireTime(now)); // TTL：每次写入刷新过期时间
         memory.setUpdateTime(now);
 
         if (insert) {
@@ -177,13 +206,18 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         }
 
         int actualLimit = resolveLimit(limit);
+        Date now = new Date();
         List<AgentLongTermMemory> candidates = agentLongTermMemoryMapper.selectList(
                 new LambdaQueryWrapper<AgentLongTermMemory>()
                         .eq(AgentLongTermMemory::getUserId, userId)
                         .eq(AgentLongTermMemory::getStatus, AgentMemoryStatus.ACTIVE.name())
                         .eq(AgentLongTermMemory::getIsDeleted, NOT_DELETED)
+                        // TTL：未过期（expire_time 为空或晚于 now）才参与召回
+                        .and(nested -> nested.isNull(AgentLongTermMemory::getExpireTime)
+                                .or().gt(AgentLongTermMemory::getExpireTime, now))
+                        // 排序键用 create_time，避免“召回即刷新 updateTime”导致排序漂移
                         .orderByDesc(AgentLongTermMemory::getImportance)
-                        .orderByDesc(AgentLongTermMemory::getUpdateTime)
+                        .orderByDesc(AgentLongTermMemory::getCreateTime)
                         .last("LIMIT " + MEMORY_SCAN_LIMIT)
         );
         if (CollectionUtils.isEmpty(candidates)) {
@@ -198,7 +232,7 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
 
         List<AgentLongTermMemory> selected = scoredMemories.stream()
                 .sorted(Comparator.comparingDouble(ScoredMemory::score).reversed()
-                        .thenComparing(memory -> safeDate(memory.memory().getUpdateTime()), Comparator.reverseOrder()))
+                        .thenComparing(memory -> safeDate(memory.memory().getCreateTime()), Comparator.reverseOrder()))
                 .limit(actualLimit)
                 .map(ScoredMemory::memory)
                 .toList();
@@ -213,6 +247,7 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             return null;
         }
 
+        Date now = new Date();
         AgentLongTermMemory memory = agentLongTermMemoryMapper.selectOne(
                 new LambdaQueryWrapper<AgentLongTermMemory>()
                         .eq(AgentLongTermMemory::getUserId, userId)
@@ -220,6 +255,8 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
                         .eq(AgentLongTermMemory::getMemoryKey, memoryKey.trim())
                         .eq(AgentLongTermMemory::getStatus, AgentMemoryStatus.ACTIVE.name())
                         .eq(AgentLongTermMemory::getIsDeleted, NOT_DELETED)
+                        .and(nested -> nested.isNull(AgentLongTermMemory::getExpireTime)
+                                .or().gt(AgentLongTermMemory::getExpireTime, now))
                         .orderByDesc(AgentLongTermMemory::getUpdateTime)
                         .last("LIMIT 1")
         );
@@ -227,9 +264,10 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             return null;
         }
 
-        memory.setLastUsedTime(new Date());
-        memory.setUpdateTime(new Date());
-        agentLongTermMemoryMapper.updateById(memory);
+        // 只更新 last_used_time 单列，不碰 updateTime，避免读引发写放大（字符串列名保证可单测）
+        agentLongTermMemoryMapper.update(null, new UpdateWrapper<AgentLongTermMemory>()
+                .set("last_used_time", now)
+                .eq("id", memory.getId()));
         return memory.getMemoryValue();
     }
 
@@ -374,6 +412,77 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         return memories.size();
     }
 
+    /**
+     * 归档已过期的 ACTIVE 记忆（TTL 治理，任务9）。
+     * 由每日定时任务调用；批量处理，避免一次扫描过多数据。
+     *
+     * @return 本次归档数量
+     */
+    @Override
+    public int archiveExpiredMemories() {
+        Date now = new Date();
+        List<AgentLongTermMemory> expired = agentLongTermMemoryMapper.selectList(
+                new LambdaQueryWrapper<AgentLongTermMemory>()
+                        .eq(AgentLongTermMemory::getStatus, AgentMemoryStatus.ACTIVE.name())
+                        .eq(AgentLongTermMemory::getIsDeleted, NOT_DELETED)
+                        .isNotNull(AgentLongTermMemory::getExpireTime)
+                        .le(AgentLongTermMemory::getExpireTime, now)
+                        .orderByAsc(AgentLongTermMemory::getExpireTime)
+                        .last("LIMIT " + ARCHIVE_BATCH_LIMIT)
+        );
+        if (CollectionUtils.isEmpty(expired)) {
+            return 0;
+        }
+
+        for (AgentLongTermMemory memory : expired) {
+            AgentLongTermMemory oldSnapshot = copyMemory(memory);
+            memory.setStatus(AgentMemoryStatus.ARCHIVED.name());
+            memory.setUpdateTime(now);
+            agentLongTermMemoryMapper.updateById(memory);
+            recordMemoryHistory(oldSnapshot, memory, CHANGE_STATUS, memory.getSourceType(), memory.getSourceId(), OPERATOR_SYSTEM);
+        }
+        return expired.size();
+    }
+
+    // 来源置信度：后台人工 > 用户明述 > 规划/LLM 抽取 > 工具结果
+    private int sourceRank(String sourceType) {
+        if (!StringUtils.hasText(sourceType)) {
+            return 0;
+        }
+        try {
+            return switch (AgentMemorySourceType.valueOf(sourceType.trim())) {
+                case ADMIN_MANUAL -> 4;
+                case USER_MESSAGE -> 3;
+                case AGENT_PLAN -> 2;
+                case TOOL_RESULT -> 1;
+            };
+        } catch (IllegalArgumentException exception) {
+            return 0;
+        }
+    }
+
+    // 新来源置信度是否严格高于旧来源（只有更高才允许覆盖旧值）
+    private boolean outranks(String newSourceType, String oldSourceType) {
+        return sourceRank(newSourceType) > sourceRank(oldSourceType);
+    }
+
+    // 记忆正文是否发生变化（用于判断同 key 覆盖是否构成冲突）
+    private boolean isValueChanged(AgentLongTermMemory existing, String newValue) {
+        if (existing == null || !StringUtils.hasText(newValue)) {
+            return false;
+        }
+        return !normalizeForCompare(existing.getMemoryValue()).equals(normalizeForCompare(newValue));
+    }
+
+    // 计算过期时间：now + 默认 TTL 天数；TTL<=0 表示不过期（返回 NULL）
+    private Date resolveExpireTime(Date now) {
+        int ttlDays = agentMemoryProperties.getDefaultTtlDays();
+        if (ttlDays <= 0) {
+            return null;
+        }
+        return new Date(now.getTime() + TimeUnit.DAYS.toMillis(ttlDays));
+    }
+
     private void recordMemoryHistory(
             AgentLongTermMemory oldMemory,
             AgentLongTermMemory newMemory,
@@ -453,12 +562,16 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             return null;
         }
 
+        Date now = new Date();
         return agentLongTermMemoryMapper.selectOne(
                 new LambdaQueryWrapper<AgentLongTermMemory>()
                         .eq(AgentLongTermMemory::getUserId, userId)
                         .eq(AgentLongTermMemory::getMemoryType, memoryType.name())
                         .eq(AgentLongTermMemory::getMemoryKey, memoryKey.trim())
                         .eq(AgentLongTermMemory::getIsDeleted, NOT_DELETED)
+                        // 过期记忆视为不存在，允许写入新记忆（旧的由归档任务清理）
+                        .and(nested -> nested.isNull(AgentLongTermMemory::getExpireTime)
+                                .or().gt(AgentLongTermMemory::getExpireTime, now))
                         .orderByDesc(AgentLongTermMemory::getUpdateTime)
                         .last("LIMIT 1")
         );
@@ -561,9 +674,11 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
 
         Date now = new Date();
         for (AgentLongTermMemory memory : memories) {
-            memory.setLastUsedTime(now);
-            memory.setUpdateTime(now);
-            agentLongTermMemoryMapper.updateById(memory);
+            // 只更新 last_used_time 单列，不碰 updateTime：修复“读引发写放大”，且不让召回改写排序。
+            // 用字符串列名而非 LambdaUpdateWrapper：纯 Mockito 单测里 Lambda 缓存未初始化会报错，字符串列名 SQL 等价且可测。
+            agentLongTermMemoryMapper.update(null, new UpdateWrapper<AgentLongTermMemory>()
+                    .set("last_used_time", now)
+                    .eq("id", memory.getId()));
         }
     }
 
