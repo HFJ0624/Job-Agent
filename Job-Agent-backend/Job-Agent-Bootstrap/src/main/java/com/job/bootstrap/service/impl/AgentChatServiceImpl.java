@@ -7,6 +7,7 @@ import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
+import com.job.bootstrap.agent.intent.AgentIntentLlmClassifier;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
@@ -127,6 +128,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AgentIntentRouter agentIntentRouter;
 
     /**
+     * 意图 LLM 兜底分类器：规则没命中时用大模型兜底（任务5 阶段一）。
+     */
+    private final AgentIntentLlmClassifier agentIntentLlmClassifier;
+
+    /**
      * Agent Planner 服务。
      */
     private final AgentPlanningService agentPlanningService;
@@ -244,12 +250,13 @@ public class AgentChatServiceImpl implements AgentChatService {
         String safeMessage = String.valueOf(agentGuardrailService.maskSensitiveData(message));
 
         /*
-         * 4. 识别用户意图。
-         *    当前只是规则识别，作用是:
-         *    - Trace 日志可以分类
-         *    - 后续可以根据意图走不同 Agent 编排流程
+         * 4. 识别用户意图：规则优先，规则没命中时用 LLM 兜底分类（任务5 阶段一）。
+         *    意图用于 Trace 分类与后续编排；LLM 兜底失败或置信度不足时保持规则的 GENERAL_CHAT。
          */
-        AgentIntentCode intentCode = agentIntentRouter.route(safeMessage);
+        AgentIntentRouter.IntentResolution intentResolution = agentIntentRouter.routeDetailed(safeMessage);
+        AgentIntentCode intentCode = intentResolution.ruleMatched()
+                ? intentResolution.intentCode()
+                : agentIntentLlmClassifier.classify(userId, traceId, safeMessage).orElse(intentResolution.intentCode());
 
         /*
          * 5. 如果前端传入 planId，说明这是“继续执行已有计划”。

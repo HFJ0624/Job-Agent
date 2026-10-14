@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
+import com.job.bootstrap.agent.intent.AgentIntentLlmClassifier;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
@@ -52,6 +53,7 @@ class AgentChatRagFallbackTest {
     private final AgentTraceService agentTraceService = mock(AgentTraceService.class);
     private final RagRetrievalService ragRetrievalService = mock(RagRetrievalService.class);
     private final AgentIntentRouter agentIntentRouter = mock(AgentIntentRouter.class);
+    private final AgentIntentLlmClassifier agentIntentLlmClassifier = mock(AgentIntentLlmClassifier.class);
     private final AgentPlanningService agentPlanningService = mock(AgentPlanningService.class);
     private final AgentPlanExecutorService agentPlanExecutorService = mock(AgentPlanExecutorService.class);
     private final AgentMemoryCaptureService agentMemoryCaptureService = mock(AgentMemoryCaptureService.class);
@@ -62,7 +64,7 @@ class AgentChatRagFallbackTest {
 
     private final AgentChatServiceImpl service = new AgentChatServiceImpl(
             aiConversationMapper, aiMessageMapper, aiModelGatewayService, agentTraceService,
-            ragRetrievalService, agentIntentRouter, agentPlanningService, agentPlanExecutorService,
+            ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
             agentGuardrailService, objectMapper);
 
@@ -71,7 +73,8 @@ class AgentChatRagFallbackTest {
         when(agentGuardrailService.checkUserInput(anyLong(), anyString())).thenReturn(AgentGuardrailResult.allow());
         when(agentGuardrailService.maskSensitiveData(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentGuardrailService.sanitizeFinalAnswer(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(agentIntentRouter.route(anyString())).thenReturn(AgentIntentCode.GENERAL_CHAT);
+        when(agentIntentRouter.routeDetailed(anyString()))
+                .thenReturn(new AgentIntentRouter.IntentResolution(AgentIntentCode.GENERAL_CHAT, true));
         when(agentPlanningService.createPlan(any(), any(), any(), any(), any(), any())).thenReturn(buildPlan());
         when(agentMemoryContextService.buildContext(any(), any())).thenReturn(new AgentMemoryContextVO());
         when(agentMemoryCaptureService.captureFromUserMessage(any(), any(), any(), any())).thenReturn(List.of());

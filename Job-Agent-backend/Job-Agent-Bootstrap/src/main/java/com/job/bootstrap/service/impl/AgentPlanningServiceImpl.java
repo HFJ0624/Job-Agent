@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.plan.AgentPlanParameterExtractor;
+import com.job.bootstrap.agent.plan.AgentPlanParamLlmExtractor;
 import com.job.bootstrap.agent.plan.AgentPlanStepTemplate;
 import com.job.bootstrap.agent.plan.AgentPlanTemplate;
 import com.job.bootstrap.agent.plan.AgentPlanTemplateFactory;
@@ -25,8 +26,10 @@ import org.springframework.util.StringUtils;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Agent 计划生成服务实现，负责把用户目标拆成可执行的 Plan。
@@ -69,6 +72,7 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
     private final AgentPlanMapper agentPlanMapper;
     private final AgentPlanStepMapper agentPlanStepMapper;
     private final AgentPlanParameterExtractor parameterExtractor;
+    private final AgentPlanParamLlmExtractor agentPlanParamLlmExtractor;
     private final AgentPlanTemplateFactory templateFactory;
     private final ObjectMapper objectMapper;
 
@@ -109,6 +113,13 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         Map<String, Object> extractedParams = parameterExtractor.extract(extractionText);
         AgentPlanTemplate template = templateFactory.create(intentCode, userGoal);
         List<String> missingParams = findMissingParams(template.requiredParams(), extractedParams);
+        // 正则缺必填参数时，用 LLM 兜底补抽：只补白名单 key，正则已有值不覆盖（任务5 阶段二）
+        if (!missingParams.isEmpty()) {
+            Map<String, Object> llmParams = agentPlanParamLlmExtractor.extract(
+                    userId, traceId, userGoal, buildLlmAllowedKeys(missingParams));
+            llmParams.forEach(extractedParams::putIfAbsent);
+            missingParams = findMissingParams(template.requiredParams(), extractedParams);
+        }
         String status = CollectionUtils.isEmpty(missingParams)
                 ? AgentPlanStatus.PLANNED.name()
                 : AgentPlanStatus.NEED_CLARIFICATION.name();
@@ -188,6 +199,21 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         return requiredParams.stream()
                 .filter(param -> !hasRequiredParam(param, extractedParams))
                 .toList();
+    }
+
+    /**
+     * 组装允许 LLM 补抽的 key：缺失必填参数 + 其自然语言替代（resumeId→resumeName、jobId→jobTitle），
+     * 让 LLM 在 ID 之外也能补抽名称，再由 hasRequiredParam 判定必填是否满足。
+     */
+    private Set<String> buildLlmAllowedKeys(List<String> missingParams) {
+        Set<String> keys = new LinkedHashSet<>(missingParams);
+        if (keys.contains("resumeId")) {
+            keys.add("resumeName");
+        }
+        if (keys.contains("jobId")) {
+            keys.add("jobTitle");
+        }
+        return keys;
     }
 
     private boolean hasRequiredParam(String param, Map<String, Object> extractedParams) {

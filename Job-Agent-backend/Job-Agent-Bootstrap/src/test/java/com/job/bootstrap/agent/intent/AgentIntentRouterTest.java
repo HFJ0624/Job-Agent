@@ -67,4 +67,18 @@ class AgentIntentRouterTest {
         assertThat(router.route("")).isEqualTo(AgentIntentCode.GENERAL_CHAT);
         assertThat(router.route("   ")).isEqualTo(AgentIntentCode.GENERAL_CHAT);
     }
+
+    @Test
+    void routeDetailedShouldMarkRuleMatched() {
+        AgentIntentRouter.IntentResolution resolution = router.routeDetailed("帮我看看这份简历和这个岗位匹配吗");
+        assertThat(resolution.ruleMatched()).isTrue();
+        assertThat(resolution.intentCode()).isEqualTo(AgentIntentCode.JOB_MATCH);
+    }
+
+    @Test
+    void routeDetailedShouldMarkNotMatchedForUnknown() {
+        AgentIntentRouter.IntentResolution resolution = router.routeDetailed("今天天气怎么样啊");
+        assertThat(resolution.ruleMatched()).isFalse();
+        assertThat(resolution.intentCode()).isEqualTo(AgentIntentCode.GENERAL_CHAT);
+    }
 }
