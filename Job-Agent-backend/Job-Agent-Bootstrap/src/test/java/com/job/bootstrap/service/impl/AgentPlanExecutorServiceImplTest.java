@@ -20,8 +20,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import org.mockito.ArgumentCaptor;
+
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -292,6 +295,38 @@ class AgentPlanExecutorServiceImplTest {
         assertThat(result.getSuccess()).isTrue();
         assertThat(result.getSteps().get(0).getStatus()).isEqualTo(AgentPlanStepStatus.SKIPPED.name());
         verify(agentToolInvoker, times(1)).invoke(any(), any(), any());
+    }
+
+    /**
+     * 用例：步骤间数据传递。步骤2 的入参用 {{step_1.output.jobId}} 引用步骤1 输出，
+     * Executor 应在调用工具前把占位符解析成步骤1 的真实输出值。
+     */
+    @Test
+    void shouldResolveStepOutputPlaceholderBeforeInvoke() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        AgentPlanStep step1 = buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name());
+        AgentPlanStep step2 = buildStep(2, "JobMatchTool.matchJob", AgentPlanStepStatus.PENDING.name());
+        // 步骤2 自带可执行参数：resumeId 固定，jobId 用占位符引用步骤1 输出
+        step2.setToolInputSchema("{\"extractedParams\":{\"resumeId\":7,\"jobId\":\"{{step_1.output.jobId}}\"}}");
+        List<AgentPlanStep> steps = List.of(step1, step2);
+
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        // 步骤1 输出含顶层 jobId=42
+        when(agentToolInvoker.invoke(eq("JobSearchTool.searchJobs"), any(), any())).thenReturn(
+                AgentToolExecutionResult.builder().success(true).toolName("JobSearchTool.searchJobs")
+                        .message("ok").dataJson("{\"jobId\":42,\"total\":1}").costTime(1L).build());
+        when(agentToolInvoker.invoke(eq("JobMatchTool.matchJob"), any(), any()))
+                .thenReturn(buildToolSuccess("JobMatchTool.matchJob"));
+
+        executor.executePlan(USER_ID, PLAN_ID);
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(agentToolInvoker).invoke(eq("JobMatchTool.matchJob"), captor.capture(), any());
+        // 占位符已被替换为步骤1 输出的 jobId；resumeId 用步骤2 自带值
+        assertThat(captor.getValue().get("jobId")).isEqualTo(42);
+        assertThat(captor.getValue().get("resumeId")).isEqualTo(7);
     }
 
     private AgentToolExecutionResult buildToolSuccess(String toolName) {

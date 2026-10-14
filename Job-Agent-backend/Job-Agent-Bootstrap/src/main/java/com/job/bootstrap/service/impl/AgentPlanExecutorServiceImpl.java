@@ -38,6 +38,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Agent 计划执行服务实现，是 Agent 链路中 Tool Calling 与 Observation 的核心编排者。
@@ -104,6 +106,13 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
      * 3. 阈值需要大于单个步骤的最长合理执行时间（模型调用默认 45 秒超时），10 分钟是保守值。
      */
     private static final long RUNNING_STALE_MINUTES = 10;
+
+    /**
+     * 步骤间数据传递占位符：{{step_N.output.xxx}}。
+     * N 为步骤序号，xxx 为该步工具输出里的字段路径（支持点号多级），缺省 output 表示整个输出。
+     */
+    private static final Pattern STEP_OUTPUT_PLACEHOLDER =
+            Pattern.compile("\\{\\{\\s*step_(\\d+)\\.output(\\.[\\w.]*)?\\s*\\}\\}");
 
     private final AgentPlanMapper agentPlanMapper;
     private final AgentPlanStepMapper agentPlanStepMapper;
@@ -215,6 +224,8 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         Map<String, Object> params = readJsonMap(plan.getExtractedParamsJson());
 
         List<AgentPlanStepExecutionResult> stepResults = new ArrayList<>();
+        // 步骤输出快照：stepNo -> 该步工具输出（解析后的 JSON），供后续步骤的 {{step_N.output.xxx}} 占位符引用
+        Map<Integer, Object> stepOutputs = new LinkedHashMap<>();
         boolean failed = false;
         String failReason = null;
 
@@ -239,8 +250,9 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                 continue;
             }
 
-            AgentPlanStepExecutionResult result = executeToolStep(plan, step, toolName, params);
+            AgentPlanStepExecutionResult result = executeToolStep(plan, step, toolName, params, stepOutputs);
             stepResults.add(result);
+            rememberStepOutput(stepOutputs, result);
 
             if (AgentPlanStepStatus.FAILED.name().equals(result.getStatus())) {
                 failed = true;
@@ -314,7 +326,8 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             AgentPlan plan,
             AgentPlanStep step,
             String toolName,
-            Map<String, Object> params
+            Map<String, Object> params,
+            Map<Integer, Object> stepOutputs
     ) {
         markStepRunning(step, toolName);
 
@@ -343,7 +356,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
              */
             AgentToolExecutionResult toolResult = agentToolInvoker.invoke(
                     toolName,
-                    buildExecutionParams(params, plan),
+                    buildExecutionParams(params, plan, step, stepOutputs),
                     plan.getUserGoal()
             );
 
@@ -755,14 +768,136 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                 .orElse(toolName);
     }
 
-    private Map<String, Object> buildExecutionParams(Map<String, Object> params, AgentPlan plan) {
+    private Map<String, Object> buildExecutionParams(
+            Map<String, Object> params,
+            AgentPlan plan,
+            AgentPlanStep step,
+            Map<Integer, Object> stepOutputs
+    ) {
+        // 1. 计划级参数打底
         Map<String, Object> merged = new LinkedHashMap<>();
         if (params != null) {
             merged.putAll(params);
         }
+        // 2. 叠加当前步骤自己的可执行参数（LLM 补步会写入；模板步骤等于计划参数，无副作用）
+        merged.putAll(readStepExecutableParams(step));
+        // 3. 解析 {{step_N.output.xxx}} 占位符，用前序步骤输出做步骤间数据传递
+        merged = resolvePlaceholders(merged, stepOutputs);
+        // 4. 检索类工具兜底 query/message
         merged.putIfAbsent("message", plan.getUserGoal());
         merged.putIfAbsent("query", plan.getUserGoal());
         return merged;
+    }
+
+    // 读取步骤 toolInputSchema 里由 Planner 写入的可执行参数（键 extractedParams）
+    private Map<String, Object> readStepExecutableParams(AgentPlanStep step) {
+        if (step == null || !StringUtils.hasText(step.getToolInputSchema())) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> schema = objectMapper.readValue(step.getToolInputSchema(), new TypeReference<>() {
+            });
+            Object extracted = schema.get("extractedParams");
+            if (extracted instanceof Map<?, ?> map) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                map.forEach((k, v) -> result.put(String.valueOf(k), v));
+                return result;
+            }
+        } catch (Exception exception) {
+            log.debug("解析步骤可执行参数失败，stepId={}, error={}", step.getId(), exception.getMessage());
+        }
+        return Map.of();
+    }
+
+    // 执行后把该步工具输出（解析后的 JSON）记入 stepOutputs，供后续步骤占位符引用
+    private void rememberStepOutput(Map<Integer, Object> stepOutputs, AgentPlanStepExecutionResult result) {
+        if (result == null || result.getStepNo() == null || result.getToolResult() == null) {
+            return;
+        }
+        Object parsed = readJsonObject(result.getToolResult().getDataJson());
+        if (parsed != null) {
+            stepOutputs.put(result.getStepNo(), parsed);
+        }
+    }
+
+    // 把参数值里的 {{step_N.output.xxx}} 占位符替换成前序步骤输出
+    private Map<String, Object> resolvePlaceholders(Map<String, Object> params, Map<Integer, Object> stepOutputs) {
+        if (params == null || params.isEmpty() || stepOutputs == null || stepOutputs.isEmpty()) {
+            return params;
+        }
+        Map<String, Object> resolved = new LinkedHashMap<>();
+        params.forEach((key, value) -> resolved.put(key, resolveValue(value, stepOutputs)));
+        return resolved;
+    }
+
+    private Object resolveValue(Object value, Map<Integer, Object> stepOutputs) {
+        if (value instanceof String text) {
+            Matcher matcher = STEP_OUTPUT_PLACEHOLDER.matcher(text);
+            if (!matcher.find()) {
+                return text;
+            }
+            // 整个值就是一个占位符 -> 保留原始类型（如 Long/String/Map）
+            if (matcher.start() == 0 && matcher.end() == text.length()) {
+                return resolveToken(matcher.group(1), matcher.group(2), stepOutputs, text);
+            }
+            // 嵌在字符串里 -> 逐个替换为字符串形式
+            StringBuilder builder = new StringBuilder();
+            matcher.reset();
+            while (matcher.find()) {
+                Object resolved = resolveToken(matcher.group(1), matcher.group(2), stepOutputs, null);
+                String replacement = resolved == null ? matcher.group(0) : String.valueOf(resolved);
+                matcher.appendReplacement(builder, Matcher.quoteReplacement(replacement));
+            }
+            matcher.appendTail(builder);
+            return builder.toString();
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((k, v) -> copy.put(String.valueOf(k), resolveValue(v, stepOutputs)));
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>();
+            list.forEach(item -> copy.add(resolveValue(item, stepOutputs)));
+            return copy;
+        }
+        return value;
+    }
+
+    // 解析单个占位符：stepNo 定位前序输出，path 按点号取字段；解析不到返回 fallback（保留原样）
+    private Object resolveToken(String stepNoText, String path, Map<Integer, Object> stepOutputs, Object fallback) {
+        try {
+            Object output = stepOutputs.get(Integer.valueOf(stepNoText));
+            if (output == null) {
+                return fallback;
+            }
+            if (path == null || ".".equals(path)) {
+                return output;
+            }
+            Object current = output;
+            for (String part : path.substring(1).split("\\.")) {
+                if (current instanceof Map<?, ?> map) {
+                    current = map.get(part);
+                } else {
+                    return fallback;
+                }
+            }
+            return current == null ? fallback : current;
+        } catch (Exception exception) {
+            return fallback;
+        }
+    }
+
+    // 把工具输出 JSON 解析成对象（Map/List/标量），失败返回 null
+    private Object readJsonObject(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     private Map<String, Object> readJsonMap(String json) {
