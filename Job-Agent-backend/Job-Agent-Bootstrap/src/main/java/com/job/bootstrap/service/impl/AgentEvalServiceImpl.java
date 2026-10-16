@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.eval.AgentEvalMatcher;
 import com.job.bootstrap.mapper.AgentEvalCaseMapper;
 import com.job.bootstrap.mapper.AgentEvalDatasetMapper;
 import com.job.bootstrap.mapper.AgentEvalResultMapper;
@@ -14,6 +15,7 @@ import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.service.AgentChatService;
 import com.job.bootstrap.service.AgentEvalService;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.bootstrap.service.WorkflowTaskService;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
 import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
@@ -22,6 +24,7 @@ import com.job.common.dto.agent.AgentEvalDatasetSaveDTO;
 import com.job.common.dto.agent.AgentEvalQuickFixDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
 import com.job.common.dto.agent.AgentEvalRunQueryDTO;
+import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentEvalCase;
 import com.job.common.entity.agent.AgentEvalDataset;
 import com.job.common.entity.agent.AgentEvalResult;
@@ -37,6 +40,7 @@ import com.job.common.vo.agent.AgentEvalResultDiagnosisVO;
 import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 import com.job.common.vo.rag.RagSearchResultVO;
+import com.job.enums.WorkflowTaskType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -126,6 +130,8 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     private final AgentEvalCoreTemplateFactory coreTemplateFactory;
     private final AgentEvalResultDiagnosisBuilder resultDiagnosisBuilder;
     private final AgentEvalCaseQualityChecker caseQualityChecker;
+    private final AgentEvalMatcher agentEvalMatcher;
+    private final WorkflowTaskService workflowTaskService;
 
     @Override
     public IPage<AgentEvalDatasetVO> pageDatasets(AgentEvalDatasetQueryDTO query) {
@@ -251,13 +257,17 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         agentEvalCaseMapper.updateById(evalCase);
     }
 
+    /*
+     * 异步化（任务10）：runCase/runDataset/runAll 不再同步逐条执行，
+     * 而是创建 RUNNING 批次 + 投递 AGENT_EVAL_RUN 工作流任务后立即返回，
+     * 真正执行交给 AgentEvalRunWorkflowTaskHandler 在 worker 线程完成，避免大数据集 HTTP 超时。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentEvalRunVO runCase(Long caseId) {
         AgentEvalCase evalCase = getCaseRequired(caseId);
         AgentEvalRun run = createRun(evalCase.getDatasetId(), RUN_TYPE_CASE, "单条用例回归-" + evalCase.getCaseName(), 1);
-        AgentEvalResult result = executeCase(run.getId(), evalCase);
-        finishRun(run, List.of(result), null);
+        enqueueEvalRun(run, Map.of("caseId", caseId));
         return AgentEvalRunVO.from(run);
     }
 
@@ -265,21 +275,58 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     @Transactional(rollbackFor = Exception.class)
     public AgentEvalRunVO runDataset(Long datasetId) {
         AgentEvalDataset dataset = getDatasetRequired(datasetId);
-        List<AgentEvalCase> cases = listEnabledCases(datasetId);
-        AgentEvalRun run = createRun(datasetId, RUN_TYPE_DATASET, "数据集回归-" + dataset.getDatasetName(), cases.size());
-        List<AgentEvalResult> results = executeCases(run.getId(), cases);
-        finishRun(run, results, cases.isEmpty() ? "数据集没有启用用例" : null);
+        AgentEvalRun run = createRun(datasetId, RUN_TYPE_DATASET, "数据集回归-" + dataset.getDatasetName(), listEnabledCases(datasetId).size());
+        enqueueEvalRun(run, Map.of("datasetId", datasetId));
         return AgentEvalRunVO.from(run);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentEvalRunVO runAll() {
-        List<AgentEvalCase> cases = listEnabledCases(null);
-        AgentEvalRun run = createRun(null, RUN_TYPE_ALL, "全量回归-" + System.currentTimeMillis(), cases.size());
+        AgentEvalRun run = createRun(null, RUN_TYPE_ALL, "全量回归-" + System.currentTimeMillis(), listEnabledCases(null).size());
+        enqueueEvalRun(run, Map.of());
+        return AgentEvalRunVO.from(run);
+    }
+
+    /**
+     * 执行一个已创建的 Eval 批次（异步 worker 调用，幂等）。
+     * 批次已结束（SUCCESS/FAILED）则直接返回，避免 Workflow 重试导致重复跑用例。
+     *
+     * @param runId  批次 ID
+     * @param caseId 仅 RUN_TYPE_CASE 使用，为待执行用例 ID；其余类型传 null
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentEvalRunVO executeRun(Long runId, Long caseId) {
+        AgentEvalRun run = getRunRequired(runId);
+        if (STATUS_SUCCESS.equals(run.getStatus()) || STATUS_FAILED.equals(run.getStatus())) {
+            return AgentEvalRunVO.from(run);
+        }
+
+        List<AgentEvalCase> cases = resolveRunCases(run, caseId);
         List<AgentEvalResult> results = executeCases(run.getId(), cases);
         finishRun(run, results, cases.isEmpty() ? "没有启用用例" : null);
         return AgentEvalRunVO.from(run);
+    }
+
+    // 按批次类型解析待执行用例：CASE 用指定 caseId，DATASET 用 run.datasetId，ALL 用全部启用用例
+    private List<AgentEvalCase> resolveRunCases(AgentEvalRun run, Long caseId) {
+        if (RUN_TYPE_CASE.equals(run.getRunType())) {
+            return caseId == null ? List.of() : List.of(getCaseRequired(caseId));
+        }
+        if (RUN_TYPE_DATASET.equals(run.getRunType())) {
+            return listEnabledCases(run.getDatasetId());
+        }
+        return listEnabledCases(null);
+    }
+
+    // 投递 AGENT_EVAL_RUN 工作流任务（bizId=runId，requestJson 携带 scope），由 worker 异步执行
+    private void enqueueEvalRun(AgentEvalRun run, Map<String, Object> scope) {
+        WorkflowTaskCreateDTO request = new WorkflowTaskCreateDTO();
+        request.setTaskType(WorkflowTaskType.AGENT_EVAL_RUN.name());
+        request.setBizId(run.getId());
+        request.setRequestJson(toJson(scope));
+        workflowTaskService.createTask(request);
     }
 
     @Override
@@ -466,9 +513,17 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         return healthReportBuilder.build(latestRun, enabledCases, latestResults);
     }
 
+    /*
+     * 兼容旧接口：同步跑全量并返回通过数。
+     * 与异步的 runAll 不同——这里立即执行并收尾，保持旧调用方“拿到通过数”的语义。
+     */
     @Override
     public Integer runAllEnabledCases() {
-        return runAll().getPassCount();
+        List<AgentEvalCase> cases = listEnabledCases(null);
+        AgentEvalRun run = createRun(null, RUN_TYPE_ALL, "全量回归-" + System.currentTimeMillis(), cases.size());
+        List<AgentEvalResult> results = executeCases(run.getId(), cases);
+        finishRun(run, results, cases.isEmpty() ? "没有启用用例" : null);
+        return run.getPassCount();
     }
 
     private AgentEvalRun findLatestRun(Long datasetId) {
@@ -587,7 +642,7 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         }
 
         boolean matched = check.actualTools.stream()
-                .anyMatch(tool -> tool.contains(evalCase.getExpectedToolName()));
+                .anyMatch(tool -> agentEvalMatcher.toolStrictMatch(tool, evalCase.getExpectedToolName()));
         check.toolSelectPass = matched ? 1 : 0;
         if (!matched) {
             check.failureType = "TOOL_SELECT_FAILED";

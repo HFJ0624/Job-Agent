@@ -111,6 +111,15 @@ public interface AgentEvalService {
     AgentEvalRunVO runAll();
 
     /**
+     * 执行一个已创建的 Eval 批次（异步 worker 调用，幂等；批次已结束则直接返回）。
+     *
+     * @param runId  批次 ID
+     * @param caseId 仅单条用例批次使用，为待执行用例 ID；其余类型传 null
+     * @return 执行完成后的批次
+     */
+    AgentEvalRunVO executeRun(Long runId, Long caseId);
+
+    /**
      * 将某次运行结果设置为基线版本，用于后续回归比对。
      *
      * @param runId 运行记录 ID

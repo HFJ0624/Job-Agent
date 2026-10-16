@@ -12,6 +12,11 @@ public enum WorkflowTaskType {
     AGENT_EVAL_RUN_DATASET,
 
     /**
+     * Agent Eval 批次异步执行（bizId = evalRunId）。
+     */
+    AGENT_EVAL_RUN,
+
+    /**
      * 已约面试后，异步给用户发送面试通知邮件。
      */
     INTERVIEW_EMAIL_NOTIFY
