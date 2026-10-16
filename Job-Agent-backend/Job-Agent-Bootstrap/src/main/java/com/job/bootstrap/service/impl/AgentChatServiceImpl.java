@@ -123,8 +123,8 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final RagRetrievalService ragRetrievalService;
 
     /**
-     * 意图路由器。
-     * 第一版使用规则识别，后续可以升级为大模型分类。
+     * 意图路由器：规则优先识别 + 大模型兜底分类。
+     * 规则（关键词）命中则用规则；没命中时才调 AgentIntentLlmClassifier 让模型兜底。
      */
     private final AgentIntentRouter agentIntentRouter;
 
@@ -306,9 +306,10 @@ public class AgentChatServiceImpl implements AgentChatService {
         /*
          * 7.2 在 Planner 前构造长期记忆上下文。
          *
-         * 设计原因:
-         * - 第一版只在 Executor 总结前召回记忆，无法帮助 Planner 补齐城市、岗位、称呼等参数。
-         * - 第二版把压缩后的记忆上下文提供给 Planner 的参数抽取阶段，但不覆盖用户原始输入。
+         * 设计说明:
+         * - 把压缩后的长期记忆上下文在更早阶段就提供给 Planner 的参数抽取，帮助补齐城市、
+         *   目标岗位、称呼等参数（用户原始输入优先，记忆只补缺省、不覆盖）。
+         * - 同一份上下文后续也会用于 Executor 总结。
          */
         AgentMemoryContextVO planningMemoryContext = buildLongTermMemoryContext(userId, safeMessage);
 

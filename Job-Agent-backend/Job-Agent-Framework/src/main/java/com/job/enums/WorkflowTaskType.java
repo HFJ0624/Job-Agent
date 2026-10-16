@@ -1,7 +1,7 @@
 package com.job.enums;
 
 /**
- * 第一版支持的工作流任务类型。
+ * 支持的工作流任务类型。
  */
 public enum WorkflowTaskType {
 
