@@ -596,6 +596,7 @@ import {
   pageEvalResults,
   pageEvalRuns,
   runAllEvalCases,
+  getEvalRun,
   runEvalCase,
   runEvalDataset,
   saveEvalCase,
@@ -912,12 +913,37 @@ async function removeCase(row: AgentEvalCaseInfo) {
   await loadCases();
 }
 
+// 轮询批次直到执行完成（异步 Eval，后端已改为投递任务）：RUNNING→SUCCESS/FAILED，最多等 timeoutMs，超时返回 null
+async function pollRunUntilFinished(runId: number, timeoutMs = 120000): Promise<AgentEvalRunInfo | null> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const run = await getEvalRun(runId);
+    if (run.status === "SUCCESS" || run.status === "FAILED") {
+      return run;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return null;
+}
+
+// 提交批次后轮询到结束，再刷新运行批次/结果/体检，并提示最终结果
+async function waitRunAndRefresh(run: AgentEvalRunInfo, label: string) {
+  const finished = await pollRunUntilFinished(run.id!);
+  if (!finished) {
+    ElMessage.info(`${label}已提交，仍在后台执行中，请稍后在“运行批次”查看结果`);
+  } else if (finished.status === "SUCCESS") {
+    ElMessage.success(`${label}回归完成：通过 ${finished.passCount}/${finished.totalCount}`);
+  } else {
+    ElMessage.error(`${label}回归失败：${finished.failReason || "请查看运行批次详情"}`);
+  }
+  await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
+}
+
 async function runCase(row: AgentEvalCaseInfo) {
   running.value = true;
   try {
-    await runEvalCase(row.id!);
-    ElMessage.success("用例运行完成");
-    await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
+    const run = await runEvalCase(row.id!);
+    await waitRunAndRefresh(run, "用例");
   } finally {
     running.value = false;
   }
@@ -926,9 +952,8 @@ async function runCase(row: AgentEvalCaseInfo) {
 async function runDataset(row: AgentEvalDatasetInfo) {
   running.value = true;
   try {
-    await runEvalDataset(row.id!);
-    ElMessage.success("数据集回归完成");
-    await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
+    const run = await runEvalDataset(row.id!);
+    await waitRunAndRefresh(run, "数据集");
   } finally {
     running.value = false;
   }
@@ -937,9 +962,8 @@ async function runDataset(row: AgentEvalDatasetInfo) {
 async function runAll() {
   running.value = true;
   try {
-    await runAllEvalCases();
-    ElMessage.success("全量回归完成");
-    await Promise.all([loadRuns(), loadResults(), loadHealthReport()]);
+    const run = await runAllEvalCases();
+    await waitRunAndRefresh(run, "全量");
   } finally {
     running.value = false;
   }

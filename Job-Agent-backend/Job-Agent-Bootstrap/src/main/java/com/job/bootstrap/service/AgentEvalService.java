@@ -120,6 +120,14 @@ public interface AgentEvalService {
     AgentEvalRunVO executeRun(Long runId, Long caseId);
 
     /**
+     * 查询单个 Eval 批次（供前端轮询异步批次状态）。
+     *
+     * @param runId 批次 ID
+     * @return 批次详情
+     */
+    AgentEvalRunVO getRun(Long runId);
+
+    /**
      * 将某次运行结果设置为基线版本，用于后续回归比对。
      *
      * @param runId 运行记录 ID

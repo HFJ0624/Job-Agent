@@ -139,6 +139,14 @@ public class AdminAgentEvalController {
         return Result.build(agentEvalService.runAll(), ResultCodeEnum.SUCCESS);
     }
 
+    /**
+     * 查询单个 Eval 批次（前端轮询异步批次执行状态用）。
+     */
+    @GetMapping("/runs/{runId}")
+    public Result<AgentEvalRunVO> getRun(@PathVariable Long runId) {
+        return Result.build(agentEvalService.getRun(runId), ResultCodeEnum.SUCCESS);
+    }
+
     @PostMapping("/runs/{runId}/baseline")
     public Result<AgentEvalRunVO> setBaseline(@PathVariable Long runId) {
         return Result.build(agentEvalService.setBaseline(runId), ResultCodeEnum.SUCCESS);

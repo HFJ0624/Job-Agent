@@ -309,6 +309,11 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         return AgentEvalRunVO.from(run);
     }
 
+    @Override
+    public AgentEvalRunVO getRun(Long runId) {
+        return AgentEvalRunVO.from(getRunRequired(runId));
+    }
+
     // 按批次类型解析待执行用例：CASE 用指定 caseId，DATASET 用 run.datasetId，ALL 用全部启用用例
     private List<AgentEvalCase> resolveRunCases(AgentEvalRun run, Long caseId) {
         if (RUN_TYPE_CASE.equals(run.getRunType())) {
