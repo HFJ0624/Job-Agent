@@ -3,6 +3,7 @@ package com.job.bootstrap.agent.plan;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -54,6 +55,7 @@ public class AgentPlanParamLlmExtractor {
         try {
             String output = aiModelGatewayService.chat(
                     AI_SCENE_PARAM_EXTRACT,
+                    AiModelTier.LIGHT, // 参数抽取是轻任务，走轻量档（任务 G1）
                     buildVariables(allowedKeys),
                     buildUserMessage(message.trim()),
                     userId,

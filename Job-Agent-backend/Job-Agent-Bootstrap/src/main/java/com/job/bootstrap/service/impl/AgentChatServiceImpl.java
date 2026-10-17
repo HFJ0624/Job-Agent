@@ -32,6 +32,7 @@ import com.job.common.vo.agent.AgentPlanVO;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.enums.AgentPlanStatus;
+import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -941,6 +942,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         try {
             return aiModelGatewayService.chat(
                 AI_SCENE_AGENT_SUMMARY,
+                AiModelTier.PRO, // 对话总结用户直接可见，质量优先走强模型档（任务 G1）
                 buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
                 executorSummaryMessage,
                 userId,

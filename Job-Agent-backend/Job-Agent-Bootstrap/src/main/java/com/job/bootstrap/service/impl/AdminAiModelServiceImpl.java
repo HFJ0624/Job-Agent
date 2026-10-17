@@ -22,6 +22,7 @@ import com.job.common.vo.ai.AiModelCostStatsVO;
 import com.job.common.vo.ai.AiModelRouteVO;
 import com.job.enums.AiConfigStatus;
 import com.job.enums.AiModelCallStatus;
+import com.job.enums.AiModelTier;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -392,6 +394,7 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
         route.setPromptVersionId(request.getPromptVersionId());
         route.setGrayPercent(normalizePercent(request.getGrayPercent()));
         route.setAbGroup(trimToNull(request.getAbGroup()));
+        route.setTier(normalizeTier(request.getTier()));
         route.setStatus(normalizeConfigStatus(request.getStatus()));
     }
 
@@ -507,6 +510,18 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
         return AiConfigStatus.DISABLED.name().equals(status.trim())
                 ? AiConfigStatus.DISABLED.name()
                 : AiConfigStatus.ACTIVE.name();
+    }
+
+    // 模型档位规范化（任务 G1）：为空按 STANDARD；非法值直接抛错，避免库里出现未知档位
+    private String normalizeTier(String tier) {
+        if (!StringUtils.hasText(tier)) {
+            return AiModelTier.STANDARD.name();
+        }
+        try {
+            return AiModelTier.valueOf(tier.trim().toUpperCase(Locale.ROOT)).name();
+        } catch (IllegalArgumentException exception) {
+            throw new BizException("不支持的模型档位: " + tier);
+        }
     }
 
     private String requireText(String value, String message) {

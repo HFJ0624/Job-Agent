@@ -6,6 +6,7 @@ import com.job.bootstrap.agent.guardrail.PiiMasker;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.enums.AiModelTier;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,7 +104,7 @@ class AgentContextBuilderTest {
                 msg(106L, "USER", "旧二"), msg(105L, "ASSISTANT", "旧一")
         );
         when(aiMessageMapper.selectList(any())).thenReturn(recent, overflow);
-        when(aiModelGatewayService.chat(eq("CONTEXT_SUMMARY"), any(), anyString(), anyLong(), any()))
+        when(aiModelGatewayService.chat(eq("CONTEXT_SUMMARY"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenReturn("用户之前在谈Java岗位");
         when(aiConversationMapper.updateById(any(AiConversation.class))).thenReturn(1);
 
@@ -125,7 +126,7 @@ class AgentContextBuilderTest {
                 msg(106L, "USER", "c"), msg(105L, "ASSISTANT", "d")
         );
         when(aiMessageMapper.selectList(any())).thenReturn(recent, overflow);
-        when(aiModelGatewayService.chat(eq("CONTEXT_SUMMARY"), any(), anyString(), anyLong(), any()))
+        when(aiModelGatewayService.chat(eq("CONTEXT_SUMMARY"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenThrow(new RuntimeException("场景未配置"));
 
         AgentContextBuilder.BuiltContext built = builder.build(100L, "trace", conversation);

@@ -2,6 +2,7 @@ package com.job.bootstrap.agent.plan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.enums.AiModelTier;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -34,7 +35,7 @@ class AgentPlanParamLlmExtractorTest {
 
     @Test
     void shouldReturnWhitelistedAndTypedParams() {
-        when(gateway.chat(eq("PARAM_EXTRACT"), any(), anyString(), anyLong(), any()))
+        when(gateway.chat(eq("PARAM_EXTRACT"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenReturn("{\"resumeId\":\"12\",\"jobTitle\":\"Java 后端\",\"minSalary\":\"15000\"}");
 
         Map<String, Object> result = extractor.extract(1L, "trace", "分析简历12应聘Java后端",
@@ -47,7 +48,7 @@ class AgentPlanParamLlmExtractorTest {
 
     @Test
     void shouldDropNonWhitelistedKey() {
-        when(gateway.chat(eq("PARAM_EXTRACT"), any(), anyString(), anyLong(), any()))
+        when(gateway.chat(eq("PARAM_EXTRACT"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenReturn("{\"resumeId\":1,\"evilKey\":\"x\"}");
 
         Map<String, Object> result = extractor.extract(1L, "trace", "m", Set.of("resumeId"));
@@ -57,7 +58,7 @@ class AgentPlanParamLlmExtractorTest {
 
     @Test
     void shouldDropWrongType() {
-        when(gateway.chat(eq("PARAM_EXTRACT"), any(), anyString(), anyLong(), any()))
+        when(gateway.chat(eq("PARAM_EXTRACT"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenReturn("{\"resumeId\":\"abc\"}");
 
         Map<String, Object> result = extractor.extract(1L, "trace", "m", Set.of("resumeId"));
@@ -67,7 +68,7 @@ class AgentPlanParamLlmExtractorTest {
 
     @Test
     void fencedJsonShouldBeParsed() {
-        when(gateway.chat(eq("PARAM_EXTRACT"), any(), anyString(), anyLong(), any()))
+        when(gateway.chat(eq("PARAM_EXTRACT"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenReturn("```json\n{\"city\":\"杭州\"}\n```");
 
         Map<String, Object> result = extractor.extract(1L, "trace", "m", Set.of("city"));
@@ -77,7 +78,7 @@ class AgentPlanParamLlmExtractorTest {
 
     @Test
     void gatewayFailureShouldDegradeToEmpty() {
-        when(gateway.chat(eq("PARAM_EXTRACT"), any(), anyString(), anyLong(), any()))
+        when(gateway.chat(eq("PARAM_EXTRACT"), eq(AiModelTier.LIGHT), any(), anyString(), anyLong(), any()))
                 .thenThrow(new RuntimeException("boom"));
         assertThat(extractor.extract(1L, "trace", "m", Set.of("resumeId"))).isEmpty();
     }

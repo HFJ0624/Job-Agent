@@ -84,7 +84,7 @@ class AgentChatRagFallbackTest {
                 AgentPlanExecutionResult.builder()
                         .success(true).status("COMPLETED").message("执行完成").steps(List.of())
                         .build());
-        when(aiModelGatewayService.chat(any(), any(), any(), any(), any())).thenReturn("已基于通用求职知识回答");
+        when(aiModelGatewayService.chat(any(), any(), any(), any(), any(), any())).thenReturn("已基于通用求职知识回答");
         // 关键：RAG 检索抛异常，触发降级
         when(ragRetrievalService.search(anyLong(), anyString(), any())).thenThrow(new RuntimeException("pgvector 连接失败"));
         when(agentContextBuilder.build(any(), any(), any()))

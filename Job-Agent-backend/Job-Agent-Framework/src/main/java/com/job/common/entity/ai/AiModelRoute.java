@@ -35,5 +35,11 @@ public class AiModelRoute extends BaseEntity {
 
     private String abGroup;
 
+    /**
+     * 模型档位（AiModelTier）：LIGHT/STANDARD/PRO。
+     * 网关按 sceneCode + tier 解析路由，未配置时按 STANDARD 处理。
+     */
+    private String tier;
+
     private String status;
 }

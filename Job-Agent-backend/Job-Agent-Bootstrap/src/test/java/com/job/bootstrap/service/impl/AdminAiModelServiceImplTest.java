@@ -4,9 +4,14 @@ import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiModelRouteMapper;
 import com.job.common.dto.ai.AiModelCallLogQueryDTO;
+import com.job.common.dto.ai.AiModelRouteSaveDTO;
+import com.job.common.entity.ai.AiModelConfig;
+import com.job.common.entity.ai.AiModelRoute;
 import com.job.common.vo.ai.AiModelCostStatsVO;
+import com.job.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -14,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -90,6 +96,62 @@ class AdminAiModelServiceImplTest {
         assertThat(stats.getSuccessCalls()).isZero();
         assertThat(stats.getFailedCalls()).isEqualTo(5L); // 5 - 0
         assertThat(stats.getTotalCost()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    // ===== 任务 G1：路由 tier 规范化 =====
+
+    @Test
+    void createRouteShouldNormalizeTier() {
+        when(configMapper.selectOne(any())).thenReturn(activeModel());
+        AiModelRouteSaveDTO request = routeRequest();
+        request.setTier("light"); // 小写也应归一为大写
+
+        service.createRoute(request);
+
+        ArgumentCaptor<AiModelRoute> captor = ArgumentCaptor.forClass(AiModelRoute.class);
+        verify(routeMapper).insert(captor.capture());
+        assertThat(captor.getValue().getTier()).isEqualTo("LIGHT");
+    }
+
+    @Test
+    void createRouteShouldDefaultTierToStandard() {
+        when(configMapper.selectOne(any())).thenReturn(activeModel());
+        AiModelRouteSaveDTO request = routeRequest(); // tier 为空
+
+        service.createRoute(request);
+
+        ArgumentCaptor<AiModelRoute> captor = ArgumentCaptor.forClass(AiModelRoute.class);
+        verify(routeMapper).insert(captor.capture());
+        assertThat(captor.getValue().getTier()).isEqualTo("STANDARD");
+    }
+
+    @Test
+    void createRouteShouldRejectInvalidTier() {
+        when(configMapper.selectOne(any())).thenReturn(activeModel());
+        AiModelRouteSaveDTO request = routeRequest();
+        request.setTier("ULTRA");
+
+        assertThatThrownBy(() -> service.createRoute(request))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("档位");
+        verify(routeMapper, never()).insert(any(AiModelRoute.class));
+    }
+
+    private AiModelRouteSaveDTO routeRequest() {
+        AiModelRouteSaveDTO request = new AiModelRouteSaveDTO();
+        request.setSceneCode("AGENT_SUMMARY");
+        request.setRouteName("测试路由");
+        request.setPrimaryModelCode("m1");
+        request.setPromptCode("p");
+        return request;
+    }
+
+    private AiModelConfig activeModel() {
+        AiModelConfig model = new AiModelConfig();
+        model.setModelCode("m1");
+        model.setStatus("ACTIVE");
+        model.setIsDeleted(0);
+        return model;
     }
 
     // 模拟 MySQL 聚合行：COUNT/BIGINT → Long，SUM(total_cost)/AVG → BigDecimal

@@ -29,6 +29,7 @@ import com.job.enums.AgentObservationStatus;
 import com.job.enums.AiCircuitStatus;
 import com.job.enums.AiConfigStatus;
 import com.job.enums.AiModelCallStatus;
+import com.job.enums.AiModelTier;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -133,7 +134,13 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
      */
     @Override
     public String chat(String sceneCode, Map<String, Object> variables, String userMessage, Long userId, String traceId) {
-        AiModelRoute route = resolveRoute(sceneCode, variables, userId, traceId);
+        // 兼容旧调用方：不传档位按 STANDARD 处理（任务 G1 分级路由）
+        return chat(sceneCode, AiModelTier.STANDARD, variables, userMessage, userId, traceId);
+    }
+
+    @Override
+    public String chat(String sceneCode, AiModelTier tier, Map<String, Object> variables, String userMessage, Long userId, String traceId) {
+        AiModelRoute route = resolveRoute(sceneCode, tier, variables, userId, traceId);
         AiRenderedPrompt renderedPrompt = aiPromptRuntimeService.renderPrompt(route, variables);
         List<AiModelConfig> modelCandidates = resolveModelCandidates(route);
 
@@ -244,7 +251,7 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
      * @param traceId 链路 ID
      * @return 命中的模型路由
      */
-    private AiModelRoute resolveRoute(String sceneCode, Map<String, Object> variables, Long userId, String traceId) {
+    private AiModelRoute resolveRoute(String sceneCode, AiModelTier tier, Map<String, Object> variables, Long userId, String traceId) {
         if (!StringUtils.hasText(sceneCode)) {
             throw new BizException("模型场景不能为空");
         }
@@ -268,16 +275,37 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
                 ? null
                 : String.valueOf(variables.get("abGroup"));
         int bucket = stableBucket(userId, traceId, sceneCode);
+        AiModelTier targetTier = tier == null ? AiModelTier.STANDARD : tier;
+
+        /*
+         * 分级路由（任务 G1）：先按 sceneCode + 档位精确匹配；
+         * 场景内没有配置该档位时，降级使用场景默认路由，保证老配置可用。
+         */
         for (AiModelRoute route : routes) {
-            boolean abMatched = !StringUtils.hasText(abGroup)
-                    || !StringUtils.hasText(route.getAbGroup())
-                    || abGroup.equals(route.getAbGroup());
-            boolean grayMatched = bucket < safeInt(route.getGrayPercent(), 100);
-            if (abMatched && grayMatched) {
+            if (routeMatches(route, abGroup, bucket) && tierMatches(route, targetTier)) {
+                return route;
+            }
+        }
+        for (AiModelRoute route : routes) {
+            if (routeMatches(route, abGroup, bucket)) {
                 return route;
             }
         }
         return routes.get(0);
+    }
+
+    // ab 分组 + 灰度比例是否命中该路由
+    private boolean routeMatches(AiModelRoute route, String abGroup, int bucket) {
+        boolean abMatched = !StringUtils.hasText(abGroup)
+                || !StringUtils.hasText(route.getAbGroup())
+                || abGroup.equals(route.getAbGroup());
+        return abMatched && bucket < safeInt(route.getGrayPercent(), 100);
+    }
+
+    // 档位是否匹配：路由未配 tier 按 STANDARD 处理
+    private boolean tierMatches(AiModelRoute route, AiModelTier targetTier) {
+        String routeTier = StringUtils.hasText(route.getTier()) ? route.getTier().trim() : AiModelTier.STANDARD.name();
+        return routeTier.equalsIgnoreCase(targetTier.name());
     }
 
     /**

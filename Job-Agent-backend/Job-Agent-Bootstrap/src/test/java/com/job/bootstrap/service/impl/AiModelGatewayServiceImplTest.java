@@ -19,9 +19,11 @@ import com.job.common.entity.ai.AiModelConfig;
 import com.job.common.entity.ai.AiModelRoute;
 import com.job.common.entity.ai.AiPromptVersion;
 import com.job.enums.AiCircuitStatus;
+import com.job.enums.AiModelTier;
 import com.job.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
@@ -33,6 +35,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -187,5 +190,56 @@ class AiModelGatewayServiceImplTest {
 
         assertThat(answer).isEqualTo("恢复成功");
         verify(aiModelHttpClient, times(1)).chat(any(), any(), any());
+    }
+
+    // ===== 任务 G1：模型分级路由 =====
+
+    @Test
+    void shouldPreferTierRouteWhenConfigured() {
+        when(aiModelRouteMapper.selectList(any())).thenReturn(List.of(route("p-std", null), route("p-light", "LIGHT")));
+        when(aiModelHttpClient.chat(any(), any(), any())).thenReturn(new AiModelCallResponse("ok", 1, 1));
+
+        gateway.chat("AGENT_SUMMARY", AiModelTier.LIGHT, java.util.Map.of(), "hi", 100L, "trace");
+
+        // 命中 LIGHT 档路由（用调用日志的 promptCode 验证选中的路由）
+        ArgumentCaptor<AiModelCallLog> logCaptor = ArgumentCaptor.forClass(AiModelCallLog.class);
+        verify(aiModelCallLogMapper, atLeastOnce()).insert(logCaptor.capture());
+        assertThat(logCaptor.getValue().getPromptCode()).isEqualTo("p-light");
+    }
+
+    @Test
+    void shouldDegradeToSceneDefaultWhenTierNotConfigured() {
+        when(aiModelRouteMapper.selectList(any())).thenReturn(List.of(route("p-std", null))); // 场景内只有 STANDARD
+        when(aiModelHttpClient.chat(any(), any(), any())).thenReturn(new AiModelCallResponse("ok", 1, 1));
+
+        gateway.chat("AGENT_SUMMARY", AiModelTier.LIGHT, java.util.Map.of(), "hi", 100L, "trace");
+
+        ArgumentCaptor<AiModelCallLog> logCaptor = ArgumentCaptor.forClass(AiModelCallLog.class);
+        verify(aiModelCallLogMapper, atLeastOnce()).insert(logCaptor.capture());
+        assertThat(logCaptor.getValue().getPromptCode()).isEqualTo("p-std"); // 降级用场景默认路由
+    }
+
+    @Test
+    void legacyChatWithoutTierShouldUseStandard() {
+        when(aiModelRouteMapper.selectList(any())).thenReturn(List.of(route("p-std", null), route("p-light", "LIGHT")));
+        when(aiModelHttpClient.chat(any(), any(), any())).thenReturn(new AiModelCallResponse("ok", 1, 1));
+
+        gateway.chat("AGENT_SUMMARY", java.util.Map.of(), "hi", 100L, "trace"); // 旧 5 参方法
+
+        ArgumentCaptor<AiModelCallLog> logCaptor = ArgumentCaptor.forClass(AiModelCallLog.class);
+        verify(aiModelCallLogMapper, atLeastOnce()).insert(logCaptor.capture());
+        assertThat(logCaptor.getValue().getPromptCode()).isEqualTo("p-std"); // 等价 STANDARD
+    }
+
+    // 构造测试路由：同场景、灰度 100、ACTIVE，tier 可空（空按 STANDARD）
+    private AiModelRoute route(String promptCode, String tier) {
+        AiModelRoute testRoute = new AiModelRoute();
+        testRoute.setSceneCode("AGENT_SUMMARY");
+        testRoute.setPrimaryModelCode("m1");
+        testRoute.setPromptCode(promptCode);
+        testRoute.setGrayPercent(100);
+        testRoute.setStatus("ACTIVE");
+        testRoute.setTier(tier);
+        return testRoute;
     }
 }

@@ -6,6 +6,7 @@ import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.enums.AiModelTier;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import lombok.RequiredArgsConstructor;
@@ -159,6 +160,7 @@ public class AgentContextBuilder {
         try {
             String output = aiModelGatewayService.chat(
                     AI_SCENE_CONTEXT_SUMMARY,
+                    AiModelTier.LIGHT, // 摘要压缩是轻任务，走轻量档（任务 G1）
                     buildSummaryVariables(conversation.getSummary()),
                     buildSummaryMessage(chronological, conversation.getSummary()),
                     userId,

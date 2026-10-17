@@ -130,6 +130,9 @@
             <template #default="{ row }">{{ row.grayPercent ?? 100 }}%</template>
           </el-table-column>
           <el-table-column prop="abGroup" label="A/B" width="90" />
+          <el-table-column prop="tier" label="档位" width="110">
+            <template #default="{ row }">{{ row.tier ?? "STANDARD" }}</template>
+          </el-table-column>
           <el-table-column prop="status" label="状态" width="110">
             <template #default="{ row }">
               <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'">{{ row.status }}</el-tag>
@@ -356,6 +359,13 @@
             <el-input v-model="routeForm.abGroup" clearable placeholder="A/B 分组，可空" />
           </div>
         </el-form-item>
+        <el-form-item label="模型档位">
+          <el-select v-model="routeForm.tier" placeholder="默认 STANDARD">
+            <el-option label="LIGHT 轻量（分类/抽取/压缩）" value="LIGHT" />
+            <el-option label="STANDARD 标准（默认）" value="STANDARD" />
+            <el-option label="PRO 强模型（总结/生成）" value="PRO" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="routeForm.status">
             <el-radio-button label="ACTIVE">启用</el-radio-button>
@@ -480,6 +490,7 @@ const routeForm = reactive<AiModelRouteInfo>({
   promptVersionId: null,
   grayPercent: 100,
   abGroup: "",
+  tier: "STANDARD",
   status: "ACTIVE"
 });
 
@@ -635,6 +646,7 @@ function openRouteDialog(row?: AiModelRouteInfo) {
     promptVersionId: row?.promptVersionId || null,
     grayPercent: row?.grayPercent ?? 100,
     abGroup: row?.abGroup || "",
+    tier: row?.tier || "STANDARD",
     status: row?.status || "ACTIVE"
   });
   routeDialogVisible.value = true;

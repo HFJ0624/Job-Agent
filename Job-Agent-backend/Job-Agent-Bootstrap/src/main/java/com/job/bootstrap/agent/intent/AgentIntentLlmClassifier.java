@@ -3,6 +3,7 @@ package com.job.bootstrap.agent.intent;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -49,6 +50,7 @@ public class AgentIntentLlmClassifier {
         try {
             String output = aiModelGatewayService.chat(
                     AI_SCENE_INTENT_CLASSIFY,
+                    AiModelTier.LIGHT, // 意图分类是轻任务，走轻量档（任务 G1）
                     buildVariables(),
                     buildUserMessage(message.trim()),
                     userId,

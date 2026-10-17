@@ -32,6 +32,8 @@ public class AiModelRouteVO {
 
     private String abGroup;
 
+    private String tier;
+
     private String status;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -55,6 +57,7 @@ public class AiModelRouteVO {
         vo.setPromptVersionId(entity.getPromptVersionId());
         vo.setGrayPercent(entity.getGrayPercent());
         vo.setAbGroup(entity.getAbGroup());
+        vo.setTier(entity.getTier());
         vo.setStatus(entity.getStatus());
         vo.setCreateTime(entity.getCreateTime());
         vo.setUpdateTime(entity.getUpdateTime());

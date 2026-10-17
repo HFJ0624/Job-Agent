@@ -3,6 +3,7 @@ package com.job.bootstrap.agent.memory;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.enums.AiModelTier;
 import com.job.enums.AgentMemoryType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,6 +60,7 @@ public class AgentMemoryLlmExtractor {
         try {
             String output = aiModelGatewayService.chat(
                     AI_SCENE_MEMORY_EXTRACT,
+                    AiModelTier.LIGHT, // 记忆抽取是轻任务，走轻量档（任务 G1）
                     buildVariables(message),
                     buildUserMessage(message),
                     userId,
