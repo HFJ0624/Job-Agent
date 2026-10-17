@@ -10,6 +10,7 @@ import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.plan.AgentReplanner;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
@@ -37,6 +38,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -51,7 +53,7 @@ import java.util.regex.Pattern;
  * 4. 支持失败恢复：recover=true 时把未完成步骤重置后从断点继续，已失败计划不会永久锁死。
  * 5. 对每一步执行 Guardrails 校验，防止计划外工具被越权调用。
  * 6. 通过 AgentToolInvoker 调用真实工具，并回写步骤状态（RUNNING/COMPLETED/FAILED/SKIPPED）。
- * 7. 任一步骤失败则终止后续步骤，并更新计划状态为 FAILED。
+ * 7. 任一步骤失败则终止后续步骤，并更新计划状态为 FAILED；失败且还有预算时先尝试 Replan 重规划（任务 G2）。
  * 8. 每一步都写入 Executor 观测事件（Observation），便于后台排障。
  * 9. 执行完成后调用 AgentMemoryExtractionService 沉淀长期记忆。</p>
  *
@@ -108,6 +110,12 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     private static final long RUNNING_STALE_MINUTES = 10;
 
     /**
+     * 单个计划最多允许的重规划次数（任务 G2 Replan）。
+     * 步骤失败时会尝试让 Replanner 给出替代步骤；次数用尽后按原行为失败，防止无限 replan。
+     */
+    private static final int MAX_REPLAN_PER_PLAN = 2;
+
+    /**
      * 步骤间数据传递占位符：{{step_N.output.xxx}}。
      * N 为步骤序号，xxx 为该步工具输出里的字段路径（支持点号多级），缺省 output 表示整个输出。
      */
@@ -121,6 +129,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     private final AgentToolSchemaRegistry agentToolSchemaRegistry;
     private final AgentGuardrailService agentGuardrailService;
     private final AgentObservationService agentObservationService;
+    private final AgentReplanner agentReplanner;
     private final ObjectMapper objectMapper;
 
     /**
@@ -152,7 +161,8 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     @Transactional(rollbackFor = Exception.class)
     public AgentPlanExecutionResult executePlan(Long userId, Long planId, boolean recover) {
         AgentPlan plan = loadUserPlan(userId, planId);
-        List<AgentPlanStep> steps = loadPlanSteps(planId);
+        // 可变副本：Replan 会在执行过程中追加步骤（不依赖 Mapper 返回集合的可变性）
+        List<AgentPlanStep> steps = new ArrayList<>(loadPlanSteps(planId));
 
         /*
          * 幂等保护:
@@ -229,7 +239,9 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         boolean failed = false;
         String failReason = null;
 
-        for (AgentPlanStep step : steps) {
+        // 索引遍历（而非 for-each）：重规划会在循环中追加步骤，需要边遍历边执行新步骤
+        for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+            AgentPlanStep step = steps.get(stepIndex);
             if (failed) {
                 stepResults.add(skipStep(plan, step, "前置步骤失败，跳过执行。"));
                 continue;
@@ -255,6 +267,16 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             rememberStepOutput(stepOutputs, result);
 
             if (AgentPlanStepStatus.FAILED.name().equals(result.getStatus())) {
+                /*
+                 * 任务 G2: 失败不直接终止——还有预算时让 Replanner 基于已有上下文给出替代步骤，
+                 * 失败步骤标记 SKIPPED（原路径放弃），替代步骤追加到计划尾部、同一循环继续执行。
+                 * 没有预算或 Replanner 无建议时，才按原行为失败终止。
+                 */
+                List<AgentPlanStep> correctiveSteps = tryReplan(plan, step, result, steps);
+                if (!correctiveSteps.isEmpty()) {
+                    steps.addAll(correctiveSteps);
+                    continue;
+                }
                 failed = true;
                 failReason = result.getErrorMsg();
             }
@@ -278,6 +300,149 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
          */
         recordLongTermMemory(plan, executionResult);
         return executionResult;
+    }
+
+    /**
+     * 尝试重规划（任务 G2）：有预算且 Replanner 给出替代步骤时，放弃失败步骤并追加替代步骤。
+     *
+     * <p>与“失败恢复”的区别：恢复是重跑同一步骤；重规划是换路径——失败步骤标记 SKIPPED，
+     * 由 LLM 基于已完成步骤的上下文给出替代步骤，追加到计划尾部继续执行。</p>
+     *
+     * @param plan         当前计划
+     * @param failedStep   失败的步骤
+     * @param failedResult 失败步骤的执行结果
+     * @param steps        当前步骤列表（会被追加替代步骤）
+     * @return 追加的替代步骤；空表示不重规划，调用方按失败处理
+     */
+    private List<AgentPlanStep> tryReplan(
+            AgentPlan plan,
+            AgentPlanStep failedStep,
+            AgentPlanStepExecutionResult failedResult,
+            List<AgentPlanStep> steps
+    ) {
+        int replanCount = plan.getReplanCount() == null ? 0 : plan.getReplanCount();
+        if (replanCount >= MAX_REPLAN_PER_PLAN) {
+            log.info("Agent 计划重规划次数用尽，按失败处理，planId={}, replanCount={}", plan.getId(), replanCount);
+            return List.of();
+        }
+
+        List<AgentReplanner.ReplanStep> proposals = agentReplanner.replan(
+                plan.getUserId(),
+                plan.getTraceId(),
+                plan.getUserGoal(),
+                buildCompletedStepsSummary(steps),
+                failedStep.getStepName(),
+                failedResult.getErrorMsg()
+        );
+        if (proposals.isEmpty()) {
+            log.info("Agent 重规划无可行替代步骤，按失败处理，planId={}", plan.getId());
+            return List.of();
+        }
+
+        // 1. 失败步骤放弃：标记 SKIPPED，由替代步骤接管目标
+        failedStep.setStatus(AgentPlanStepStatus.SKIPPED.name());
+        failedStep.setResultSummary("执行失败，已由 Replan 替代步骤接管");
+        failedStep.setUpdateTime(new Date());
+        agentPlanStepMapper.updateById(failedStep);
+
+        // 2. 替代步骤追加到计划尾部（stepNo 续增），随即参与本轮执行
+        List<AgentPlanStep> appended = appendReplanSteps(plan, steps, proposals);
+
+        // 3. 计数 +1 落库（条件更新避免覆盖并发修改），供下次触发判定与后台审计
+        plan.setReplanCount(replanCount + 1);
+        agentPlanMapper.update(null, new UpdateWrapper<AgentPlan>()
+                .eq("id", plan.getId())
+                .set("replan_count", replanCount + 1));
+
+        // 4. 观测事件：后台可统计“失败→改道”的发生次数
+        recordReplanEvent(plan, failedStep, proposals.size(), replanCount + 1);
+        return appended;
+    }
+
+    // 把替代步骤插入计划（stepNo 续增），返回插入后的实体列表
+    private List<AgentPlanStep> appendReplanSteps(AgentPlan plan, List<AgentPlanStep> steps, List<AgentReplanner.ReplanStep> proposals) {
+        Date now = new Date();
+        int nextStepNo = steps.stream()
+                .map(AgentPlanStep::getStepNo)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .max()
+                .orElse(0);
+
+        List<AgentPlanStep> appended = new ArrayList<>();
+        for (AgentReplanner.ReplanStep proposal : proposals) {
+            AgentPlanStep step = new AgentPlanStep();
+            step.setPlanId(plan.getId());
+            step.setUserId(plan.getUserId());
+            step.setConversationId(plan.getConversationId());
+            step.setStepNo(++nextStepNo);
+            step.setStepName(proposal.stepName());
+            step.setStepGoal(proposal.stepGoal());
+            step.setToolName(proposal.toolName());
+            step.setToolInputSchema(toJson(buildReplanInputSchema(proposal)));
+            step.setCompletionCriteria(proposal.completionCriteria());
+            step.setStatus(AgentPlanStepStatus.PENDING.name());
+            step.setIsDeleted(NOT_DELETED);
+            step.setCreateTime(now);
+            step.setUpdateTime(now);
+            agentPlanStepMapper.insert(step);
+            appended.add(step);
+        }
+        return appended;
+    }
+
+    // 与 LLM 补步同一格式：extractedParams 供 Executor 读取并解析 {{step_N.output.xxx}} 占位符
+    private Map<String, Object> buildReplanInputSchema(AgentReplanner.ReplanStep proposal) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("extractedParams", proposal.toolInput());
+        schema.put("source", "LLM_REPLAN");
+        schema.put("note", "Replan 替代步骤的可执行参数，Executor 会解析其中的步骤间数据占位符。");
+        return schema;
+    }
+
+    // 已完成步骤摘要（含 stepNo，供 Replanner 用 {{step_N.output.xxx}} 引用前序输出）
+    private String buildCompletedStepsSummary(List<AgentPlanStep> steps) {
+        StringBuilder builder = new StringBuilder();
+        for (AgentPlanStep step : steps) {
+            if (!AgentPlanStepStatus.COMPLETED.name().equals(step.getStatus())) {
+                continue;
+            }
+            builder.append("步骤").append(step.getStepNo())
+                    .append("（").append(StringUtils.hasText(step.getStepName()) ? step.getStepName() : "未命名").append("）: ")
+                    .append(preview(step.getResultSummary()))
+                    .append('\n');
+        }
+        return builder.toString();
+    }
+
+    // 重规划观测事件：记录哪个步骤失败、改道出了几个替代步骤、这是第几次重规划
+    private void recordReplanEvent(AgentPlan plan, AgentPlanStep failedStep, int appendedCount, int replanCount) {
+        Map<String, Object> requestSnapshot = new LinkedHashMap<>();
+        requestSnapshot.put("failedStepNo", failedStep.getStepNo());
+        requestSnapshot.put("failedStepName", failedStep.getStepName());
+        requestSnapshot.put("appendedSteps", appendedCount);
+        requestSnapshot.put("replanCount", replanCount);
+
+        agentObservationService.recordEvent(AgentObservationRecord.builder()
+                .traceId(plan.getTraceId())
+                .userId(plan.getUserId())
+                .conversationId(plan.getConversationId())
+                .planId(plan.getId())
+                .intentCode(plan.getIntentCode())
+                .eventType(AgentObservationEventType.EXECUTOR)
+                .eventName("PlanReplan")
+                .status(AgentObservationStatus.SUCCESS)
+                .requestSnapshot(requestSnapshot)
+                .build());
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            log.debug("序列化 JSON 失败，error={}", exception.getMessage());
+            return "{}";
+        }
     }
 
     private AgentPlan loadUserPlan(Long userId, Long planId) {

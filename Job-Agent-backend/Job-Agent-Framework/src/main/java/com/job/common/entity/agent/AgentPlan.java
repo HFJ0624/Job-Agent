@@ -74,4 +74,10 @@ public class AgentPlan extends BaseEntity {
      * 失败原因。
      */
     private String failReason;
+
+    /**
+     * 失败后重规划次数（任务 G2 Replan）。
+     * 步骤失败且还有预算时，执行器会让 Replanner 给出替代步骤；该字段用于有界控制与审计。
+     */
+    private Integer replanCount;
 }

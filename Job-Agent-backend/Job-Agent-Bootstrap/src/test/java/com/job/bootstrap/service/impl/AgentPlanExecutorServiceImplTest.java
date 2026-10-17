@@ -6,9 +6,11 @@ import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.plan.AgentReplanner;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
+import com.job.bootstrap.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
 import com.job.bootstrap.service.AgentObservationService;
 import com.job.common.agent.tool.AgentToolSchema;
@@ -30,7 +32,9 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -46,6 +50,8 @@ import static org.mockito.Mockito.when;
  * 3. 步骤级幂等：失败恢复时已完成的步骤采用历史结果，副作用工具不会重复调用。
  * 4. 抢占竞争：条件更新影响行数为 0 时不执行任何工具。
  * 5. 失败语义：任一步骤失败则终止后续步骤，计划置为 FAILED。
+ * 6. Replan（任务 G2）：步骤失败且有预算时，Replanner 给出替代步骤、失败步骤放弃、追加步骤继续执行；
+ *    预算用尽或无建议时按原失败语义终止。
  */
 class AgentPlanExecutorServiceImplTest {
 
@@ -59,6 +65,7 @@ class AgentPlanExecutorServiceImplTest {
     private AgentToolSchemaRegistry agentToolSchemaRegistry;
     private AgentGuardrailService agentGuardrailService;
     private AgentObservationService agentObservationService;
+    private AgentReplanner agentReplanner;
 
     private AgentPlanExecutorServiceImpl executor;
 
@@ -71,6 +78,7 @@ class AgentPlanExecutorServiceImplTest {
         agentToolSchemaRegistry = mock(AgentToolSchemaRegistry.class);
         agentGuardrailService = mock(AgentGuardrailService.class);
         agentObservationService = mock(AgentObservationService.class);
+        agentReplanner = mock(AgentReplanner.class);
 
         executor = new AgentPlanExecutorServiceImpl(
                 agentPlanMapper,
@@ -80,6 +88,7 @@ class AgentPlanExecutorServiceImplTest {
                 agentToolSchemaRegistry,
                 agentGuardrailService,
                 agentObservationService,
+                agentReplanner,
                 new ObjectMapper()
         );
 
@@ -327,6 +336,110 @@ class AgentPlanExecutorServiceImplTest {
         // 占位符已被替换为步骤1 输出的 jobId；resumeId 用步骤2 自带值
         assertThat(captor.getValue().get("jobId")).isEqualTo(42);
         assertThat(captor.getValue().get("resumeId")).isEqualTo(7);
+    }
+
+    /**
+     * 用例9（任务 G2）：步骤失败且有预算时触发 Replan——失败步骤放弃（SKIPPED），
+     * 替代步骤追加到计划尾部继续执行，计划最终 COMPLETED。
+     */
+    @Test
+    void failedStepShouldTriggerReplanAndComplete() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "ResumeAnalyzeTool.analyzeResume", AgentPlanStepStatus.PENDING.name())
+        );
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        // 第 1 次调用（原步骤）失败；第 2 次调用（替代步骤）成功
+        when(agentToolInvoker.invoke(any(), any(), any()))
+                .thenReturn(AgentToolExecutionResult.builder()
+                        .success(false)
+                        .toolName("ResumeAnalyzeTool.analyzeResume")
+                        .errorCode("TOOL_EXECUTION_FAILED")
+                        .message("简历解析失败")
+                        .costTime(1L)
+                        .build(),
+                        buildToolSuccess("JobSearchTool.searchJobs"));
+        when(agentReplanner.replan(any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new AgentReplanner.ReplanStep(
+                        "替代搜索", "重新搜索岗位", "JobSearchTool.searchJobs",
+                        Map.of("keyword", "Java"), "返回岗位列表")));
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(AgentPlanStatus.COMPLETED.name());
+        assertThat(result.getSteps()).hasSize(2); // 原步骤 + 替代步骤
+        verify(agentToolInvoker, times(2)).invoke(any(), any(), any());
+        verify(agentPlanStepMapper).insert(any(AgentPlanStep.class)); // 替代步骤落库
+        // 失败步骤最终被标记为 SKIPPED（放弃），替代步骤执行成功
+        ArgumentCaptor<AgentPlanStep> stepCaptor = ArgumentCaptor.forClass(AgentPlanStep.class);
+        verify(agentPlanStepMapper, atLeastOnce()).updateById(stepCaptor.capture());
+        assertThat(stepCaptor.getAllValues()).anySatisfy(step -> {
+            assertThat(step.getStatus()).isEqualTo(AgentPlanStepStatus.SKIPPED.name());
+            assertThat(step.getResultSummary()).contains("Replan");
+        });
+        // 有重规划观测事件，后台可统计“失败→改道”
+        verify(agentObservationService, atLeastOnce()).recordEvent(
+                argThat(event -> "PlanReplan".equals(event.getEventName())));
+    }
+
+    /**
+     * 用例10（任务 G2）：replan_count 已达上限时不再重规划，按原失败语义终止。
+     */
+    @Test
+    void replanBudgetExhaustedShouldFail() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        plan.setReplanCount(2); // 已达 MAX_REPLAN_PER_PLAN
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "ResumeAnalyzeTool.analyzeResume", AgentPlanStepStatus.PENDING.name())
+        );
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(any(), any(), any())).thenReturn(AgentToolExecutionResult.builder()
+                .success(false)
+                .toolName("ResumeAnalyzeTool.analyzeResume")
+                .errorCode("TOOL_EXECUTION_FAILED")
+                .message("简历解析失败")
+                .costTime(1L)
+                .build());
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isFalse();
+        assertThat(result.getStatus()).isEqualTo(AgentPlanStatus.FAILED.name());
+        verify(agentReplanner, never()).replan(any(), any(), any(), any(), any(), any());
+        verify(agentPlanStepMapper, never()).insert(any(AgentPlanStep.class));
+    }
+
+    /**
+     * 用例11（任务 G2）：Replanner 无可行替代建议时，按原失败语义终止。
+     */
+    @Test
+    void noReplanSuggestionShouldFail() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "ResumeAnalyzeTool.analyzeResume", AgentPlanStepStatus.PENDING.name())
+        );
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(any(), any(), any())).thenReturn(AgentToolExecutionResult.builder()
+                .success(false)
+                .toolName("ResumeAnalyzeTool.analyzeResume")
+                .errorCode("TOOL_EXECUTION_FAILED")
+                .message("简历解析失败")
+                .costTime(1L)
+                .build());
+        when(agentReplanner.replan(any(), any(), any(), any(), any(), any())).thenReturn(List.of());
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isFalse();
+        verify(agentReplanner, times(1)).replan(any(), any(), any(), any(), any(), any());
+        verify(agentPlanStepMapper, never()).insert(any(AgentPlanStep.class));
     }
 
     private AgentToolExecutionResult buildToolSuccess(String toolName) {
