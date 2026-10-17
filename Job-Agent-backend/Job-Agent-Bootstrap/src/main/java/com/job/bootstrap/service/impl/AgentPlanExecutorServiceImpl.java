@@ -18,6 +18,7 @@ import com.job.bootstrap.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
 import com.job.bootstrap.service.AgentObservationService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
+import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
 import com.job.enums.AgentObservationEventType;
@@ -25,8 +26,10 @@ import com.job.enums.AgentObservationStatus;
 import com.job.enums.AgentPlanStatus;
 import com.job.enums.AgentPlanStepStatus;
 import com.job.enums.AgentToolErrorCode;
+import com.job.enums.AgentToolSideEffectType;
 import com.job.exception.AgentToolException;
 import com.job.exception.BizException;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,12 +37,24 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -51,6 +66,7 @@ import java.util.regex.Pattern;
  * 2. 执行前通过条件更新抢占计划，防止同一计划被并发重复执行。
  * 3. 支持步骤级幂等：已完成的步骤直接采用历史结果，副作用工具不会重复执行。
  * 4. 支持失败恢复：recover=true 时把未完成步骤重置后从断点继续，已失败计划不会永久锁死。
+ * 5. 支持并行执行（任务 G4）：只读步骤按依赖分层并行（写副作用步骤是串行屏障，绝不并发写业务数据）。
  * 5. 对每一步执行 Guardrails 校验，防止计划外工具被越权调用。
  * 6. 通过 AgentToolInvoker 调用真实工具，并回写步骤状态（RUNNING/COMPLETED/FAILED/SKIPPED）。
  * 7. 任一步骤失败则终止后续步骤，并更新计划状态为 FAILED；失败且还有预算时先尝试 Replan 重规划（任务 G2）。
@@ -235,50 +251,90 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
 
         List<AgentPlanStepExecutionResult> stepResults = new ArrayList<>();
         // 步骤输出快照：stepNo -> 该步工具输出（解析后的 JSON），供后续步骤的 {{step_N.output.xxx}} 占位符引用
-        Map<Integer, Object> stepOutputs = new LinkedHashMap<>();
-        boolean failed = false;
-        String failReason = null;
+        // G4：并行执行下多线程写快照，用 ConcurrentHashMap
+        Map<Integer, Object> stepOutputs = new ConcurrentHashMap<>();
+        // 已解析步骤序号（本轮已执行 + 已完成采用历史结果），用于依赖就绪判断
+        Set<Integer> resolvedStepNos = ConcurrentHashMap.newKeySet();
 
-        // 索引遍历（而非 for-each）：重规划会在循环中追加步骤，需要边遍历边执行新步骤
-        for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
-            AgentPlanStep step = steps.get(stepIndex);
-            if (failed) {
-                stepResults.add(skipStep(plan, step, "前置步骤失败，跳过执行。"));
-                continue;
-            }
-
-            /*
-             * 步骤级幂等: 已完成的步骤直接采用历史结果，不重复调用工具。
-             * 失败恢复后重跑计划时，这一步保证副作用工具不会再次执行业务写入。
-             */
+        // 已 COMPLETED 的步骤直接采用历史结果（步骤级幂等），并把历史摘要尽力播种进输出快照，供占位符引用
+        List<AgentPlanStep> pending = new ArrayList<>();
+        for (AgentPlanStep step : steps) {
             if (AgentPlanStepStatus.COMPLETED.name().equals(step.getStatus())) {
                 stepResults.add(adoptCompletedStep(plan, step));
+                resolvedStepNos.add(step.getStepNo());
+                seedOutputFromSummary(stepOutputs, step);
                 continue;
             }
+            pending.add(step);
+        }
 
-            String toolName = chooseExecutableToolName(plan, step);
-            if (!StringUtils.hasText(toolName)) {
-                stepResults.add(skipStep(plan, step, "非工具步骤，已由 Planner/Executor 前置校验覆盖。"));
-                continue;
-            }
-
-            AgentPlanStepExecutionResult result = executeToolStep(plan, step, toolName, params, stepOutputs);
-            stepResults.add(result);
-            rememberStepOutput(stepOutputs, result);
-
-            if (AgentPlanStepStatus.FAILED.name().equals(result.getStatus())) {
-                /*
-                 * 任务 G2: 失败不直接终止——还有预算时让 Replanner 基于已有上下文给出替代步骤，
-                 * 失败步骤标记 SKIPPED（原路径放弃），替代步骤追加到计划尾部、同一循环继续执行。
-                 * 没有预算或 Replanner 无建议时，才按原行为失败终止。
-                 */
-                List<AgentPlanStep> correctiveSteps = tryReplan(plan, step, result, steps);
-                if (!correctiveSteps.isEmpty()) {
-                    steps.addAll(correctiveSteps);
-                    continue;
+        /*
+         * G4 并行执行主循环（按“波次”执行）:
+         * 1. 依赖只认 {{step_N.output.xxx}} 引用（N < 当前 stepNo），满足才就绪；
+         * 2. 写副作用工具（非 READ_ONLY，Schema 缺失保守视为写）是串行屏障：单独成波、按 stepNo 保序，绝不并发；
+         * 3. 只读步骤在下一个写步骤之前的窗口内并行执行（有界线程池，池满由提交线程兜底）；
+         * 4. 任一波次有步骤失败 → 第一个失败步骤走 G2 重规划；成功则同波其他失败步骤随改道放弃，替代步骤加入 pending 继续。
+         */
+        boolean failed = false;
+        String failReason = null;
+        while (!pending.isEmpty() && !failed) {
+            List<AgentPlanStep> ready = pending.stream()
+                    .filter(step -> depsSatisfied(step, resolvedStepNos))
+                    .toList();
+            if (ready.isEmpty()) {
+                // 防御：依赖无法解析（正常不会发生，依赖只引用更小 stepNo）→ 放弃剩余步骤
+                for (AgentPlanStep step : pending) {
+                    stepResults.add(skipStep(plan, step, "步骤依赖无法解析，跳过执行。"));
                 }
-                failed = true;
-                failReason = result.getErrorMsg();
+                break;
+            }
+
+            List<AgentPlanStep> wave = chooseWave(ready, pending);
+            List<AgentPlanStepExecutionResult> waveResults = executeWave(plan, wave, params, stepOutputs);
+            // 按 stepNo 排序，保证无论并行快慢，结果顺序确定
+            waveResults.sort(Comparator.comparing(AgentPlanStepExecutionResult::getStepNo));
+            pending.removeAll(wave);
+
+            // 输出快照与已解析序号在主线程汇总，避免并发写竞争
+            for (AgentPlanStepExecutionResult result : waveResults) {
+                stepResults.add(result);
+                rememberStepOutput(stepOutputs, result);
+                resolvedStepNos.add(result.getStepNo());
+            }
+
+            List<AgentPlanStepExecutionResult> failedResults = waveResults.stream()
+                    .filter(result -> AgentPlanStepStatus.FAILED.name().equals(result.getStatus()))
+                    .toList();
+            if (!failedResults.isEmpty()) {
+                AgentPlanStepExecutionResult firstFailedResult = failedResults.get(0);
+                AgentPlanStep firstFailedStep = wave.stream()
+                        .filter(step -> Objects.equals(step.getStepNo(), firstFailedResult.getStepNo()))
+                        .findFirst()
+                        .orElseThrow();
+                List<AgentPlanStep> correctiveSteps = tryReplan(plan, firstFailedStep, firstFailedResult, steps);
+                if (correctiveSteps.isEmpty()) {
+                    failed = true;
+                    failReason = firstFailedResult.getErrorMsg();
+                } else {
+                    // 同波次其他失败步骤：随重规划改道放弃（标记 SKIPPED，避免遗留 FAILED 状态）
+                    for (AgentPlanStepExecutionResult other : failedResults.subList(1, failedResults.size())) {
+                        AgentPlanStep otherStep = wave.stream()
+                                .filter(step -> Objects.equals(step.getStepNo(), other.getStepNo()))
+                                .findFirst()
+                                .orElse(null);
+                        if (otherStep != null) {
+                            stepResults.add(skipStep(plan, otherStep, "同波次步骤失败，随 Replan 改道放弃。"));
+                        }
+                    }
+                    pending.addAll(correctiveSteps);
+                }
+            }
+        }
+
+        // 失败终止后，剩余未执行步骤统一标记 SKIPPED，语义与改造前一致
+        if (failed) {
+            for (AgentPlanStep step : pending) {
+                stepResults.add(skipStep(plan, step, "前置步骤失败，跳过执行。"));
             }
         }
 
@@ -442,6 +498,237 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         } catch (Exception exception) {
             log.debug("序列化 JSON 失败，error={}", exception.getMessage());
             return "{}";
+        }
+    }
+
+    /*
+     * 选波规则（任务 G4）:
+     * 1. ready = 依赖已满足的待执行步骤；
+     * 2. 写副作用步骤（非 READ_ONLY，Schema 缺失保守视为写）是串行屏障：永远单独成波、按 stepNo 保序，
+     *    绝不两个写并发，也绝不允许写与任何步骤并发——并行只读不可能写业务数据，从根上避免死锁与业务竞争；
+     * 3. 只读步骤在“下一个写步骤之前”的窗口内并行；没有写步骤时全部 ready 一步并行。
+     */
+    private List<AgentPlanStep> chooseWave(List<AgentPlanStep> ready, List<AgentPlanStep> pending) {
+        Integer nextWriteNo = pending.stream()
+                .filter(step -> !isReadOnlyTool(step))
+                .map(AgentPlanStep::getStepNo)
+                .min(Integer::compareTo)
+                .orElse(null);
+
+        List<AgentPlanStep> window = nextWriteNo == null
+                ? ready
+                : ready.stream().filter(step -> step.getStepNo() < nextWriteNo).toList();
+        if (!window.isEmpty()) {
+            return window;
+        }
+
+        // 写之前没有可并行的只读步骤：ready 里有写就单独执行最小 stepNo 的写（屏障保序），否则全部并行
+        Optional<AgentPlanStep> readyWrite = ready.stream()
+                .filter(step -> !isReadOnlyTool(step))
+                .min(Comparator.comparing(AgentPlanStep::getStepNo));
+        if (readyWrite.isPresent()) {
+            return List.of(readyWrite.get());
+        }
+        return ready;
+    }
+
+    // 执行一个波次：单步直接执行；多步提交有界线程池并行，结果按 stepNo 排序保证确定性
+    private List<AgentPlanStepExecutionResult> executeWave(
+            AgentPlan plan,
+            List<AgentPlanStep> wave,
+            Map<String, Object> params,
+            Map<Integer, Object> stepOutputs
+    ) {
+        if (wave.size() == 1) {
+            return new ArrayList<>(List.of(runStep(plan, wave.get(0), params, stepOutputs)));
+        }
+
+        recordWaveEvent(plan, wave);
+
+        /*
+         * 并行执行的关键细节（G4）：AgentRuntimeContext 是 ThreadLocal，工作线程里没有主线程的上下文，
+         * setCurrentPlanStep 会直接抛“运行时上下文不存在”。这里提交前快照主线程上下文，
+         * 工作线程里重建自己的副本（planId/stepId 每线程独立，避免并行步骤互相覆盖），任务结束清理。
+         */
+        AgentRuntimeContext.Context baseContext = AgentRuntimeContext.get();
+        List<Future<AgentPlanStepExecutionResult>> futures = new ArrayList<>();
+        for (AgentPlanStep step : wave) {
+            futures.add(planStepPool().submit(() -> {
+                if (baseContext != null) {
+                    AgentRuntimeContext.set(
+                            baseContext.getUserId(),
+                            baseContext.getConversationId(),
+                            baseContext.getTraceId(),
+                            baseContext.getIntentCode(),
+                            baseContext.getConfirmedToolNames()
+                    );
+                }
+                try {
+                    return runStep(plan, step, params, stepOutputs);
+                } finally {
+                    AgentRuntimeContext.clear();
+                }
+            }));
+        }
+
+        List<AgentPlanStepExecutionResult> results = new ArrayList<>();
+        for (Future<AgentPlanStepExecutionResult> future : futures) {
+            try {
+                results.add(future.get());
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new BizException("并行执行被中断");
+            } catch (ExecutionException exception) {
+                throw new BizException("并行执行失败：" + exception.getCause().getMessage());
+            }
+        }
+        return results;
+    }
+
+    // 单步执行入口（主线程与工作线程共用）：无工具步骤标记 SKIPPED
+    private AgentPlanStepExecutionResult runStep(
+            AgentPlan plan,
+            AgentPlanStep step,
+            Map<String, Object> params,
+            Map<Integer, Object> stepOutputs
+    ) {
+        String toolName = chooseExecutableToolName(plan, step);
+        if (!StringUtils.hasText(toolName)) {
+            return skipStep(plan, step, "非工具步骤，已由 Planner/Executor 前置校验覆盖。");
+        }
+        return executeToolStep(plan, step, toolName, params, stepOutputs);
+    }
+
+    /*
+     * 提取步骤的输入依赖：toolInputSchema 中 {{step_N.output.xxx}} 且 N < 当前 stepNo 的引用。
+     * 前向引用（N >= 当前）按占位符 fallback 语义忽略，不构成执行依赖——依赖图因此天然无环。
+     */
+    private Set<Integer> extractDependencies(AgentPlanStep step) {
+        if (step == null || step.getStepNo() == null || !StringUtils.hasText(step.getToolInputSchema())) {
+            return Set.of();
+        }
+        Set<Integer> dependencies = new HashSet<>();
+        Matcher matcher = STEP_OUTPUT_PLACEHOLDER.matcher(step.getToolInputSchema());
+        while (matcher.find()) {
+            try {
+                int refStepNo = Integer.parseInt(matcher.group(1));
+                if (refStepNo < step.getStepNo()) {
+                    dependencies.add(refStepNo);
+                }
+            } catch (NumberFormatException ignored) {
+                // 非数字序号忽略
+            }
+        }
+        return dependencies;
+    }
+
+    private boolean depsSatisfied(AgentPlanStep step, Set<Integer> resolvedStepNos) {
+        return resolvedStepNos.containsAll(extractDependencies(step));
+    }
+
+    /*
+     * 是否只读工具：只有 Schema 明确声明 READ_ONLY 才允许并行。
+     * Schema 缺失/未声明/工具名解析不了一律保守按写处理（串行屏障）——安全默认项。
+     */
+    private boolean isReadOnlyTool(AgentPlanStep step) {
+        if (step == null || !StringUtils.hasText(step.getToolName())) {
+            return false;
+        }
+        String toolName = step.getToolName().trim();
+        Optional<AgentToolSchema> schema = agentToolSchemaRegistry.find(toolName);
+        if (schema.isEmpty()) {
+            schema = agentToolSchemaRegistry.find(normalizeToolName(toolName));
+        }
+        return schema.map(s -> AgentToolSideEffectType.READ_ONLY.equals(s.getSideEffectType())).orElse(false);
+    }
+
+    // 尽力把已完成步骤的历史摘要（工具输出预览）播种进输出快照，供恢复/并行场景的占位符引用
+    private void seedOutputFromSummary(Map<Integer, Object> stepOutputs, AgentPlanStep step) {
+        if (step.getStepNo() == null) {
+            return;
+        }
+        Object parsed = readJsonObject(step.getResultSummary());
+        if (parsed != null) {
+            stepOutputs.put(step.getStepNo(), parsed);
+        }
+    }
+
+    // 并行波次观测事件：后台可看到“哪些步骤被并行执行”，波次大小即并行度
+    private void recordWaveEvent(AgentPlan plan, List<AgentPlanStep> wave) {
+        Map<String, Object> requestSnapshot = new LinkedHashMap<>();
+        requestSnapshot.put("waveSize", wave.size());
+        requestSnapshot.put("stepNos", wave.stream().map(AgentPlanStep::getStepNo).toList());
+        requestSnapshot.put("tools", wave.stream().map(AgentPlanStep::getToolName).toList());
+
+        agentObservationService.recordEvent(AgentObservationRecord.builder()
+                .traceId(plan.getTraceId())
+                .userId(plan.getUserId())
+                .conversationId(plan.getConversationId())
+                .planId(plan.getId())
+                .intentCode(plan.getIntentCode())
+                .eventType(AgentObservationEventType.EXECUTOR)
+                .eventName("PlanWaveExecute")
+                .status(AgentObservationStatus.SUCCESS)
+                .requestSnapshot(requestSnapshot)
+                .build());
+    }
+
+    /*
+     * 计划步骤并行线程池（懒加载，守护线程）:
+     * 1. 只跑只读步骤（写步骤按选波规则不会进池），从根上避免并行写业务数据；
+     * 2. 有界队列 + CallerRunsPolicy：池满时由提交线程（执行主线程）兜底执行，绝不死任务、绝不无限排队；
+     * 3. 守护线程不阻止 JVM 退出；@PreDestroy 优雅关闭。
+     */
+    private volatile ExecutorService planStepPool;
+
+    private ExecutorService planStepPool() {
+        ExecutorService pool = planStepPool;
+        if (pool == null) {
+            synchronized (this) {
+                pool = planStepPool;
+                if (pool == null) {
+                    pool = new ThreadPoolExecutor(
+                            4,
+                            8,
+                            60L,
+                            TimeUnit.SECONDS,
+                            new LinkedBlockingQueue<>(64),
+                            new AgentPlanStepThreadFactory(),
+                            new ThreadPoolExecutor.CallerRunsPolicy()
+                    );
+                    planStepPool = pool;
+                }
+            }
+        }
+        return pool;
+    }
+
+    @PreDestroy
+    void shutdownPlanStepPool() {
+        ExecutorService pool = planStepPool;
+        if (pool != null) {
+            pool.shutdown();
+            try {
+                if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
+                    pool.shutdownNow();
+                }
+            } catch (InterruptedException exception) {
+                pool.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    // 计划步骤线程工厂：守护线程 + 可识别名称，便于线程转储排查
+    private static final class AgentPlanStepThreadFactory implements ThreadFactory {
+
+        private final AtomicLong sequence = new AtomicLong(1L);
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "agent-plan-step-" + sequence.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
         }
     }
 

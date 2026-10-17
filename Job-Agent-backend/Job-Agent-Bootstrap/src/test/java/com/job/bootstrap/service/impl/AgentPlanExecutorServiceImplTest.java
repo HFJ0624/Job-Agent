@@ -18,16 +18,20 @@ import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
 import com.job.enums.AgentPlanStatus;
 import com.job.enums.AgentPlanStepStatus;
+import com.job.enums.AgentToolSideEffectType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -440,6 +444,122 @@ class AgentPlanExecutorServiceImplTest {
         assertThat(result.getSuccess()).isFalse();
         verify(agentReplanner, times(1)).replan(any(), any(), any(), any(), any(), any());
         verify(agentPlanStepMapper, never()).insert(any(AgentPlanStep.class));
+    }
+
+    // ===== 任务 G4：并行执行 =====
+
+    /**
+     * 用例12：两个无依赖的只读步骤应并行执行。
+     * 用 CyclicBarrier 证明并发：若被串行化，先到的线程会等待超时并导致步骤失败。
+     */
+    @Test
+    void parallelReadOnlyStepsShouldRunConcurrently() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name()),
+                buildStep(2, "RagSearchTool.searchKnowledge", AgentPlanStepStatus.PENDING.name())
+        );
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        stubReadOnly("JobSearchTool.searchJobs", "RagSearchTool.searchKnowledge");
+
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        when(agentToolInvoker.invoke(any(), any(), any())).thenAnswer(invocation -> {
+            barrier.await(2, TimeUnit.SECONDS); // 两个步骤必须同时在执行
+            return buildToolSuccess(invocation.getArgument(0));
+        });
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isTrue();
+        assertThat(result.getSteps()).hasSize(2);
+        verify(agentToolInvoker, times(2)).invoke(any(), any(), any());
+        // 有并行波次观测事件（waveSize=2）
+        verify(agentObservationService, atLeastOnce()).recordEvent(
+                argThat(event -> "PlanWaveExecute".equals(event.getEventName())));
+    }
+
+    /**
+     * 用例13：写副作用步骤是串行屏障——两个只读步骤先并行，写步骤单独执行且按 stepNo 保序，之后的只读步骤最后执行。
+     */
+    @Test
+    void writeStepShouldSerializeAsBarrier() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name()),
+                buildStep(2, "RagSearchTool.searchKnowledge", AgentPlanStepStatus.PENDING.name()),
+                buildStep(3, "ResumeAnalyzeTool.analyzeResume", AgentPlanStepStatus.PENDING.name()),
+                buildStep(4, "JobRecommendTool.recommendJobs", AgentPlanStepStatus.PENDING.name())
+        );
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        stubReadOnly("JobSearchTool.searchJobs", "RagSearchTool.searchKnowledge", "JobRecommendTool.recommendJobs");
+        // 评分工具未 stub find → 保守按写处理（串行屏障）
+
+        List<String> invokeOrder = Collections.synchronizedList(new ArrayList<>());
+        when(agentToolInvoker.invoke(any(), any(), any())).thenAnswer(invocation -> {
+            invokeOrder.add(invocation.getArgument(0));
+            return buildToolSuccess(invocation.getArgument(0));
+        });
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isTrue();
+        assertThat(invokeOrder).hasSize(4);
+        // 前两个是只读步骤（顺序不定），第 3 个必须是写步骤（屏障保序），第 4 个是写之后的只读步骤
+        assertThat(invokeOrder.subList(0, 2)).containsExactlyInAnyOrder(
+                "JobSearchTool.searchJobs", "RagSearchTool.searchKnowledge");
+        assertThat(invokeOrder.get(2)).isEqualTo("ResumeAnalyzeTool.analyzeResume");
+        assertThat(invokeOrder.get(3)).isEqualTo("JobRecommendTool.recommendJobs");
+    }
+
+    /**
+     * 用例14：有占位符依赖的步骤即使都是只读也不并行——必须等前序步骤输出就绪。
+     */
+    @Test
+    void dependentReadOnlyStepsShouldNotParallelize() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        AgentPlanStep step1 = buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name());
+        AgentPlanStep step2 = buildStep(2, "JobMatchTool.matchJob", AgentPlanStepStatus.PENDING.name());
+        step2.setToolInputSchema("{\"extractedParams\":{\"jobId\":\"{{step_1.output.jobId}}\"}}");
+        List<AgentPlanStep> steps = List.of(step1, step2);
+
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        stubReadOnly("JobSearchTool.searchJobs", "JobMatchTool.matchJob");
+
+        List<String> invokeOrder = Collections.synchronizedList(new ArrayList<>());
+        when(agentToolInvoker.invoke(any(), any(), any())).thenAnswer(invocation -> {
+            invokeOrder.add(invocation.getArgument(0));
+            return invocation.getArgument(0).equals("JobSearchTool.searchJobs")
+                    ? AgentToolExecutionResult.builder().success(true).toolName("JobSearchTool.searchJobs")
+                            .message("ok").dataJson("{\"jobId\":42}").costTime(1L).build()
+                    : buildToolSuccess(invocation.getArgument(0));
+        });
+
+        executor.executePlan(USER_ID, PLAN_ID);
+
+        // 严格按依赖顺序执行，且占位符解析到前序输出
+        assertThat(invokeOrder).containsExactly("JobSearchTool.searchJobs", "JobMatchTool.matchJob");
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(agentToolInvoker).invoke(eq("JobMatchTool.matchJob"), captor.capture(), any());
+        assertThat(captor.getValue().get("jobId")).isEqualTo(42);
+        // 两个单步波次，不应产生并行波次事件
+        verify(agentObservationService, never()).recordEvent(
+                argThat(event -> "PlanWaveExecute".equals(event.getEventName())));
+    }
+
+    // 把指定工具 stub 为 READ_ONLY（可并行）；未 stub 的工具保守按写处理
+    private void stubReadOnly(String... toolNames) {
+        for (String toolName : toolNames) {
+            AgentToolSchema schema = new AgentToolSchema();
+            schema.setToolName(toolName);
+            schema.setSideEffectType(AgentToolSideEffectType.READ_ONLY);
+            when(agentToolSchemaRegistry.find(toolName)).thenReturn(Optional.of(schema));
+        }
     }
 
     private AgentToolExecutionResult buildToolSuccess(String toolName) {
