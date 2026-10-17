@@ -2,6 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
+import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
@@ -10,19 +11,21 @@ import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
-import com.job.bootstrap.rag.service.RagRetrievalService;
-import com.job.bootstrap.service.AgentMemoryCaptureService;
+import com.job.bootstrap.rag.service.RagRetrievalService;import com.job.bootstrap.service.AgentMemoryCaptureService;
 import com.job.bootstrap.service.AgentMemoryContextService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;
 import com.job.common.vo.agent.AgentGuardrailResult;
 import com.job.common.vo.agent.AgentMemoryContextVO;
 import com.job.common.vo.agent.AgentPlanVO;
+import com.job.enums.AiModelTier;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,6 +34,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -100,6 +104,51 @@ class AgentChatRagFallbackTest {
         verify(agentTraceService).saveToolTrace(
                 eq(USER_ID), any(), any(), eq("RagPreRetrieval.searchKnowledge"),
                 any(), any(), eq("FAILED"), any(), any());
+    }
+
+    // ===== 任务 G5：流式总结 =====
+
+    /**
+     * 流式对话：总结 token 实时回调，最终答案与落库行为和阻塞接口一致。
+     */
+    @Test
+    void streamChatShouldForwardTokensAndPersist() {
+        stubHappyPath();
+        when(aiModelGatewayService.chatStream(
+                eq("AGENT_SUMMARY"), eq(AiModelTier.PRO), any(), anyString(), anyLong(), any(), any()))
+                .thenAnswer(invocation -> {
+                    TokenConsumer consumer = invocation.getArgument(6);
+                    consumer.onToken("建议");
+                    consumer.onToken("先投递");
+                    return "建议先投递";
+                });
+
+        List<String> tokens = new ArrayList<>();
+        AgentChatVO vo = service.streamChat(USER_ID, null, null, "帮我分析简历", null, false, tokens::add);
+
+        assertThat(vo.getAnswer()).isEqualTo("建议先投递");
+        assertThat(tokens).containsExactly("建议", "先投递");
+        // 与非流式一致：助手消息照常落库
+        verify(aiMessageMapper, atLeastOnce()).insert(any(AiMessage.class));
+    }
+
+    private void stubHappyPath() {
+        when(agentGuardrailService.checkUserInput(anyLong(), anyString())).thenReturn(AgentGuardrailResult.allow());
+        when(agentGuardrailService.maskSensitiveData(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(agentGuardrailService.sanitizeFinalAnswer(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(agentIntentRouter.routeDetailed(anyString()))
+                .thenReturn(new AgentIntentRouter.IntentResolution(AgentIntentCode.GENERAL_CHAT, true));
+        when(agentPlanningService.createPlan(any(), any(), any(), any(), any(), any())).thenReturn(buildPlan());
+        when(agentMemoryContextService.buildContext(any(), any())).thenReturn(new AgentMemoryContextVO());
+        when(agentMemoryCaptureService.captureFromUserMessage(any(), any(), any(), any())).thenReturn(List.of());
+        when(agentPlanExecutorService.executePlan(anyLong(), anyLong(), anyBoolean())).thenReturn(
+                AgentPlanExecutionResult.builder()
+                        .success(true).status("COMPLETED").message("执行完成").steps(List.of())
+                        .build());
+        when(ragRetrievalService.search(anyLong(), anyString(), any())).thenReturn(List.of());
+        when(agentContextBuilder.build(any(), any(), any()))
+                .thenReturn(new AgentContextBuilder.BuiltContext("1. 用户: 之前的问题", "", false, 5));
+        when(agentContextBuilder.previewExecution(any())).thenReturn("执行结果预览");
     }
 
     private AgentPlanVO buildPlan() {

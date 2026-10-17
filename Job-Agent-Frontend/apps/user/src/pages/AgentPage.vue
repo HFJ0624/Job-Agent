@@ -116,10 +116,12 @@ import { nextTick, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   chatWithAgent,
+  streamChatWithAgent,
   deleteAgentConversation,
   listAgentConversations,
   listAgentMessages
 } from "../api/agent";
+import type { AgentChatPayload } from "../api/agent";
 import type {
   AgentChatMessage,
   AgentConversationInfo,
@@ -307,20 +309,7 @@ async function sendMessage() {
   errorMessage.value = "";
 
   await scrollToBottom();
-
-  try {
-    const result = await chatWithAgent({
-      conversationId: conversationId.value,
-      message
-    });
-
-    await handleAgentResult(result);
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
-    ElMessage.error(errorMessage.value);
-  } finally {
-    loading.value = false;
-  }
+  await runAgentTurn({ conversationId: conversationId.value, message });
 }
 
 /**
@@ -350,18 +339,48 @@ async function confirmToolExecution() {
   errorMessage.value = "";
   await scrollToBottom();
 
-  try {
-    const result = await chatWithAgent({
-      conversationId: conversationId.value,
-      planId: confirmedPlanId,
-      message: "确认执行",
-      confirmedToolNames
-    });
+  await runAgentTurn({
+    conversationId: conversationId.value,
+    planId: confirmedPlanId,
+    message: "确认执行",
+    confirmedToolNames
+  });
+}
 
-    await handleAgentResult(result);
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
-    ElMessage.error(errorMessage.value);
+/**
+ * 执行一轮对话（任务 G5：流式优先，失败回退阻塞）。
+ *
+ * 方法步骤:
+ * 1. 先插入一个空的助手气泡，流式 token 逐字追加，用户立刻看到“正在输出”；
+ * 2. 流式结束（done）后，用服务端最终答案校正气泡内容——输出护栏可能在流式后改写文本；
+ * 3. 流式不可用（旧浏览器/网络/服务端降级失败）时移除空气泡，回退阻塞接口，功能不降级。
+ *
+ * @param payload 对话请求参数
+ */
+async function runAgentTurn(payload: AgentChatPayload) {
+  const bubble = { role: "ASSISTANT", content: "" };
+  messages.value.push(bubble);
+
+  try {
+    const result = await streamChatWithAgent(payload, (token) => {
+      bubble.content += token;
+      scrollToBottom();
+    });
+    // 流式结束：以服务端最终答案为准
+    bubble.content = result.answer;
+    await applyAgentResultState(result);
+  } catch (streamError) {
+    // 流式失败：回退阻塞接口（先移除空气泡，避免残留半截内容）
+    console.warn("[Job-Agent] 流式对话失败，回退阻塞接口", streamError);
+    messages.value.splice(messages.value.indexOf(bubble), 1);
+    try {
+      const result = await chatWithAgent(payload);
+      messages.value.push({ role: "ASSISTANT", content: result.answer });
+      await applyAgentResultState(result);
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
+      ElMessage.error(errorMessage.value);
+    }
   } finally {
     loading.value = false;
   }
@@ -380,20 +399,15 @@ function cancelConfirmation() {
 }
 
 /**
- * 统一处理后端 AI 助手返回结果。
+ * 统一应用后端 AI 助手返回结果到页面状态（消息内容由调用方写入）。
  *
  * @param result 后端返回结果
  */
-async function handleAgentResult(result: Awaited<ReturnType<typeof chatWithAgent>>) {
+async function applyAgentResultState(result: Awaited<ReturnType<typeof chatWithAgent>>) {
   /*
    * 后端第一次对话会自动创建 conversationId。
    */
   conversationId.value = result.conversationId;
-
-  messages.value.push({
-    role: "ASSISTANT",
-    content: result.answer
-  });
 
   if (result.requiresUserConfirmation && result.planId && result.requiredConfirmationToolNames?.length) {
     pendingConfirmation.value = {

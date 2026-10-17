@@ -1,5 +1,6 @@
 package com.job.bootstrap.service;
 
+import com.job.bootstrap.ai.TokenConsumer;
 import com.job.enums.AiModelTier;
 
 import java.util.Map;
@@ -45,5 +46,29 @@ public interface AiModelGatewayService {
      */
     default String chat(String sceneCode, AiModelTier tier, Map<String, Object> variables, String userMessage, Long userId, String traceId) {
         return chat(sceneCode, variables, userMessage, userId, traceId);
+    }
+
+    /**
+     * 按业务场景 + 档位流式调用模型（任务 G5）。
+     * 复用路由/限流/熔断/调用日志；流式失败时网关内部降级为阻塞调用（整段一个 token）。
+     *
+     * <p>默认实现：阻塞调用后把整段文本作为一个 token 回调——保证既有实现（含测试中的 lambda）
+     * 无需改动即可编译，也定义了“最保守的流式语义”。</p>
+     *
+     * @param consumer token 消费者（降级时只会收到一个 token）
+     * @return 完整模型输出文本
+     */
+    default String chatStream(
+            String sceneCode,
+            AiModelTier tier,
+            Map<String, Object> variables,
+            String userMessage,
+            Long userId,
+            String traceId,
+            TokenConsumer consumer
+    ) {
+        String answer = chat(sceneCode, tier, variables, userMessage, userId, traceId);
+        consumer.onToken(answer);
+        return answer;
     }
 }

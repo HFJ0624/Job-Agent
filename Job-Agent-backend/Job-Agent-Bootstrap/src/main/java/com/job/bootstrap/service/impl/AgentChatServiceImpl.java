@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
+import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
@@ -226,6 +227,47 @@ public class AgentChatServiceImpl implements AgentChatService {
             String message,
             List<String> confirmedToolNames,
             Boolean retry
+    ) {
+        return chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, null);
+    }
+
+    /**
+     * 流式对话（任务 G5）：主链路与 chat 完全一致，仅“总结生成”走流式逐 token 回调。
+     *
+     * <p>说明:
+     * 1. streamSink 为 null 时行为与 chat 完全一致（阻塞总结）；
+     * 2. 非空时总结 token 实时回调给调用方（SSE 控制器推给前端）；
+     * 3. 落库/记忆/Trace/护栏行为不变——流式只改“token 怎么到前端”，不改“数据怎么落库”；
+     * 4. 澄清/待确认等非总结分支，会把既有文本作为一个 token 回调，前端渲染一致。</p>
+     *
+     * @param streamSink token 消费者，可为 null
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
+    ) {
+        return chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
+    }
+
+    /**
+     * Agent 主链路统一编排（chat/streamChat 共用）。
+     * streamSink 为空 = 阻塞总结；非空 = 总结走流式回调（任务 G5）。
+     */
+    private AgentChatVO chatInternal(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
     ) {
         long start = System.currentTimeMillis();
 
@@ -468,7 +510,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     executionMemoryContext.getPromptContext(),
                     // 传入 RAG 增强消息（含召回知识、引用与防注入声明），让总结基于真实知识回答
                     ragContext.enhancedMessage(),
-                    contextBundle
+                    contextBundle,
+                    streamSink
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
 
@@ -916,6 +959,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param executionResult Executor 执行结果
      * @param retrievedMemories 已召回长期记忆
      * @param ragEnhancedMessage RAG 预检索增强消息（含召回知识与引用；未启用时为空）
+     * @param streamSink 流式 token 消费者（任务 G5）；为空时阻塞调用，非空时逐 token 回调
      * @return 模型总结文本
      */
     private String summarizeExecutorResult(
@@ -927,7 +971,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<AgentMemoryVO> retrievedMemories,
             String memoryPromptContext,
             String ragEnhancedMessage,
-            AgentContextBuilder.BuiltContext contextBundle
+            AgentContextBuilder.BuiltContext contextBundle,
+            TokenConsumer streamSink
     ) {
         String executorSummaryMessage = buildExecutorSummaryMessage(
                 safeMessage,
@@ -940,13 +985,30 @@ public class AgentChatServiceImpl implements AgentChatService {
         );
 
         try {
-            return aiModelGatewayService.chat(
-                AI_SCENE_AGENT_SUMMARY,
-                AiModelTier.PRO, // 对话总结用户直接可见，质量优先走强模型档（任务 G1）
-                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
-                executorSummaryMessage,
-                userId,
-                traceId
+            if (streamSink == null) {
+                return aiModelGatewayService.chat(
+                    AI_SCENE_AGENT_SUMMARY,
+                    AiModelTier.PRO, // 对话总结用户直接可见，质量优先走强模型档（任务 G1）
+                    buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
+                    executorSummaryMessage,
+                    userId,
+                    traceId
+                );
+            }
+
+            /*
+             * 流式总结（任务 G5）：token 实时回调给调用方推送给前端。
+             * 网关内部已处理“流式失败降级阻塞”（整段一个 token），这里再兜底一层：
+             * 网关整体不可用时用确定性兜底摘要，并作为一个 token 回调，保证前端有输出。
+             */
+            return aiModelGatewayService.chatStream(
+                    AI_SCENE_AGENT_SUMMARY,
+                    AiModelTier.PRO,
+                    buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
+                    executorSummaryMessage,
+                    userId,
+                    traceId,
+                    streamSink
             );
         } catch (Exception exception) {
             log.warn(
@@ -956,7 +1018,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                     exception.getMessage(),
                     exception
             );
-            return buildDeterministicExecutorAnswer(plan, executionResult);
+            String fallbackAnswer = buildDeterministicExecutorAnswer(plan, executionResult);
+            if (streamSink != null) {
+                // 兜底摘要也走流式通道输出，前端渲染逻辑不变
+                streamSink.onToken(fallbackAnswer);
+            }
+            return fallbackAnswer;
         }
     }
 

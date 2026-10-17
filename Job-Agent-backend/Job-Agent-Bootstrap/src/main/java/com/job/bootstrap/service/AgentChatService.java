@@ -1,5 +1,6 @@
 package com.job.bootstrap.service;
 
+import com.job.bootstrap.ai.TokenConsumer;
 import com.job.common.vo.agent.AgentChatVO;
 
 import java.util.List;
@@ -58,5 +59,22 @@ public interface AgentChatService {
             String message,
             List<String> confirmedToolNames,
             Boolean retry
+    );
+
+    /**
+     * 流式对话（任务 G5）：主链路与 chat 一致，总结 token 实时回调给 streamSink。
+     * 落库/记忆/Trace/护栏行为与 chat 完全一致；streamSink 为空时等价于 chat。
+     *
+     * @param streamSink token 消费者（可为 null）
+     * @return Agent 回复（流式结束后返回完整结果，供 SSE done 事件使用）
+     */
+    AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
     );
 }

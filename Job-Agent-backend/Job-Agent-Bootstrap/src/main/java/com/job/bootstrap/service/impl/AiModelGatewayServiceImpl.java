@@ -9,6 +9,7 @@ import com.job.bootstrap.ai.AiModelCallResponse;
 import com.job.bootstrap.ai.AiModelHttpClient;
 import com.job.bootstrap.ai.AiModelRateLimiter;
 import com.job.bootstrap.ai.AiRetryPolicy;
+import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.ai.AiRenderedPrompt;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelCircuitStateMapper;
@@ -224,6 +225,93 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
                         break;
                     }
                 }
+            }
+        }
+
+        throw new BizException("AI 模型调用失败：" + (lastException == null ? "没有可用模型" : lastException.getMessage()));
+    }
+
+    /**
+     * 流式调用（任务 G5）：与 chat 共用路由/限流/熔断/日志，差异只有两点:
+     * 1. 模型调用走 chatStream，token 实时回调给调用方（如 SSE 控制器）；
+     * 2. 流式失败时降级为阻塞调用，整段作为一个 token 回调——流式是增强，不是新故障点。
+     *
+     * 降级成功不计熔断失败：否则“不支持 stream”的供应商会把熔断器打开，反而拖垮阻塞主链路。
+     * 流式中途不做重试：重试会向调用方重复推送 token，重试决策留给降级后的阻塞调用（其内部有退避重试）。
+     */
+    @Override
+    public String chatStream(
+            String sceneCode,
+            AiModelTier tier,
+            Map<String, Object> variables,
+            String userMessage,
+            Long userId,
+            String traceId,
+            TokenConsumer consumer
+    ) {
+        AiModelRoute route = resolveRoute(sceneCode, tier, variables, userId, traceId);
+        AiRenderedPrompt renderedPrompt = aiPromptRuntimeService.renderPrompt(route, variables);
+        List<AiModelConfig> modelCandidates = resolveModelCandidates(route);
+
+        if (!aiModelRateLimiter.tryAcquireScene(sceneCode) || !aiModelRateLimiter.tryAcquireUser(userId)) {
+            throw new BizException("触发模型网关限流，请稍后重试");
+        }
+
+        Exception lastException = null;
+        for (int modelIndex = 0; modelIndex < modelCandidates.size(); modelIndex++) {
+            AiModelConfig model = modelCandidates.get(modelIndex);
+            boolean fallbackUsed = modelIndex > 0;
+
+            if (isCircuitOpen(model)) {
+                lastException = new BizException("模型熔断中：" + model.getModelCode());
+                recordCircuitOpenObservation(
+                        traceId, userId, sceneCode, route.getPromptCode(),
+                        renderedPrompt.promptVersion().getId(), model, fallbackUsed);
+                continue;
+            }
+
+            long start = System.currentTimeMillis();
+            StringBuilder fullAnswer = new StringBuilder();
+            try {
+                try {
+                    aiModelHttpClient.chatStream(
+                            model,
+                            renderedPrompt.systemPrompt(),
+                            userMessage,
+                            token -> {
+                                fullAnswer.append(token);
+                                consumer.onToken(token);
+                            }
+                    );
+                } catch (Exception streamException) {
+                    // 流式失败降级：阻塞调用 + 整段一次性回调；成功则不计熔断失败
+                    log.warn("模型流式调用失败，降级阻塞调用，sceneCode={}, modelCode={}, error={}",
+                            sceneCode, model.getModelCode(), streamException.getMessage());
+                    String answer = aiModelHttpClient.chat(model, renderedPrompt.systemPrompt(), userMessage).content();
+                    fullAnswer.append(answer);
+                    consumer.onToken(answer);
+                }
+
+                int estimatedTokens = estimateTokens(fullAnswer.toString());
+                recordCallLog(
+                        traceId, userId, sceneCode, route.getPromptCode(),
+                        renderedPrompt.promptVersion().getId(), model, fallbackUsed,
+                        estimatedTokens, estimatedTokens,
+                        System.currentTimeMillis() - start,
+                        AiModelCallStatus.SUCCESS.name(), null
+                );
+                closeCircuit(model);
+                return fullAnswer.toString();
+            } catch (Exception exception) {
+                lastException = exception;
+                recordCallLog(
+                        traceId, userId, sceneCode, route.getPromptCode(),
+                        renderedPrompt.promptVersion().getId(), model, fallbackUsed,
+                        estimateTokens(renderedPrompt.systemPrompt() + "\n" + userMessage), 0,
+                        System.currentTimeMillis() - start,
+                        AiModelCallStatus.FAILED.name(), exception.getMessage()
+                );
+                openCircuitIfNeeded(model, exception);
             }
         }
 

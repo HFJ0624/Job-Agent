@@ -7,6 +7,7 @@ import com.job.bootstrap.ai.AiModelHttpClient;
 import com.job.bootstrap.ai.AiModelRateLimiter;
 import com.job.bootstrap.ai.AiRenderedPrompt;
 import com.job.bootstrap.ai.AiRetryPolicy;
+import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelCircuitStateMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;
@@ -29,6 +30,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -36,6 +38,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -229,6 +233,42 @@ class AiModelGatewayServiceImplTest {
         ArgumentCaptor<AiModelCallLog> logCaptor = ArgumentCaptor.forClass(AiModelCallLog.class);
         verify(aiModelCallLogMapper, atLeastOnce()).insert(logCaptor.capture());
         assertThat(logCaptor.getValue().getPromptCode()).isEqualTo("p-std"); // 等价 STANDARD
+    }
+
+    // ===== 任务 G5：流式调用 =====
+
+    @Test
+    void streamShouldForwardTokensAndRecordLog() {
+        doAnswer(invocation -> {
+            TokenConsumer consumer = invocation.getArgument(3);
+            consumer.onToken("你");
+            consumer.onToken("好");
+            return null;
+        }).when(aiModelHttpClient).chatStream(any(), any(), any(), any());
+
+        List<String> tokens = new ArrayList<>();
+        String answer = gateway.chatStream(
+                "AGENT_SUMMARY", AiModelTier.STANDARD, java.util.Map.of(), "hi", 100L, "trace", tokens::add);
+
+        assertThat(answer).isEqualTo("你好");
+        assertThat(tokens).containsExactly("你", "好");
+        verify(aiModelCallLogMapper, atLeastOnce()).insert(any(AiModelCallLog.class));
+    }
+
+    @Test
+    void streamFailureShouldFallbackToBlocking() {
+        doThrow(new RuntimeException("provider does not support stream"))
+                .when(aiModelHttpClient).chatStream(any(), any(), any(), any());
+        when(aiModelHttpClient.chat(any(), any(), any())).thenReturn(new AiModelCallResponse("完整答案", 3, 3));
+
+        List<String> tokens = new ArrayList<>();
+        String answer = gateway.chatStream(
+                "AGENT_SUMMARY", AiModelTier.STANDARD, java.util.Map.of(), "hi", 100L, "trace", tokens::add);
+
+        // 流式失败降级阻塞：整段作为一个 token，调用方无感知
+        assertThat(answer).isEqualTo("完整答案");
+        assertThat(tokens).containsExactly("完整答案");
+        verify(aiModelHttpClient).chat(any(), any(), any());
     }
 
     // 构造测试路由：同场景、灰度 100、ACTIVE，tier 可空（空按 STANDARD）
