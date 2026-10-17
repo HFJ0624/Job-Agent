@@ -25,6 +25,8 @@
 - **简历故事**："从一次性规划到带反思的规划：完成条件校验 + 有界 replan，Agent 能处理'第一步发现假设不成立'的场景"。
 
 ### G3. Eval 增强：LLM-as-judge + 自动化门禁
+
+> 状态：✅ 已完成（2026-10-17，全量 188 单测全绿）。① LLM judge 四维评分（accuracy/completeness/groundedness/format）+ JSON 约束 + 失败降级规则分，3 个单测覆盖；② `scripts/eval-quality-gate.sh` 质量门禁（自动登录→触发回归→轮询→双闸门判定），文档见 `docs/eval-quality-gate.md`。
 - **企业级对照**：评估不能只有规则匹配——语义类输出（回答质量）要 LLM 评判；CI 每日跑防退化。
 - **现状**：严格匹配 + 手动异步回归 + 基线字段已具备。
 - **方案**：① 新增 `EVAL_JUDGE` 网关场景，对回答质量类用例做 1-5 分评判（prompt 带评分标准 + 输出 JSON 约束 + 失败降级到规则分）；② 质量门禁脚本：VM/自建 runner 每日跑核心数据集，passRate 相对基线下降超阈值即非零退出（GitHub Actions 连不上开发库，用自建 runner 或本地脚本，见"环境受限项"）。

@@ -13,11 +13,14 @@ import com.job.bootstrap.service.WorkflowTaskService;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentEvalCase;
 import com.job.common.entity.agent.AgentEvalDataset;
+import com.job.common.entity.agent.AgentEvalResult;
 import com.job.common.entity.agent.AgentEvalRun;
+import com.job.common.vo.agent.AgentChatVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +36,7 @@ import static org.mockito.Mockito.when;
  * 覆盖重点:
  * 1. runDataset 只创建 RUNNING 批次并投递 AGENT_EVAL_RUN 任务，不同步执行（agentChatService 不被调用）。
  * 2. executeRun 幂等：批次已结束（SUCCESS/FAILED）则直接返回，不重复执行。
+ * 3. LLM-as-Judge（任务 G3）：judge 分数/结论落库；低于阈值判失败；网关不可用时降级不阻断回归。
  */
 class AgentEvalServiceImplTest {
 
@@ -97,5 +101,97 @@ class AgentEvalServiceImplTest {
         // 幂等：不重复加载用例、不重复执行
         verify(caseMapper, never()).selectList(any());
         verify(agentChatService, never()).chat(any(), any(), any(), any(), any());
+    }
+
+    // ===== 任务 G3：LLM-as-Judge =====
+
+    @Test
+    void executeRunShouldRecordJudgeResult() {
+        stubCaseRun();
+        when(agentChatService.chat(any(), any(), any(), any(), any()))
+                .thenReturn(chatVO("推荐Java后端岗位，Spring框架经验加分"));
+        when(traceLogMapper.selectList(any())).thenReturn(List.of());
+        when(aiModelGatewayService.chat(any(), any(), any(), any(), any())).thenReturn(
+                "{\"score\":85,\"pass\":true,\"reason\":\"准确且完整\",\"hallucinationRisk\":\"LOW\",\"suggestions\":[\"可补充城市\"]}");
+        when(resultMapper.insert(any(AgentEvalResult.class))).thenReturn(1);
+
+        service.executeRun(9L, 5L);
+
+        ArgumentCaptor<AgentEvalResult> captor = ArgumentCaptor.forClass(AgentEvalResult.class);
+        verify(resultMapper).insert(captor.capture());
+        AgentEvalResult saved = captor.getValue();
+        assertThat(saved.getJudgeScore()).isEqualByComparingTo(BigDecimal.valueOf(85));
+        assertThat(saved.getJudgePass()).isEqualTo(1);
+        assertThat(saved.getJudgeDetailJson()).contains("hallucinationRisk");
+        assertThat(saved.getPassStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void executeRunShouldMarkJudgeFailedBelowThreshold() {
+        stubCaseRun();
+        when(agentChatService.chat(any(), any(), any(), any(), any()))
+                .thenReturn(chatVO("推荐Java后端岗位"));
+        when(traceLogMapper.selectList(any())).thenReturn(List.of());
+        when(aiModelGatewayService.chat(any(), any(), any(), any(), any())).thenReturn(
+                "{\"score\":50,\"pass\":false,\"reason\":\"覆盖不足\",\"hallucinationRisk\":\"MEDIUM\"}");
+        when(resultMapper.insert(any(AgentEvalResult.class))).thenReturn(1);
+
+        service.executeRun(9L, 5L);
+
+        ArgumentCaptor<AgentEvalResult> captor = ArgumentCaptor.forClass(AgentEvalResult.class);
+        verify(resultMapper).insert(captor.capture());
+        AgentEvalResult saved = captor.getValue();
+        assertThat(saved.getJudgeScore()).isEqualByComparingTo(BigDecimal.valueOf(50));
+        assertThat(saved.getJudgePass()).isEqualTo(0);
+        assertThat(saved.getPassStatus()).isEqualTo(0);
+        assertThat(saved.getFailReason()).contains("Judge");
+    }
+
+    @Test
+    void executeRunShouldDegradeWhenJudgeUnavailable() {
+        stubCaseRun();
+        when(agentChatService.chat(any(), any(), any(), any(), any()))
+                .thenReturn(chatVO("推荐Java后端岗位，Spring框架经验加分"));
+        when(traceLogMapper.selectList(any())).thenReturn(List.of());
+        // EVAL_JUDGE 场景未配置/模型不可用：Judge 降级，不影响评测主流程
+        when(aiModelGatewayService.chat(any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("场景未配置"));
+        when(resultMapper.insert(any(AgentEvalResult.class))).thenReturn(1);
+
+        service.executeRun(9L, 5L);
+
+        ArgumentCaptor<AgentEvalResult> captor = ArgumentCaptor.forClass(AgentEvalResult.class);
+        verify(resultMapper).insert(captor.capture());
+        AgentEvalResult saved = captor.getValue();
+        assertThat(saved.getJudgePass()).isNull();
+        assertThat(saved.getJudgeReason()).contains("Judge 调用失败");
+        // 规则分通过：judge 降级不阻断回归
+        assertThat(saved.getPassStatus()).isEqualTo(1);
+    }
+
+    // 构造一条 CASE 批次 + 带关键词/阈值 configured 的用例（不配置工具/RAG 断言，聚焦 judge）
+    private void stubCaseRun() {
+        AgentEvalRun run = new AgentEvalRun();
+        run.setId(9L);
+        run.setRunType("CASE");
+        run.setStatus("RUNNING");
+        when(runMapper.selectOne(any())).thenReturn(run);
+
+        AgentEvalCase evalCase = new AgentEvalCase();
+        evalCase.setId(5L);
+        evalCase.setDatasetId(1L);
+        evalCase.setUserId(1L);
+        evalCase.setCaseName("Java岗位推荐");
+        evalCase.setInputMessage("推荐几个Java岗位");
+        evalCase.setExpectedAnswerKeywords("Java,Spring");
+        evalCase.setMinAnswerScore(BigDecimal.valueOf(60));
+        when(caseMapper.selectOne(any())).thenReturn(evalCase);
+    }
+
+    private AgentChatVO chatVO(String answer) {
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(99L);
+        vo.setAnswer(answer);
+        return vo;
     }
 }
