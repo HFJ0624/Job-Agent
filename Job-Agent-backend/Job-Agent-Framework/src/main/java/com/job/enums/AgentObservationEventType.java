@@ -45,5 +45,10 @@ public enum AgentObservationEventType {
     /**
      * 查询改写事件（多轮指代消解，任务 G8）。
      */
-    REWRITE
+    REWRITE,
+
+    /**
+     * 计划补偿事件（Saga 反向操作，任务 G9）。
+     */
+    COMPENSATION
 }

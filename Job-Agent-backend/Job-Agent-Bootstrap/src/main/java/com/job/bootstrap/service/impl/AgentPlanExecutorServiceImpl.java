@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.bootstrap.agent.compensation.AgentPlanCompensator;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
@@ -67,6 +68,8 @@ import java.util.regex.Pattern;
  * 3. 支持步骤级幂等：已完成的步骤直接采用历史结果，副作用工具不会重复执行。
  * 4. 支持失败恢复：recover=true 时把未完成步骤重置后从断点继续，已失败计划不会永久锁死。
  * 5. 支持并行执行（任务 G4）：只读步骤按依赖分层并行（写副作用步骤是串行屏障，绝不并发写业务数据）。
+ * 6. 支持补偿事务（任务 G9）：计划终失败时，对本轮已完成的副作用步骤按 stepNo 逆序补偿
+ *    （可补偿动作幂等执行；不可逆动作记录并如实告知；档案类副作用明确保留）。
  * 5. 对每一步执行 Guardrails 校验，防止计划外工具被越权调用。
  * 6. 通过 AgentToolInvoker 调用真实工具，并回写步骤状态（RUNNING/COMPLETED/FAILED/SKIPPED）。
  * 7. 任一步骤失败则终止后续步骤，并更新计划状态为 FAILED；失败且还有预算时先尝试 Replan 重规划（任务 G2）。
@@ -146,6 +149,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
     private final AgentGuardrailService agentGuardrailService;
     private final AgentObservationService agentObservationService;
     private final AgentReplanner agentReplanner;
+    private final AgentPlanCompensator agentPlanCompensator;
     private final ObjectMapper objectMapper;
 
     /**
@@ -277,6 +281,8 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
          */
         boolean failed = false;
         String failReason = null;
+        // 补偿汇总后缀（任务 G9）：终失败时补偿完成才拼接，成功路径为空
+        String compensationSuffix = "";
         while (!pending.isEmpty() && !failed) {
             List<AgentPlanStep> ready = pending.stream()
                     .filter(step -> depsSatisfied(step, resolvedStepNos))
@@ -336,6 +342,17 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             for (AgentPlanStep step : pending) {
                 stepResults.add(skipStep(plan, step, "前置步骤失败，跳过执行。"));
             }
+
+            /*
+             * 任务 G9：补偿事务——计划终失败时，对本轮已完成的副作用步骤按 stepNo 逆序补偿
+             * （后写的先撤）。补偿汇总拼进失败消息，让用户明确知道“哪些撤了、哪些撤不了”。
+             * 补偿内部单步失败不抛出，绝不因为补偿失败而掩盖原始失败原因。
+             */
+            AgentPlanCompensator.CompensationSummary compensation =
+                    agentPlanCompensator.compensate(plan, stepResults);
+            if (compensation.hasActions()) {
+                compensationSuffix = "（" + compensation.describe() + "）";
+            }
         }
 
         updatePlanStatus(plan, failed, failReason);
@@ -344,7 +361,9 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                 .planId(plan.getId())
                 .success(!failed)
                 .status(failed ? AgentPlanStatus.FAILED.name() : AgentPlanStatus.COMPLETED.name())
-                .message(failed ? "计划执行失败: " + failReason : "计划执行完成")
+                .message(failed
+                        ? "计划执行失败: " + failReason + compensationSuffix
+                        : "计划执行完成")
                 .steps(stepResults)
                 .build();
 

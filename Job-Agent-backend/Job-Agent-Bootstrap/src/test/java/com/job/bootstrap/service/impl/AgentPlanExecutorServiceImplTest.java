@@ -6,6 +6,7 @@ import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.compensation.AgentPlanCompensator;
 import com.job.bootstrap.agent.plan.AgentReplanner;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
@@ -70,6 +71,7 @@ class AgentPlanExecutorServiceImplTest {
     private AgentGuardrailService agentGuardrailService;
     private AgentObservationService agentObservationService;
     private AgentReplanner agentReplanner;
+    private AgentPlanCompensator agentPlanCompensator;
 
     private AgentPlanExecutorServiceImpl executor;
 
@@ -83,6 +85,10 @@ class AgentPlanExecutorServiceImplTest {
         agentGuardrailService = mock(AgentGuardrailService.class);
         agentObservationService = mock(AgentObservationService.class);
         agentReplanner = mock(AgentReplanner.class);
+        agentPlanCompensator = mock(AgentPlanCompensator.class);
+        // 计划终失败会触发补偿（任务 G9）；默认空汇总，需要断言补偿的用例自行覆盖
+        when(agentPlanCompensator.compensate(any(), any()))
+                .thenReturn(AgentPlanCompensator.CompensationSummary.EMPTY);
 
         executor = new AgentPlanExecutorServiceImpl(
                 agentPlanMapper,
@@ -93,6 +99,7 @@ class AgentPlanExecutorServiceImplTest {
                 agentGuardrailService,
                 agentObservationService,
                 agentReplanner,
+                agentPlanCompensator,
                 new ObjectMapper()
         );
 
@@ -560,6 +567,40 @@ class AgentPlanExecutorServiceImplTest {
             schema.setSideEffectType(AgentToolSideEffectType.READ_ONLY);
             when(agentToolSchemaRegistry.find(toolName)).thenReturn(Optional.of(schema));
         }
+    }
+
+    /**
+     * 用例15（任务 G9）：计划终失败时触发补偿，补偿汇总拼进失败消息。
+     */
+    @Test
+    void failedPlanShouldTriggerCompensation() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name()),
+                buildStep(2, "JobMatchTool.matchJob", AgentPlanStepStatus.PENDING.name())
+        );
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(any(), any(), any()))
+                .thenReturn(buildToolSuccess("JobSearchTool.searchJobs"),
+                        AgentToolExecutionResult.builder()
+                                .success(false)
+                                .toolName("JobMatchTool.matchJob")
+                                .errorCode("TOOL_EXECUTION_FAILED")
+                                .message("匹配失败")
+                                .costTime(1L)
+                                .build());
+        when(agentReplanner.replan(any(), any(), any(), any(), any(), any())).thenReturn(List.of());
+        when(agentPlanCompensator.compensate(any(), any()))
+                .thenReturn(new AgentPlanCompensator.CompensationSummary(1, 0, 0, 0));
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isFalse();
+        // 补偿汇总拼进失败消息：用户明确知道副作用已被处理
+        assertThat(result.getMessage()).contains("已补偿 1 个副作用步骤");
+        verify(agentPlanCompensator).compensate(eq(plan), any());
     }
 
     private AgentToolExecutionResult buildToolSuccess(String toolName) {
