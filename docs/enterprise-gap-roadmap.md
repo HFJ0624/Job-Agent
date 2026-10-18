@@ -56,6 +56,8 @@
 - **简历故事**："总结场景流式改造：SSE + 流式 HTTP 解析 + 断线取消，首字节延迟从整段生成时间降到（待补数字）"。
 
 ### G6. MCP 真连接（一个就够）
+
+> 状态：✅ 已完成（2026-10-18，Bootstrap 209 + Mcp-Tools 11 单测全绿）。自建 MCP Server（`POST /mcp`，JSON-RPC 2.0：initialize/tools/list/tools/call/ping）+ 零依赖手写客户端 + Agent 主链路接入（首个激活：招聘平台搜索）+ 后台真实协议帧展示。连接器业务真实化（真连邮箱/平台）需外部授权配置，与协议激活解耦，列为后续项。
 - **企业级对照**：MCP 是工具接入事实标准；会协议是明确加分项。
 - **现状**：连接器是预览桩（README 已正名）。
 - **方案**：引入 `langchain4j-mcp` 或手写 JSON-RPC 客户端，激活**一个**真实 server（filesystem 或邮件 IMAP），把对应连接器从 PREVIEW 改为真实调用；保留 Guardrails 确认链。

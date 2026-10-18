@@ -39,4 +39,16 @@ public interface AdminExternalConnectorService {
      * @return 工具调用返回的 JSON 字符串
      */
     String preview(String toolName, Map<String, Object> params);
+
+    /**
+     * 调用外部连接器工具（任务 G6）。
+     *
+     * <p>MCP 已激活的工具走真实协议链路（McpClient -&gt; JSON-RPC -&gt; MCP Server -&gt; 连接器工具）；
+     * 未激活的工具保持本地预览语义。激活清单见实现类 MCP_ENABLED_TOOLS。</p>
+     *
+     * @param toolName 工具唯一名称标识
+     * @param params   工具调用参数
+     * @return 工具执行结果（MCP 路径为协议返回的文本内容）
+     */
+    String invokeConnector(String toolName, Map<String, Object> params);
 }

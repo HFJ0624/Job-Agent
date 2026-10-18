@@ -107,7 +107,7 @@ public class AgentToolInvoker {
                      "CalendarConnectorTool.createInterviewEvent",
                      "NotificationConnectorTool.sendNotification",
                      "ResumeExportConnectorTool.exportResume",
-                     "JobSourceSyncConnectorTool.syncJobs" -> adminExternalConnectorService.preview(toolName, params);
+                     "JobSourceSyncConnectorTool.syncJobs" -> adminExternalConnectorService.invokeConnector(toolName, params);
                 default -> throw new AgentToolException(
                         AgentToolErrorCode.TOOL_NOT_REGISTERED,
                         toolName,

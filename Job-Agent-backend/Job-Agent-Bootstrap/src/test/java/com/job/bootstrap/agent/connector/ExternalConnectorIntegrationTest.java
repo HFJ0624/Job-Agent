@@ -3,6 +3,7 @@ package com.job.bootstrap.agent.connector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.mcp.McpClient;
 import com.job.bootstrap.service.AdminExternalConnectorService;
 import com.job.bootstrap.service.impl.AdminExternalConnectorServiceImpl;
 import com.job.common.agent.tool.AgentToolSchema;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * 外部连接器 Schema 注册与预览冒烟测试。
@@ -50,6 +52,7 @@ class ExternalConnectorIntegrationTest {
     void shouldPreviewExternalConnectorToolByCanonicalToolName() throws Exception {
         AdminExternalConnectorService service = new AdminExternalConnectorServiceImpl(
                 registry,
+                mock(McpClient.class),
                 new RecruitmentPlatformConnectorTool(),
                 new EmailConnectorTool(),
                 new CalendarConnectorTool(),

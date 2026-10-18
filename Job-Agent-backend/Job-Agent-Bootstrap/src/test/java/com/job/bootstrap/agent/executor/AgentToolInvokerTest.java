@@ -135,4 +135,26 @@ class AgentToolInvokerTest {
         assertThat(result.getErrorCode()).isEqualTo(AgentToolErrorCode.TOOL_OUTPUT_INVALID_JSON.name());
         verify(agentGuardrailService).validateToolOutput(any(), any(), any());
     }
+
+    @Test
+    void connectorToolShouldGoThroughInvokeConnector() {
+        Map<String, Object> params = Map.of("providerCode", "boss", "keyword", "Java", "city", "上海", "limit", 5);
+        when(adminExternalConnectorService.invokeConnector(
+                "RecruitmentPlatformConnectorTool.searchExternalJobs", params))
+                .thenReturn("{\"status\":\"PREVIEW\"}");
+        when(agentToolSchemaRegistry.getRequired("RecruitmentPlatformConnectorTool.searchExternalJobs"))
+                .thenReturn(AgentToolSchema.builder()
+                        .toolName("RecruitmentPlatformConnectorTool.searchExternalJobs").build());
+        doNothing().when(agentGuardrailService).validateToolOutput(any(), any(), any());
+
+        AgentToolExecutionResult result = invoker.invoke(
+                "RecruitmentPlatformConnectorTool.searchExternalJobs", params, "帮我在BOSS找Java岗位");
+
+        assertThat(result.getSuccess()).isTrue();
+        assertThat(result.getDataJson()).isEqualTo("{\"status\":\"PREVIEW\"}");
+        // G6：连接器统一走 invokeConnector（内部按激活清单决定 MCP 真实链路或本地预览）
+        verify(adminExternalConnectorService).invokeConnector(
+                "RecruitmentPlatformConnectorTool.searchExternalJobs", params);
+        verify(adminExternalConnectorService, never()).preview(any(), any());
+    }
 }

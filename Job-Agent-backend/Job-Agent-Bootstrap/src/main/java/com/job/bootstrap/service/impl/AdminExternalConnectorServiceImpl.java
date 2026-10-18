@@ -1,6 +1,7 @@
 package com.job.bootstrap.service.impl;
 
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.mcp.McpClient;
 import com.job.bootstrap.service.AdminExternalConnectorService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolErrorCode;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 后台外部连接器管理服务实现。
@@ -54,7 +56,21 @@ public class AdminExternalConnectorServiceImpl implements AdminExternalConnector
 
     private static final String CONNECTOR_CATEGORY = "external_connector";
 
+    /**
+     * MCP 已激活的连接器工具（任务 G6）。
+     *
+     * 说明:
+     * 1. 清单一内的工具，Agent 调用时走真实协议链路（McpClient -&gt; /mcp -&gt; 连接器工具）；
+     * 2. 招聘平台搜索是第一个激活项：只读、无副作用、参数简单，适合作为协议回路的首个验证对象；
+     * 3. 后续激活更多连接器（邮箱/日历等）只需追加清单，接入链路不变；
+     * 4. 连接器的“业务真实化”（真连邮箱/平台）仍需外部授权配置，与协议激活解耦。
+     */
+    private static final Set<String> MCP_ENABLED_TOOLS = Set.of(
+            "RecruitmentPlatformConnectorTool.searchExternalJobs"
+    );
+
     private final AgentToolSchemaRegistry agentToolSchemaRegistry;
+    private final McpClient mcpClient;
     private final RecruitmentPlatformConnectorTool recruitmentPlatformConnectorTool;
     private final EmailConnectorTool emailConnectorTool;
     private final CalendarConnectorTool calendarConnectorTool;
@@ -93,6 +109,30 @@ public class AdminExternalConnectorServiceImpl implements AdminExternalConnector
             );
         }
         return schema;
+    }
+
+    /**
+     * 调用外部连接器工具（任务 G6）：MCP 已激活的工具走真实协议链路，其余保持本地预览。
+     *
+     * <p>激活链路：AgentToolInvoker -&gt; 本方法 -&gt; McpClient.callTool -&gt; POST /mcp（JSON-RPC）
+     * -&gt; McpProtocolHandler -&gt; 连接器工具 -&gt; 原路返回。协议错误按 AgentToolException 抛出，
+     * Executor 会把它记为步骤失败并触发既有失败处理（重规划/降级）。</p>
+     */
+    @Override
+    public String invokeConnector(String toolName, Map<String, Object> params) {
+        String canonicalToolName = agentToolSchemaRegistry.resolveToolName(toolName)
+                .orElseThrow(() -> new AgentToolException(
+                        AgentToolErrorCode.TOOL_NOT_REGISTERED,
+                        toolName,
+                        "外部连接器工具未注册: " + toolName
+                ));
+        getConnectorTool(canonicalToolName);
+
+        if (!MCP_ENABLED_TOOLS.contains(canonicalToolName)) {
+            // 未激活：保持第一版预览语义，不谎称“已连接”
+            return preview(canonicalToolName, params);
+        }
+        return mcpClient.callTool(canonicalToolName, params).result();
     }
 
     /**
