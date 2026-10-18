@@ -59,6 +59,15 @@ public interface AgentMemoryService {
     List<AgentMemoryVO> searchMemories(Long userId, String query, Integer limit);
 
     /**
+     * 查询用户某类型下全部有效记忆（任务 G7：供记忆门控做写入前冲突预检）。
+     *
+     * @param userId 用户 ID
+     * @param memoryType 记忆类型
+     * @return 有效记忆列表（按重要性、更新时间倒序，有上限保护）
+     */
+    List<AgentMemoryVO> listActiveMemoriesByType(Long userId, AgentMemoryType memoryType);
+
+    /**
      * 查询某个稳定记忆键的最新值。
      *
      * @param userId 用户 ID

@@ -3,6 +3,7 @@ package com.job.bootstrap.service.impl;
 import com.job.bootstrap.agent.memory.AgentMemoryActionClassifier;
 import com.job.bootstrap.agent.memory.AgentMemoryActionDecision;
 import com.job.bootstrap.agent.memory.AgentMemoryCandidate;
+import com.job.bootstrap.agent.memory.AgentMemoryConflictGate;
 import com.job.bootstrap.agent.memory.AgentMemoryLlmExtractor;
 import com.job.bootstrap.agent.memory.AgentMemoryRuleExtractor;
 import com.job.bootstrap.agent.memory.AgentMemoryWritePolicy;
@@ -40,6 +41,7 @@ import java.util.Map;
  * -> AgentMemoryActionClassifier（动作分类）
  * -> AgentMemoryRuleExtractor + AgentMemoryLlmExtractor（双轨抽取）
  * -> AgentMemoryWritePolicy（写入策略校验）
+ * -> AgentMemoryConflictGate（写入前冲突预检，任务 G7）
  * -> AgentMemoryService.saveOrUpdateMemory（落库）
  * -> AgentMemoryContextService.rebuildProfile（画像重建）</p>
  *
@@ -69,6 +71,7 @@ public class AgentMemoryCaptureServiceImpl implements AgentMemoryCaptureService 
     private final AgentMemoryRuleExtractor ruleExtractor;
     private final AgentMemoryLlmExtractor llmExtractor;
     private final AgentMemoryWritePolicy writePolicy;
+    private final AgentMemoryConflictGate conflictGate;
     private final AgentMemoryService agentMemoryService;
     private final AgentMemoryContextService agentMemoryContextService;
 
@@ -125,6 +128,23 @@ public class AgentMemoryCaptureServiceImpl implements AgentMemoryCaptureService 
         List<AgentMemoryVO> saved = new ArrayList<>();
         for (AgentMemoryCandidate candidate : candidates) {
             if (!writePolicy.allowWrite(candidate)) {
+                continue;
+            }
+
+            /*
+             * 任务 G7：写入前冲突预检。等价值/临时表达/异 key 值重叠直接拦截，
+             * 不落库、不刷冲突历史、不触发画像重建；拦截原因进观测事件供后台统计。
+             */
+            AgentMemoryConflictGate.MemoryGateDecision gateDecision =
+                    conflictGate.check(userId, traceId, candidate);
+            if (gateDecision.blocked()) {
+                log.debug(
+                        "长期记忆被门控拦截，userId={}, traceId={}, decision={}, reason={}",
+                        userId,
+                        traceId,
+                        gateDecision.result(),
+                        gateDecision.reason()
+                );
                 continue;
             }
 

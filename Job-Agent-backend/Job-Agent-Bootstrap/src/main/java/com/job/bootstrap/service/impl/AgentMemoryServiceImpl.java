@@ -272,6 +272,36 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
     }
 
     @Override
+    public List<AgentMemoryVO> listActiveMemoriesByType(Long userId, AgentMemoryType memoryType) {
+        if (userId == null || userId <= 0 || memoryType == null) {
+            return List.of();
+        }
+
+        /*
+         * 任务 G7：供记忆门控做写入前冲突预检。
+         * 与召回查询的差异：不更新 last_used_time（预检是纯读，不能读引发写），
+         * 同样带 TTL 过滤与扫描上限，避免全表拉取。
+         */
+        Date now = new Date();
+        List<AgentLongTermMemory> candidates = agentLongTermMemoryMapper.selectList(
+                new LambdaQueryWrapper<AgentLongTermMemory>()
+                        .eq(AgentLongTermMemory::getUserId, userId)
+                        .eq(AgentLongTermMemory::getMemoryType, memoryType.name())
+                        .eq(AgentLongTermMemory::getStatus, AgentMemoryStatus.ACTIVE.name())
+                        .eq(AgentLongTermMemory::getIsDeleted, NOT_DELETED)
+                        .and(nested -> nested.isNull(AgentLongTermMemory::getExpireTime)
+                                .or().gt(AgentLongTermMemory::getExpireTime, now))
+                        .orderByDesc(AgentLongTermMemory::getImportance)
+                        .orderByDesc(AgentLongTermMemory::getUpdateTime)
+                        .last("LIMIT " + MEMORY_SCAN_LIMIT)
+        );
+        if (CollectionUtils.isEmpty(candidates)) {
+            return List.of();
+        }
+        return candidates.stream().map(AgentMemoryVO::from).toList();
+    }
+
+    @Override
     public IPage<AgentMemoryVO> pageMemories(AgentMemoryQueryDTO query) {
         long pageNum = query.getPageNum() == null || query.getPageNum() <= 0 ? 1L : query.getPageNum();
         long pageSize = query.getPageSize() == null || query.getPageSize() <= 0 ? 10L : query.getPageSize();

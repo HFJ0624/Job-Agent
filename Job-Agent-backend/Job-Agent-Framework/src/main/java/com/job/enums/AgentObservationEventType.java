@@ -35,5 +35,10 @@ public enum AgentObservationEventType {
     /**
      * 普通 Trace 事件。
      */
-    TRACE
+    TRACE,
+
+    /**
+     * 长期记忆事件（捕获、门控拦截、冲突等，任务 G7）。
+     */
+    MEMORY
 }
