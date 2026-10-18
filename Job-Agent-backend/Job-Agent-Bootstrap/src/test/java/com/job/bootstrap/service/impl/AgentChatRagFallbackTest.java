@@ -8,6 +8,7 @@ import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.intent.AgentIntentLlmClassifier;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
+import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
@@ -66,16 +67,19 @@ class AgentChatRagFallbackTest {
     private final AgentToolSchemaRegistry agentToolSchemaRegistry = mock(AgentToolSchemaRegistry.class);
     private final AgentGuardrailService agentGuardrailService = mock(AgentGuardrailService.class);
     private final AgentContextBuilder agentContextBuilder = mock(AgentContextBuilder.class);
+    private final AgentQueryRewriter queryRewriter = mock(AgentQueryRewriter.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AgentChatServiceImpl service = new AgentChatServiceImpl(
             aiConversationMapper, aiMessageMapper, aiModelGatewayService, agentTraceService,
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
-            agentGuardrailService, agentContextBuilder, objectMapper);
+            agentGuardrailService, agentContextBuilder, queryRewriter, objectMapper);
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {
+        // 本用例聚焦 RAG 降级：改写器按恒等处理（原消息进出），不干扰断言
+        when(queryRewriter.rewrite(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
         when(agentGuardrailService.checkUserInput(anyLong(), anyString())).thenReturn(AgentGuardrailResult.allow());
         when(agentGuardrailService.maskSensitiveData(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentGuardrailService.sanitizeFinalAnswer(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));

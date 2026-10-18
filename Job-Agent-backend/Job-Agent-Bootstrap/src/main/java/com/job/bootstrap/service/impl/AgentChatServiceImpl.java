@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
+import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
@@ -65,6 +66,7 @@ import java.util.UUID;
  * <p>主要调用链：
  * 前端 -> AgentChatController -> AgentChatServiceImpl.chat
  * -> AgentGuardrailService (输入检查)
+ * -> AgentQueryRewriter (多轮指代消解，任务 G8)
  * -> AgentIntentRouter (意图识别)
  * -> AgentPlanningService (生成计划)
  * -> AgentPlanExecutorService (执行计划 + Tool Calling)
@@ -171,6 +173,11 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 多轮上下文构建器：组装最近 N 轮历史 + 滚动摘要，并按预算裁剪（任务6）。
      */
     private final AgentContextBuilder agentContextBuilder;
+
+    /**
+     * 多轮查询改写器：把带指代/省略的消息改写成自包含查询（任务 G8）。
+     */
+    private final AgentQueryRewriter queryRewriter;
 
     /**
      * 统一 JSON 工具。
@@ -347,14 +354,32 @@ public class AgentChatServiceImpl implements AgentChatService {
         );
 
         /*
-         * 7.2 在 Planner 前构造长期记忆上下文。
+         * 7.2 构建多轮上下文（任务6）+ 查询改写（任务 G8）。
          *
          * 设计说明:
-         * - 把压缩后的长期记忆上下文在更早阶段就提供给 Planner 的参数抽取，帮助补齐城市、
-         *   目标岗位、称呼等参数（用户原始输入优先，记忆只补缺省、不覆盖）。
-         * - 同一份上下文后续也会用于 Executor 总结。
+         * 1. 这里构建一次历史上下文：既供查询改写消解指代，总结阶段复用同一份，
+         *    避免二次读取消息和二次触发滚动摘要；
+         * 2. build 内部会排除刚保存的当前轮用户消息，历史里只有“之前的对话”；
+         * 3. 改写只在消息含指代/延续信号时发起（LIGHT 档模型），自包含消息原样返回；
+         * 4. 改写失败一律回退原消息——改写是增强，不能成为主流程故障点。
          */
-        AgentMemoryContextVO planningMemoryContext = buildLongTermMemoryContext(userId, safeMessage);
+        AgentContextBuilder.BuiltContext contextBundle = agentContextBuilder.build(userId, traceId, conversation);
+        String planningMessage = queryRewriter.rewrite(
+                userId,
+                traceId,
+                safeMessage,
+                contextBundle.historyText()
+        );
+
+        /*
+         * 7.3 在 Planner 前构造长期记忆上下文。
+         *
+         * 设计说明:
+         * - 用改写后的自包含查询做记忆检索：“那第二个呢”检索不到任何记忆，
+         *    “刚才推荐的第二个Java岗位的匹配度如何”才能召回相关岗位决策记忆；
+         * - 用户原始输入优先，记忆只补缺省、不覆盖的语义不变。
+         */
+        AgentMemoryContextVO planningMemoryContext = buildLongTermMemoryContext(userId, planningMessage);
 
         AgentPlanVO plan = null;
         try {
@@ -370,7 +395,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                             conversation.getId(),
                             traceId,
                             intentCode,
-                            safeMessage,
+                            // 用改写后的自包含查询做规划（任务 G8），指代/省略已消解
+                            planningMessage,
                             planningMemoryContext.getPromptContext()
                     );
             String activeIntentCode = plan.getIntentCode();
@@ -438,7 +464,8 @@ public class AgentChatServiceImpl implements AgentChatService {
              *     RAG 可观测性由 retrieveRagContext 自己写入的 Tool Trace 承载。
              */
             RagContext ragContext = ragEnabledFor(activeIntentCode)
-                    ? retrieveRagContext(userId, conversation.getId(), activeIntentCode, safeMessage)
+                    // 用改写后的自包含查询做 RAG 检索（任务 G8）：“那第二个呢”检索不到有效知识
+                    ? retrieveRagContext(userId, conversation.getId(), activeIntentCode, planningMessage)
                     : new RagContext(false, "DISABLED", null, List.of(), null);
 
             /*
@@ -487,10 +514,11 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<AgentMemoryVO> retrievedMemories = executionMemoryContext.getMemories();
 
             /*
-             * 6.5 构建多轮上下文（任务6）：最近 N 轮历史 + 滚动摘要，
-             *      放在执行后、总结前；历史与工具结果会在 Builder 内脱敏并按预算裁剪。
+             * 6.5 多轮上下文复用（任务6 + G8）：
+             *      上下文已在 7.2（改写前）构建一次，此处直接复用——
+             *      期间没有新消息落库（助手消息在总结之后才保存），内容等价，
+             *      且避免二次读取消息、二次触发滚动摘要。
              */
-            AgentContextBuilder.BuiltContext contextBundle = agentContextBuilder.build(userId, traceId, conversation);
 
             /*
              * 7. 总结执行结果。

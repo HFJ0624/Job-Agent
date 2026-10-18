@@ -40,5 +40,10 @@ public enum AgentObservationEventType {
     /**
      * 长期记忆事件（捕获、门控拦截、冲突等，任务 G7）。
      */
-    MEMORY
+    MEMORY,
+
+    /**
+     * 查询改写事件（多轮指代消解，任务 G8）。
+     */
+    REWRITE
 }
