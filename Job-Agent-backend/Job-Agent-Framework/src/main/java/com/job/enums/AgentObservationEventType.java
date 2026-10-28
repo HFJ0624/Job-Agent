@@ -50,5 +50,10 @@ public enum AgentObservationEventType {
     /**
      * 计划补偿事件（Saga 反向操作，任务 G9）。
      */
-    COMPENSATION
+    COMPENSATION,
+
+    /**
+     * 语义缓存事件（命中/未命中/写入，任务 G10）。
+     */
+    CACHE
 }

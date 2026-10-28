@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.context.AgentRuntimeContext;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
+import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
@@ -46,6 +47,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -178,6 +180,11 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 多轮查询改写器：把带指代/省略的消息改写成自包含查询（任务 G8）。
      */
     private final AgentQueryRewriter queryRewriter;
+
+    /**
+     * 答案语义缓存：重复/改写提问短路整条链路（任务 G10）。
+     */
+    private final AgentAnswerCacheService answerCacheService;
 
     /**
      * 统一 JSON 工具。
@@ -370,6 +377,30 @@ public class AgentChatServiceImpl implements AgentChatService {
                 safeMessage,
                 contextBundle.historyText()
         );
+
+        /*
+         * 7.2.5 语义缓存查询（任务 G10）：用改写后的自包含查询查同用户历史答案。
+         *
+         * 设计说明:
+         * 1. 命中即短路：不规划、不执行、不总结，直接以缓存答案回复并正常落库/Trace；
+         * 2. 位置在改写之后——“那第二个呢”和完整表述能命中同一条缓存，这是 G8 的红利；
+         * 3. 记忆捕获（7.1）已先执行且本身幂等（同 key 等价值会被 G7 门控跳过），
+         *    缓存命中不会造成记忆库污染；
+         * 4. 缓存故障（embedding 不可用等）内部降级为未命中，不影响主流程。
+         */
+        Optional<String> cachedAnswer = answerCacheService.lookup(userId, planningMessage);
+        if (cachedAnswer.isPresent()) {
+            return buildCacheHitResult(
+                    userId,
+                    conversation,
+                    traceId,
+                    intentCode,
+                    message,
+                    planningMessage,
+                    cachedAnswer.get(),
+                    start
+            );
+        }
 
         /*
          * 7.3 在 Planner 前构造长期记忆上下文。
@@ -573,6 +604,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             );
 
             //返回结果
+            /*
+             * 任务 G10：成功答案写回语义缓存。
+             * 只缓存这一条路径的答案——需要用户确认的、执行失败的、护栏拦截的
+             * 答案都不具备“重复提问可直接复用”的性质，不进缓存。
+             */
+            answerCacheService.remember(userId, planningMessage, answer);
+
             AgentChatVO vo = new AgentChatVO();
             vo.setConversationId(conversation.getId());
             vo.setPlanId(plan.getId());
@@ -608,6 +646,56 @@ public class AgentChatServiceImpl implements AgentChatService {
              */
             AgentRuntimeContext.clear();
         }
+    }
+
+    /**
+     * 语义缓存命中后的短路返回（任务 G10）。
+     *
+     * 方法步骤:
+     * 1. 缓存答案作为助手消息正常落库，保证聊天上下文连续（用户回看时看到的就是当时回复）；
+     * 2. 写一条 executionMode=CACHE_HIT 的成功 Trace，后台可区分“缓存回复”与“模型回复”；
+     * 3. planId 返回 null——本轮没有创建计划，前端按普通回答渲染即可。
+     */
+    private AgentChatVO buildCacheHitResult(
+            Long userId,
+            AiConversation conversation,
+            String traceId,
+            AgentIntentCode intentCode,
+            String originalMessage,
+            String planningMessage,
+            String cachedAnswer,
+            long start
+    ) {
+        saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, cachedAnswer, null);
+        touchConversation(conversation);
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("message", originalMessage);
+        input.put("planningMessage", planningMessage);
+        input.put("executionMode", "CACHE_HIT");
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("answer", cachedAnswer);
+        output.put("executionMode", "CACHE_HIT");
+        agentTraceService.saveTrace(
+                traceId,
+                userId,
+                conversation.getId(),
+                intentCode.name(),
+                null,
+                input,
+                output,
+                "SUCCESS",
+                null,
+                System.currentTimeMillis() - start
+        );
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(conversation.getId());
+        vo.setPlanId(null);
+        vo.setAnswer(cachedAnswer);
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
     }
 
     /**

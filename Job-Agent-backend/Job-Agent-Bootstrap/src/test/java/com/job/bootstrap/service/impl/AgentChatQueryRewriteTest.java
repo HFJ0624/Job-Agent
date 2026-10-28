@@ -7,6 +7,7 @@ import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.intent.AgentIntentCode;
 import com.job.bootstrap.agent.intent.AgentIntentLlmClassifier;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
+import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
@@ -70,6 +71,7 @@ class AgentChatQueryRewriteTest {
     private final AgentGuardrailService agentGuardrailService = mock(AgentGuardrailService.class);
     private final AgentContextBuilder agentContextBuilder = mock(AgentContextBuilder.class);
     private final AgentObservationService agentObservationService = mock(AgentObservationService.class);
+    private final AgentAnswerCacheService answerCacheService = mock(AgentAnswerCacheService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 真改写器（网关与观测用 mock）：验证“主链路真的接了改写”
@@ -80,10 +82,13 @@ class AgentChatQueryRewriteTest {
             aiConversationMapper, aiMessageMapper, aiModelGatewayService, agentTraceService,
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService,
             agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
-            agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter, objectMapper);
+            agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,
+            answerCacheService, objectMapper);
 
     @BeforeEach
     void setUp() {
+        // 本用例聚焦改写接线：缓存恒未命中，不干扰断言
+        when(answerCacheService.lookup(any(), any())).thenReturn(java.util.Optional.empty());
         when(agentGuardrailService.checkUserInput(anyLong(), anyString())).thenReturn(AgentGuardrailResult.allow());
         when(agentGuardrailService.maskSensitiveData(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentGuardrailService.sanitizeFinalAnswer(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
