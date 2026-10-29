@@ -1,7 +1,7 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;

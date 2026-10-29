@@ -460,15 +460,15 @@ public class AgentToolSchemaRegistry {
         return externalConnectorTool(
                 "ResumeExportConnectorTool.exportResume",
                 "简历导出",
-                "把用户简历导出为 PDF、Word 或 Markdown。第二版只返回预览结果，不生成真实文件。",
+                "把用户简历导出为 Markdown 文件（v1）。用户确认后生成真实文件并上传对象存储，返回可核对的文件键与下载地址；未确认时只返回预览。PDF/DOCX 待接入文档生成器。",
                 "ResumeExportConnectorTool",
                 "exportResume",
                 AgentToolSideEffectType.WRITE_BUSINESS_RECORD,
-                AgentToolConfirmationType.NONE,
-                null,
+                AgentToolConfirmationType.REQUIRED_BEFORE_EXECUTION,
+                "导出会生成真实文件并写入对象存储，请确认简历与格式后再执行。",
                 List.of(
                         param("resumeId", AgentToolValueType.LONG, true, "简历ID", "USER_INPUT_OR_FRONTEND_CONTEXT", "1001", null),
-                        param("format", AgentToolValueType.STRING, true, "导出格式，例如 PDF、DOCX、MARKDOWN", "USER_INPUT", "PDF", null)
+                        param("format", AgentToolValueType.STRING, true, "导出格式，v1 仅支持 MARKDOWN", "USER_INPUT", "MARKDOWN", null)
                 )
         );
     }

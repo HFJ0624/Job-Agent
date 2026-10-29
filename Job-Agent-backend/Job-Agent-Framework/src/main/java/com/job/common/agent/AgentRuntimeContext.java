@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.context;
+package com.job.common.agent;
 
 import java.util.Collection;
 import java.util.HashSet;

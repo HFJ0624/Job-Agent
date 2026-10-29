@@ -9,6 +9,7 @@ import com.job.bootstrap.service.impl.AdminExternalConnectorServiceImpl;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolConfirmationType;
 import com.job.enums.AgentToolSideEffectType;
+import com.job.mcp.connector.support.ResumeExportExecutor;
 import com.job.mcp.connector.tool.CalendarConnectorTool;
 import com.job.mcp.connector.tool.EmailConnectorTool;
 import com.job.mcp.connector.tool.JobSourceSyncConnectorTool;
@@ -57,7 +58,7 @@ class ExternalConnectorIntegrationTest {
                 new EmailConnectorTool(),
                 new CalendarConnectorTool(),
                 new NotificationConnectorTool(),
-                new ResumeExportConnectorTool(),
+                new ResumeExportConnectorTool(mock(ResumeExportExecutor.class)),
                 new JobSourceSyncConnectorTool()
         );
 

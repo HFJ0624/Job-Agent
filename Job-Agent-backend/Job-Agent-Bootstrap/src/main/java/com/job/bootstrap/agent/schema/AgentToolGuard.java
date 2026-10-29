@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.schema;
 
-import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.guardrail.SensitiveOperationGuard;
 import com.job.common.agent.tool.AgentToolParamSchema;
 import com.job.common.agent.tool.AgentToolSchema;

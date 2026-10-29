@@ -29,7 +29,10 @@ public class ConnectorToolResponse {
     private String providerCode;
 
     /**
-     * 第一版固定返回 PREVIEW，表示已经完成参数结构化，但还没有调用真实第三方 API。
+     * 连接器执行状态（任务 J3 起区分三态）:
+     * - PREVIEW：已完成参数结构化与归属校验，未执行真实动作（未确认或后台预览）；
+     * - EXECUTED：已真实执行（如文件已生成并上传），data 携带可核对结果；
+     * - ERROR：参数校验/归属校验/真实执行失败，message 说明原因。
      */
     private String status;
 

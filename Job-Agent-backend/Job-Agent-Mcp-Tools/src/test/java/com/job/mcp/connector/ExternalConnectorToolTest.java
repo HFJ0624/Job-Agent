@@ -1,6 +1,7 @@
 package com.job.mcp.connector;
 
 import cn.hutool.json.JSONUtil;
+import com.job.mcp.connector.support.ResumeExportExecutor;
 import com.job.mcp.connector.tool.CalendarConnectorTool;
 import com.job.mcp.connector.tool.EmailConnectorTool;
 import com.job.mcp.connector.tool.JobSourceSyncConnectorTool;
@@ -9,6 +10,7 @@ import com.job.mcp.connector.tool.RecruitmentPlatformConnectorTool;
 import com.job.mcp.connector.tool.ResumeExportConnectorTool;
 import org.junit.jupiter.api.Test;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ExternalConnectorToolTest {
@@ -41,7 +43,7 @@ class ExternalConnectorToolTest {
     void shouldReturnCalendarNotificationResumeAndSyncPreview() {
         CalendarConnectorTool calendarTool = new CalendarConnectorTool();
         NotificationConnectorTool notificationTool = new NotificationConnectorTool();
-        ResumeExportConnectorTool resumeExportTool = new ResumeExportConnectorTool();
+        ResumeExportConnectorTool resumeExportTool = new ResumeExportConnectorTool(mock(ResumeExportExecutor.class));
         JobSourceSyncConnectorTool syncTool = new JobSourceSyncConnectorTool();
 
         String calendarJson = calendarTool.createInterviewEvent("google-calendar", "后端面试", "2026-07-01 10:00", "线上");

@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.guardrail;
 
-import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.common.agent.AgentRuntimeContext;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolErrorCode;
 import com.job.enums.AgentToolSideEffectType;

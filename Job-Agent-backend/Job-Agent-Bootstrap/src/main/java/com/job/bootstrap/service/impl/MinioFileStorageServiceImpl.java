@@ -106,6 +106,50 @@ public class MinioFileStorageServiceImpl implements FileStorageService {
     }
 
     /**
+     * 上传服务端生成的文件（任务 J3：简历导出真实执行）。
+     *
+     * 设计说明:
+     * 1. objectKey 由业务方给出稳定键（如 "{userId}/{resumeId}.md"），对象名确定性生成——
+     *    同一简历重复导出覆盖同一对象，内容一致即幂等，不会因重复请求产生垃圾文件；
+     * 2. 走与前端上传相同的 ensureBucket + buildFileUrl 链路，访问方式一致。
+     */
+    @Override
+    public StoredFile uploadBytes(byte[] content, String filename, String contentType, String folder, String objectKey) {
+        if (content == null || content.length == 0) {
+            throw new BizException("上传内容不能为空");
+        }
+        if (!StringUtils.hasText(objectKey)) {
+            throw new BizException("稳定对象键不能为空");
+        }
+
+        try {
+            ensureBucketExists();
+
+            String cleanFolder = StringUtils.hasText(folder) ? folder.trim() : "common";
+            String objectName = cleanFolder + "/" + objectKey.trim().replaceAll("^/+", "");
+
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(minioProperties.getBucketName())
+                    .object(objectName)
+                    .contentType(contentType)
+                    .stream(new java.io.ByteArrayInputStream(content), content.length, -1)
+                    .build());
+
+            return new StoredFile(
+                    buildFileUrl(objectName),
+                    objectName,
+                    filename,
+                    (long) content.length,
+                    contentType
+            );
+        } catch (BizException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BizException(ResultCodeEnum.SYSTEM_ERROR.getCode(), "文件上传失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    /**
      * 构建对象名，按业务目录 + 年/月分层，避免单目录对象过多。
      *
      * @param folder           业务目录

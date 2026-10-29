@@ -11,7 +11,7 @@
 |---|---|---|---|
 | J1 | P0 | 完整多步骤求职任务 | ✅ 代码完成（2026-10-29，267 单测全绿）；用例集扩充待 VM 录入 |
 | J2 | P0 | 步骤级保存、失败续跑、执行防重 | ⬜ 待做（增量：执行器租约/批次号、外部结果核对） |
-| J3 | P0 | 打通至少一个真实连接器 | ⬜ 待做（简历导出本地真实化，零外部凭证） |
+| J3 | P0 | 打通至少一个真实连接器 | ✅ 简历导出真实化（2026-10-29，273 单测全绿）；真库 E2E 待 VM |
 | J4 | P1 | 长期记忆更新与遗忘规则 | 🟡 大部分已有（G7/TTL/冲突裁决），剩验证测试补齐 |
 | J5 | P1 | 岗位匹配可解释性 | ⬜ 待做（标注样本集 + NDCG@K） |
 | J6 | P1 | 统一评测、成本和延迟记录 | 🟡 大部分已有（Trace/Eval/G1），剩任务级预算与 P95 |
@@ -49,4 +49,24 @@ S1 简历分析(ResumeAnalyzeTool) → S2 岗位筛选(搜索/推荐二选一)
 ## 待办（VM/数据侧，沙箱无法完成）
 
 - [ ] J1：录入 30~50 条完整任务用例（正常流/参数缺失/工具失败三类各占一定比例），统计“完整任务成功率、参数正确率、人工补充次数、失败分布、耗时”五项指标
+- [ ] J3：VM 上验证真实导出闭环（配 MinIO → 确认导出 → 文件可下载核对 → 重复导出幂等）
 - [ ] J2/J3：真库与外部凭证验证（VM）
+
+---
+
+## J3｜P0：打通至少一个真实连接器 ✅（简历导出）
+
+**选型**：简历导出连接器真实化——本地生成 Markdown + MinIO 上传，零外部凭证、沙箱可完整单测；PDF/DOCX 待文档生成器适配器，不谎称支持。
+
+**完整闭环**（参数校验 → 预览 → 用户确认 → 实际执行 → 结果回查）：
+1. **参数校验**：resumeId 必填；格式仅支持 MARKDOWN（空默认 Markdown，PDF/DOCX 明确拒绝并说明原因）；
+2. **预览**：未确认时（后台预览按钮 / MCP 调试 / 模型直呼）只返回 PREVIEW + 预估文件名，不执行；
+3. **用户确认**：Schema 升级为 `REQUIRED_BEFORE_EXECUTION`，走 chatInternal 既有确认门禁；
+4. **实际执行**：确认后由 Executor 调工具 → 归属校验（`getUserResumeRequired`，越权/不存在同一错误信息，不泄露存在性）→ Markdown 拼装（原文优先，忠于原文）→ MinIO 上传（**稳定对象键 `{userId}/{resumeId}.md`，重复导出覆盖同一对象 = 幂等**）→ EXECUTED 响应带 fileKey/fileUrl/fileSize；
+5. **结果回查**：`ConnectorToolResponse` 三态（PREVIEW/EXECUTED/ERROR），Trace 明确区分预览与实际执行。
+
+**安全边界**：userId 只信 `AgentRuntimeContext`（模型传参不算数）；确认但 userId 缺失/非法 → 拒绝执行且不调执行器。
+
+**模块边界**：`AgentRuntimeContext` 从 Bootstrap 移至 Framework（`com.job.common.agent`）——连接器工具在 Mcp-Tools 模块，运行时上下文本就是跨模块共享基建；`ResumeExportExecutor` 接口定义在 Mcp-Tools、实现（依赖简历服务/文件存储）在 Bootstrap，端口-适配器模式解耦。
+
+**完成记录**：代码版本见 git log “J3”；测试：`ResumeExportConnectorToolTest` 7 例（预览/执行/参数/格式/归属/身份缺失/默认格式）+ `ResumeExportExecutorImplTest` 6 例（稳定键/忠于原文/parsedJson 回退/归属失败不碰存储/存储失败/非法参数）；全量 273 绿。剩余限制：真实 MinIO E2E 需 VM；PDF/DOCX 需文档生成器适配器（后续项）。

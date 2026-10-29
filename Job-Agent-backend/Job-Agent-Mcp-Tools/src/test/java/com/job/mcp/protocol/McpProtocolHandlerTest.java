@@ -2,6 +2,7 @@ package com.job.mcp.protocol;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.mcp.connector.support.ResumeExportExecutor;
 import com.job.mcp.connector.tool.CalendarConnectorTool;
 import com.job.mcp.connector.tool.EmailConnectorTool;
 import com.job.mcp.connector.tool.JobSourceSyncConnectorTool;
@@ -11,6 +12,7 @@ import com.job.mcp.connector.tool.ResumeExportConnectorTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -36,7 +38,7 @@ class McpProtocolHandlerTest {
                 new EmailConnectorTool(),
                 new CalendarConnectorTool(),
                 new NotificationConnectorTool(),
-                new ResumeExportConnectorTool(),
+                new ResumeExportConnectorTool(mock(ResumeExportExecutor.class)),
                 new JobSourceSyncConnectorTool()
         );
     }

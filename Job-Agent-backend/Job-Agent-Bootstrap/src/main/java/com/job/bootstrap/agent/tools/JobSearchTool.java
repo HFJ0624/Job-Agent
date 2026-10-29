@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.tools;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.schema.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.JobPositionService;

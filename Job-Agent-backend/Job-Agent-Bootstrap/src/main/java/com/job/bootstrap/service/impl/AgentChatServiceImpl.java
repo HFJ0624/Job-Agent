@@ -2,7 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentRuntimeContext;
+import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
 import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
