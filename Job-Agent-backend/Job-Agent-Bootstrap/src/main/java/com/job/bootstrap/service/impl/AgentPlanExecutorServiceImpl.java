@@ -9,6 +9,7 @@ import com.job.bootstrap.agent.compensation.AgentPlanCompensator;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.executor.AgentToolExecutionResult;
+import com.job.bootstrap.agent.executor.ExecutionSupersededException;
 import com.job.bootstrap.agent.executor.AgentToolInvoker;
 import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.plan.AgentReplanner;
@@ -227,9 +228,11 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         }
 
         /*
-         * 执行抢占: 通过条件更新把计划置为 RUNNING。
+         * 执行抢占: 通过条件更新把计划置为 RUNNING，并递增执行批次号（任务 J2）。
          * 影响行数为 0 说明计划状态在读取之后被其他请求改变（并发执行或已结束），
          * 本次不执行任何工具，直接返回最新状态对应的结果。
+         * execution_epoch 单调递增：抢占成功的执行器持有新批次号，后续所有步骤回写都带
+         * 批次校验——旧执行器（批次已过期）的写入影响 0 行，结果被丢弃，不会覆盖新执行。
          */
         boolean recoveryMode = recover || staleRunning;
         List<String> claimableStatuses = new ArrayList<>();
@@ -239,8 +242,11 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             claimableStatuses.add(AgentPlanStatus.RUNNING.name());
         }
 
+        int currentEpoch = plan.getExecutionEpoch() == null ? 0 : plan.getExecutionEpoch();
+        int executionEpoch = currentEpoch + 1;
         AgentPlan claim = new AgentPlan();
         claim.setStatus(AgentPlanStatus.RUNNING.name());
+        claim.setExecutionEpoch(executionEpoch);
         claim.setUpdateTime(new Date());
         int claimedRows = agentPlanMapper.update(claim, new UpdateWrapper<AgentPlan>()
                 .eq("id", plan.getId())
@@ -249,13 +255,15 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             recordClaimRejectedEvent(plan, "EXECUTION_CLAIM_REJECTED", "计划状态已变化，本次放弃执行");
             return buildCurrentStateResult(planId);
         }
+        // 抢占成功：把新批次号写回内存副本，后续所有回写都以它校验持有权
+        plan.setExecutionEpoch(executionEpoch);
 
         /*
          * 恢复模式: 把上次未完成的步骤重置为 PENDING，从第一个未完成步骤继续。
          * 已 COMPLETED 的步骤不重置，执行时会直接采用历史结果，保证副作用工具不重复执行。
          */
         if (recoveryMode) {
-            resetIncompleteSteps(steps);
+            resetIncompleteSteps(plan, steps);
         }
 
         Map<String, Object> params = readJsonMap(plan.getExtractedParamsJson());
@@ -290,58 +298,70 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         String failReason = null;
         // 补偿汇总后缀（任务 G9）：终失败时补偿完成才拼接，成功路径为空
         String compensationSuffix = "";
-        while (!pending.isEmpty() && !failed) {
-            List<AgentPlanStep> ready = pending.stream()
-                    .filter(step -> depsSatisfied(step, resolvedStepNos))
-                    .toList();
-            if (ready.isEmpty()) {
-                // 防御：依赖无法解析（正常不会发生，依赖只引用更小 stepNo）→ 放弃剩余步骤
-                for (AgentPlanStep step : pending) {
-                    stepResults.add(skipStep(plan, step, "步骤依赖无法解析，跳过执行。"));
-                }
-                break;
-            }
-
-            List<AgentPlanStep> wave = chooseWave(ready, pending);
-            List<AgentPlanStepExecutionResult> waveResults = executeWave(plan, wave, params, stepOutputs);
-            // 按 stepNo 排序，保证无论并行快慢，结果顺序确定
-            waveResults.sort(Comparator.comparing(AgentPlanStepExecutionResult::getStepNo));
-            pending.removeAll(wave);
-
-            // 输出快照与已解析序号在主线程汇总，避免并发写竞争
-            for (AgentPlanStepExecutionResult result : waveResults) {
-                stepResults.add(result);
-                rememberStepOutput(stepOutputs, result);
-                resolvedStepNos.add(result.getStepNo());
-            }
-
-            List<AgentPlanStepExecutionResult> failedResults = waveResults.stream()
-                    .filter(result -> AgentPlanStepStatus.FAILED.name().equals(result.getStatus()))
-                    .toList();
-            if (!failedResults.isEmpty()) {
-                AgentPlanStepExecutionResult firstFailedResult = failedResults.get(0);
-                AgentPlanStep firstFailedStep = wave.stream()
-                        .filter(step -> Objects.equals(step.getStepNo(), firstFailedResult.getStepNo()))
-                        .findFirst()
-                        .orElseThrow();
-                List<AgentPlanStep> correctiveSteps = tryReplan(plan, firstFailedStep, firstFailedResult, steps);
-                if (correctiveSteps.isEmpty()) {
-                    failed = true;
-                    failReason = firstFailedResult.getErrorMsg();
-                } else {
-                    // 同波次其他失败步骤：随重规划改道放弃（标记 SKIPPED，避免遗留 FAILED 状态）
-                    for (AgentPlanStepExecutionResult other : failedResults.subList(1, failedResults.size())) {
-                        AgentPlanStep otherStep = wave.stream()
-                                .filter(step -> Objects.equals(step.getStepNo(), other.getStepNo()))
-                                .findFirst()
-                                .orElse(null);
-                        if (otherStep != null) {
-                            stepResults.add(skipStep(plan, otherStep, "同波次步骤失败，随 Replan 改道放弃。"));
-                        }
+        /*
+         * 任务 J2：整个执行循环包在“批次取代”保护里——回写发现计划的 execution_epoch
+         * 已被其他执行器抢走（本执行器已被取代）时，抛出 ExecutionSupersededException，
+         * 在此统一收尾：记观测事件 + 放弃本次执行，不再继续调用任何工具。
+         */
+        try {
+            while (!pending.isEmpty() && !failed) {
+                List<AgentPlanStep> ready = pending.stream()
+                        .filter(step -> depsSatisfied(step, resolvedStepNos))
+                        .toList();
+                if (ready.isEmpty()) {
+                    // 防御：依赖无法解析（正常不会发生，依赖只引用更小 stepNo）→ 放弃剩余步骤
+                    for (AgentPlanStep step : pending) {
+                        stepResults.add(skipStep(plan, step, "步骤依赖无法解析，跳过执行。"));
                     }
-                    pending.addAll(correctiveSteps);
+                    break;
+                }
+
+                List<AgentPlanStep> wave = chooseWave(ready, pending);
+                List<AgentPlanStepExecutionResult> waveResults = executeWave(plan, wave, params, stepOutputs);
+                // 按 stepNo 排序，保证无论并行快慢，结果顺序确定
+                waveResults.sort(Comparator.comparing(AgentPlanStepExecutionResult::getStepNo));
+                pending.removeAll(wave);
+
+                // 输出快照与已解析序号在主线程汇总，避免并发写竞争
+                for (AgentPlanStepExecutionResult result : waveResults) {
+                    stepResults.add(result);
+                    rememberStepOutput(stepOutputs, result);
+                    resolvedStepNos.add(result.getStepNo());
+                }
+
+                List<AgentPlanStepExecutionResult> failedResults = waveResults.stream()
+                        .filter(result -> AgentPlanStepStatus.FAILED.name().equals(result.getStatus()))
+                        .toList();
+                if (!failedResults.isEmpty()) {
+                    AgentPlanStepExecutionResult firstFailedResult = failedResults.get(0);
+                    AgentPlanStep firstFailedStep = wave.stream()
+                            .filter(step -> Objects.equals(step.getStepNo(), firstFailedResult.getStepNo()))
+                            .findFirst()
+                            .orElseThrow();
+                    List<AgentPlanStep> correctiveSteps = tryReplan(plan, firstFailedStep, firstFailedResult, steps);
+                    if (correctiveSteps.isEmpty()) {
+                        failed = true;
+                        failReason = firstFailedResult.getErrorMsg();
+                    } else {
+                        // 同波次其他失败步骤：随重规划改道放弃（标记 SKIPPED，避免遗留 FAILED 状态）
+                        for (AgentPlanStepExecutionResult other : failedResults.subList(1, failedResults.size())) {
+                            AgentPlanStep otherStep = wave.stream()
+                                    .filter(step -> Objects.equals(step.getStepNo(), other.getStepNo()))
+                                    .findFirst()
+                                    .orElse(null);
+                            if (otherStep != null) {
+                                stepResults.add(skipStep(plan, otherStep, "同波次步骤失败，随 Replan 改道放弃。"));
+                            }
+                        }
+                        pending.addAll(correctiveSteps);
+                    }
                 }
             }
+        } catch (ExecutionSupersededException exception) {
+            log.warn("执行批次已被取代，放弃本次执行，planId={}, epoch={}, stepNo={}",
+                    plan.getId(), plan.getExecutionEpoch(), exception.getStepNo());
+            recordSupersededEvent(plan, exception.getStepNo());
+            return buildExistingPlanResult(plan, steps, false, "计划已被新的执行取代，本次执行结果已丢弃");
         }
 
         // 失败终止后，剩余未执行步骤统一标记 SKIPPED，语义与改造前一致
@@ -402,6 +422,16 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             AgentPlanStepExecutionResult failedResult,
             List<AgentPlanStep> steps
     ) {
+        /*
+         * 任务 J2：RESULT_UNKNOWN（外部调用结果不明，如邮件可能已发出）绝不自动重规划——
+         * 盲目换路径重试可能造成重复副作用。按失败处理并转人工核对。
+         */
+        if (isResultUnknown(failedResult)) {
+            log.info("工具结果不确定（RESULT_UNKNOWN），不触发重规划，转人工核对，planId={}, stepNo={}",
+                    plan.getId(), failedStep.getStepNo());
+            return List.of();
+        }
+
         int replanCount = plan.getReplanCount() == null ? 0 : plan.getReplanCount();
         if (replanCount >= MAX_REPLAN_PER_PLAN) {
             log.info("Agent 计划重规划次数用尽，按失败处理，planId={}, replanCount={}", plan.getId(), replanCount);
@@ -425,7 +455,13 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         failedStep.setStatus(AgentPlanStepStatus.SKIPPED.name());
         failedStep.setResultSummary("执行失败，已由 Replan 替代步骤接管");
         failedStep.setUpdateTime(new Date());
-        agentPlanStepMapper.updateById(failedStep);
+        int abandonedRows = writeStepGuarded(plan, failedStep, wrapper -> {
+            wrapper.set("status", AgentPlanStepStatus.SKIPPED.name());
+            wrapper.set("result_summary", "执行失败，已由 Replan 替代步骤接管");
+        });
+        if (abandonedRows <= 0) {
+            throw new ExecutionSupersededException(failedStep.getStepNo());
+        }
 
         // 2. 替代步骤追加到计划尾部（stepNo 续增），随即参与本轮执行
         List<AgentPlanStep> appended = appendReplanSteps(plan, steps, proposals);
@@ -605,6 +641,13 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                 Thread.currentThread().interrupt();
                 throw new BizException("并行执行被中断");
             } catch (ExecutionException exception) {
+                /*
+                 * 任务 J2：批次被取代是编排级信号，必须原样抛出让 executePlan 统一收尾，
+                 * 不能被包装成 BizException 当成普通步骤失败——否则会继续调用后续工具。
+                 */
+                if (exception.getCause() instanceof ExecutionSupersededException superseded) {
+                    throw superseded;
+                }
                 throw new BizException("并行执行失败：" + exception.getCause().getMessage());
             }
         }
@@ -787,7 +830,14 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         step.setResultSummary(reason);
         step.setErrorMsg(null);
         step.setUpdateTime(new Date());
-        agentPlanStepMapper.updateById(step);
+        int skippedRows = writeStepGuarded(plan, step, wrapper -> {
+            wrapper.set("status", AgentPlanStepStatus.SKIPPED.name());
+            wrapper.set("result_summary", reason);
+        });
+        if (skippedRows <= 0) {
+            // 批次已被取代：跳过语义由新执行器负责，这里只记录不中止（无副作用可丢）
+            log.debug("步骤跳过回写被批次校验丢弃，planId={}, stepNo={}", plan.getId(), step.getStepNo());
+        }
         recordExecutorEvent(plan, step, step.getToolName(), AgentObservationStatus.SKIPPED, null, reason, null, null);
 
         return AgentPlanStepExecutionResult.builder()
@@ -807,7 +857,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             Map<String, Object> params,
             Map<Integer, Object> stepOutputs
     ) {
-        markStepRunning(step, toolName);
+        markStepRunning(plan, step, toolName);
 
         try {
             /*
@@ -842,6 +892,9 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
                 return markStepCompleted(plan, step, toolName, toolResult);
             }
             return markStepFailed(plan, step, toolName, toolResult);
+        } catch (ExecutionSupersededException exception) {
+            // 任务 J2：批次取代是编排级信号，原样抛出交 executePlan 收尾，不转成步骤失败
+            throw exception;
         } catch (AgentToolException exception) {
             AgentToolExecutionResult toolResult = AgentToolExecutionResult.builder()
                     .success(false)
@@ -865,18 +918,93 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         }
     }
 
-    private void markStepRunning(AgentPlanStep step, String toolName) {
+    private void markStepRunning(AgentPlan plan, AgentPlanStep step, String toolName) {
         step.setToolName(toolName);
         step.setStatus(AgentPlanStepStatus.RUNNING.name());
         step.setErrorMsg(null);
         step.setUpdateTime(new Date());
-        agentPlanStepMapper.updateById(step);
+        // 尝试次数与开始时间落库（任务 J2 验收：失败分布、恢复耗时）
+        int attempt = step.getAttemptCount() == null ? 0 : step.getAttemptCount();
+        step.setAttemptCount(attempt + 1);
+        step.setStartedAt(new Date());
+
+        /*
+         * 持有权校验（任务 J2）：仅当计划批次号仍属于本次执行才允许置 RUNNING。
+         * 0 行 = 已被新执行器取代——此时工具还没调用，直接中止，零副作用。
+         */
+        int rows = writeStepGuarded(plan, step, wrapper -> {
+            wrapper.set("status", AgentPlanStepStatus.RUNNING.name());
+            wrapper.set("tool_name", toolName);
+            wrapper.setSql("attempt_count = attempt_count + 1");
+            wrapper.set("started_at", new Date());
+        });
+        if (rows <= 0) {
+            throw new ExecutionSupersededException(step.getStepNo());
+        }
 
         /*
          * 执行心跳: 每开始一个步骤就刷新计划的 update_time。
          * Executor 靠它判断 RUNNING 计划是正常执行中，还是进程崩溃后的残留状态。
          */
         touchPlanUpdateTime(step.getPlanId());
+    }
+
+    /*
+     * 步骤状态回写（任务 J2 持有权校验）:
+     * 1. 仅当 agent_plan.execution_epoch 仍等于本次执行批次时才允许写入——
+     *    旧执行器的回写影响 0 行，结果被丢弃，不会覆盖新执行器的状态；
+     * 2. 用字符串列名 + 子查询而非 LambdaUpdateWrapper：纯 Mock 单测里 Lambda 需要
+     *    MyBatis-Plus 的 Lambda 缓存（只有 Spring 扫 Mapper 时才初始化），字符串写法可测；
+     * 3. update_time 统一在这里维护，调用方只关心业务列。
+     */
+    private int writeStepGuarded(AgentPlan plan, AgentPlanStep step, java.util.function.Consumer<UpdateWrapper<AgentPlanStep>> customizer) {
+        UpdateWrapper<AgentPlanStep> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", step.getId());
+        wrapper.apply(
+                "plan_id IN (SELECT id FROM agent_plan WHERE id = {0} AND execution_epoch = {1})",
+                step.getPlanId(),
+                plan.getExecutionEpoch()
+        );
+        customizer.accept(wrapper);
+        wrapper.set("update_time", new Date());
+        return agentPlanStepMapper.update(null, wrapper);
+    }
+
+    /*
+     * 步骤结果保留写（任务 J2）：工具已真实执行完，结果不能因批次被取代而丢失。
+     * 无条件写回（last-write-wins），让新执行器通过“已完成步骤采用历史结果”复用本结果，
+     * 避免同一工具被重复执行；同时记 ExecutionSuperseded 事件并中止本批次。
+     */
+    private void preserveSupersededResult(AgentPlan plan, AgentPlanStep step) {
+        agentPlanStepMapper.updateById(step);
+        recordSupersededEvent(plan, step.getStepNo());
+        throw new ExecutionSupersededException(step.getStepNo());
+    }
+
+    // 记录“执行批次被取代”观测事件：后台可统计抢占覆盖发生次数与步骤位置
+    private void recordSupersededEvent(AgentPlan plan, Integer stepNo) {
+        if (plan == null) {
+            return;
+        }
+        Map<String, Object> requestSnapshot = new LinkedHashMap<>();
+        requestSnapshot.put("stepNo", stepNo);
+        requestSnapshot.put("executionEpoch", plan.getExecutionEpoch());
+        requestSnapshot.put("reason", "计划已被其他执行器抢占，本批次写入被丢弃");
+
+        try {
+            agentObservationService.recordEvent(AgentObservationRecord.builder()
+                    .traceId(plan.getTraceId())
+                    .userId(plan.getUserId())
+                    .conversationId(plan.getConversationId())
+                    .planId(plan.getId())
+                    .eventType(AgentObservationEventType.EXECUTOR)
+                    .eventName("ExecutionSuperseded")
+                    .status(AgentObservationStatus.SUCCESS)
+                    .requestSnapshot(requestSnapshot)
+                    .build());
+        } catch (Exception exception) {
+            log.debug("批次取代观测事件记录失败，planId={}, error={}", plan.getId(), exception.getMessage());
+        }
     }
 
     /**
@@ -924,7 +1052,7 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
      *
      * @param steps 计划步骤列表
      */
-    private void resetIncompleteSteps(List<AgentPlanStep> steps) {
+    private void resetIncompleteSteps(AgentPlan plan, List<AgentPlanStep> steps) {
         for (AgentPlanStep step : steps) {
             if (AgentPlanStepStatus.COMPLETED.name().equals(step.getStatus())) {
                 continue;
@@ -934,7 +1062,15 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
             step.setResultSummary(null);
             step.setErrorMsg(null);
             step.setUpdateTime(new Date());
-            agentPlanStepMapper.updateById(step);
+            int resetRows = writeStepGuarded(plan, step, wrapper -> {
+                wrapper.set("status", AgentPlanStepStatus.PENDING.name());
+                wrapper.set("result_summary", null);
+                wrapper.set("error_msg", null);
+            });
+            if (resetRows <= 0) {
+                // 刚抢占成功就被取代（极端并发）：放弃本次恢复，交给新执行器
+                throw new ExecutionSupersededException(step.getStepNo());
+            }
         }
     }
 
@@ -1050,8 +1186,17 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         step.setStatus(AgentPlanStepStatus.COMPLETED.name());
         step.setResultSummary(summary);
         step.setErrorMsg(null);
+        step.setFinishedAt(new Date());
         step.setUpdateTime(new Date());
-        agentPlanStepMapper.updateById(step);
+        int completedRows = writeStepGuarded(plan, step, wrapper -> {
+            wrapper.set("status", AgentPlanStepStatus.COMPLETED.name());
+            wrapper.set("result_summary", summary);
+            wrapper.set("finished_at", new Date());
+        });
+        if (completedRows <= 0) {
+            // 工具已执行成功，结果必须保留给新执行器复用（任务 J2）
+            preserveSupersededResult(plan, step);
+        }
         recordExecutorEvent(plan, step, toolName, AgentObservationStatus.SUCCESS, null, summary, toolResult.getCostTime(), toolResult);
 
         return AgentPlanStepExecutionResult.builder()
@@ -1076,8 +1221,17 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         step.setStatus(AgentPlanStepStatus.FAILED.name());
         step.setResultSummary(null);
         step.setErrorMsg(errorMsg);
+        step.setFinishedAt(new Date());
         step.setUpdateTime(new Date());
-        agentPlanStepMapper.updateById(step);
+        int failedRows = writeStepGuarded(plan, step, wrapper -> {
+            wrapper.set("status", AgentPlanStepStatus.FAILED.name());
+            wrapper.set("error_msg", errorMsg);
+            wrapper.set("finished_at", new Date());
+        });
+        if (failedRows <= 0) {
+            // 失败结果同样保留：新执行器需要知道这步已经失败过（任务 J2）
+            preserveSupersededResult(plan, step);
+        }
         recordExecutorEvent(
                 plan,
                 step,
@@ -1104,7 +1258,27 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         plan.setStatus(failed ? AgentPlanStatus.FAILED.name() : AgentPlanStatus.COMPLETED.name());
         plan.setFailReason(failed ? failReason : null);
         plan.setUpdateTime(new Date());
-        agentPlanMapper.updateById(plan);
+        /*
+         * 终态回写也校验批次（任务 J2）：被取代的执行器不能把计划改成 COMPLETED/FAILED，
+         * 否则会覆盖新执行器的执行结论。0 行只记事件——循环已结束，无需中止。
+         */
+        int rows = agentPlanMapper.update(null, new UpdateWrapper<AgentPlan>()
+                .eq("id", plan.getId())
+                .eq("execution_epoch", plan.getExecutionEpoch())
+                .set("status", plan.getStatus())
+                .set("fail_reason", plan.getFailReason())
+                .set("update_time", plan.getUpdateTime()));
+        if (rows <= 0) {
+            log.warn("计划终态回写被批次校验丢弃，planId={}, epoch={}", plan.getId(), plan.getExecutionEpoch());
+            recordSupersededEvent(plan, null);
+        }
+    }
+
+    // 结果不确定判定：工具输出标记 RESULT_UNKNOWN（任务 J2）
+    private boolean isResultUnknown(AgentPlanStepExecutionResult failedResult) {
+        return failedResult != null
+                && failedResult.getToolResult() != null
+                && AgentToolErrorCode.RESULT_UNKNOWN.name().equals(failedResult.getToolResult().getErrorCode());
     }
 
     private void recordLongTermMemory(AgentPlan plan, AgentPlanExecutionResult executionResult) {

@@ -89,6 +89,8 @@ class AgentPlanExecutorServiceImplTest {
         // 计划终失败会触发补偿（任务 G9）；默认空汇总，需要断言补偿的用例自行覆盖
         when(agentPlanCompensator.compensate(any(), any()))
                 .thenReturn(AgentPlanCompensator.CompensationSummary.EMPTY);
+        // 任务 J2：步骤状态回写改为带批次校验的条件更新，默认成功（1 行）
+        when(agentPlanStepMapper.update(any(), any())).thenReturn(1);
 
         executor = new AgentPlanExecutorServiceImpl(
                 agentPlanMapper,
@@ -443,12 +445,14 @@ class AgentPlanExecutorServiceImplTest {
         assertThat(result.getSteps()).hasSize(2); // 原步骤 + 替代步骤
         verify(agentToolInvoker, times(2)).invoke(any(), any(), any());
         verify(agentPlanStepMapper).insert(any(AgentPlanStep.class)); // 替代步骤落库
-        // 失败步骤最终被标记为 SKIPPED（放弃），替代步骤执行成功
-        ArgumentCaptor<AgentPlanStep> stepCaptor = ArgumentCaptor.forClass(AgentPlanStep.class);
-        verify(agentPlanStepMapper, atLeastOnce()).updateById(stepCaptor.capture());
-        assertThat(stepCaptor.getAllValues()).anySatisfy(step -> {
-            assertThat(step.getStatus()).isEqualTo(AgentPlanStepStatus.SKIPPED.name());
-            assertThat(step.getResultSummary()).contains("Replan");
+        // 失败步骤最终被标记为 SKIPPED（放弃，任务 J2 起为带批次校验的条件更新），替代步骤执行成功
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentPlanStep>> wrapperCaptor =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(agentPlanStepMapper, atLeastOnce()).update(org.mockito.ArgumentMatchers.isNull(), wrapperCaptor.capture());
+        // 注意：MP 的 set(column, value) 是参数化的，值在 paramNameValuePairs 里
+        assertThat(wrapperCaptor.getAllValues()).anySatisfy(wrapper -> {
+            assertThat(wrapper.getParamNameValuePairs().values()).contains("SKIPPED");
+            assertThat(wrapper.getParamNameValuePairs().values().toString()).contains("Replan");
         });
         // 有重规划观测事件，后台可统计“失败→改道”
         verify(agentObservationService, atLeastOnce()).recordEvent(
@@ -660,6 +664,122 @@ class AgentPlanExecutorServiceImplTest {
         // 补偿汇总拼进失败消息：用户明确知道副作用已被处理
         assertThat(result.getMessage()).contains("已补偿 1 个副作用步骤");
         verify(agentPlanCompensator).compensate(eq(plan), any());
+    }
+
+    /**
+     * 用例16（任务 J2）：置 RUNNING 回写发现批次已被取代（0 行）→ 立即中止，
+     * 工具尚未调用（零副作用），返回“已被新的执行取代”，并记 ExecutionSuperseded 事件。
+     */
+    @Test
+    void supersededRunningWriteShouldAbortBeforeToolCall() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name()));
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        // 第一次步骤回写（置 RUNNING）即被批次校验拒绝
+        when(agentPlanStepMapper.update(any(), any())).thenReturn(0);
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isFalse();
+        assertThat(result.getMessage()).contains("已被新的执行取代");
+        // 工具一次都没调用：取代发生在调用前，零副作用
+        verify(agentToolInvoker, never()).invoke(any(), any(), any());
+        verifySupersededEventRecorded();
+    }
+
+    /**
+     * 用例17（任务 J2）：步骤执行成功后回写被取代（0 行）→ 结果保留写回
+     * （无条件 updateById，让新执行器复用，避免重复执行），记事件并中止。
+     */
+    @Test
+    void supersededCompletedWriteShouldPreserveResult() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name()));
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        // 第 1 次回写（RUNNING）成功，第 2 次（COMPLETED）被取代
+        when(agentPlanStepMapper.update(any(), any())).thenReturn(1, 0);
+        when(agentToolInvoker.invoke(any(), any(), any())).thenReturn(buildToolSuccess("JobSearchTool.searchJobs"));
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isFalse();
+        assertThat(result.getMessage()).contains("已被新的执行取代");
+        // 结果保留：无条件写回，供新执行器幂等复用
+        verify(agentPlanStepMapper).updateById(any(AgentPlanStep.class));
+        verifySupersededEventRecorded();
+    }
+
+    /**
+     * 用例18（任务 J2）：RESULT_UNKNOWN（外部结果不明）不触发 Replan——
+     * 盲目换路径重试可能重复副作用，按失败处理转人工核对。
+     */
+    @Test
+    void resultUnknownShouldNotTriggerReplan() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "EmailConnectorTool.sendEmail", AgentPlanStepStatus.PENDING.name()));
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(any(), any(), any())).thenReturn(
+                AgentToolExecutionResult.builder()
+                        .success(false)
+                        .toolName("EmailConnectorTool.sendEmail")
+                        .errorCode("RESULT_UNKNOWN")
+                        .message("邮件发送后响应丢失，结果不确定")
+                        .costTime(1L)
+                        .build());
+        // 即使有重规划预算和可行提案，也绝不被调用
+        when(agentReplanner.replan(any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new AgentReplanner.ReplanStep(
+                        "重试发送", "重新发送", "EmailConnectorTool.sendEmail", Map.of(), "发送成功")));
+
+        AgentPlanExecutionResult result = executor.executePlan(USER_ID, PLAN_ID);
+
+        assertThat(result.getSuccess()).isFalse();
+        verify(agentReplanner, never()).replan(any(), any(), any(), any(), any(), any());
+    }
+
+    /**
+     * 用例19（任务 J2）：步骤回写带观测字段——置 RUNNING 时 attempt_count+1 与
+     * started_at 落库，完成时 finished_at 落库。
+     */
+    @Test
+    void stepWriteShouldCarryAttemptAndTimeFields() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        List<AgentPlanStep> steps = List.of(
+                buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name()));
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(any(), any(), any())).thenReturn(buildToolSuccess("JobSearchTool.searchJobs"));
+
+        executor.executePlan(USER_ID, PLAN_ID);
+
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentPlanStep>> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(agentPlanStepMapper, org.mockito.Mockito.atLeastOnce()).update(org.mockito.ArgumentMatchers.isNull(), captor.capture());
+        String allSets = captor.getAllValues().stream()
+                .map(wrapper -> wrapper.getSqlSet() == null ? "" : wrapper.getSqlSet())
+                .reduce("", (a, b) -> a + "," + b);
+        assertThat(allSets).contains("attempt_count = attempt_count + 1");
+        assertThat(allSets).contains("started_at");
+        assertThat(allSets).contains("finished_at");
+    }
+
+    // 校验 ExecutionSuperseded 观测事件已记录（任务 J2）
+    private void verifySupersededEventRecorded() {
+        org.mockito.ArgumentCaptor<com.job.bootstrap.observability.AgentObservationRecord> captor =
+                org.mockito.ArgumentCaptor.forClass(com.job.bootstrap.observability.AgentObservationRecord.class);
+        verify(agentObservationService, org.mockito.Mockito.atLeastOnce()).recordEvent(captor.capture());
+        assertThat(captor.getAllValues().stream()
+                .anyMatch(event -> "ExecutionSuperseded".equals(event.getEventName()))).isTrue();
     }
 
     private AgentToolExecutionResult buildToolSuccess(String toolName) {

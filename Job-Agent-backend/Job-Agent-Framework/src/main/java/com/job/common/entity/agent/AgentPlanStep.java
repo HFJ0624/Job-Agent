@@ -3,6 +3,8 @@ package com.job.common.entity.agent;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.job.common.entity.base.BaseEntity;
 import lombok.Data;
+
+import java.util.Date;
 import lombok.EqualsAndHashCode;
 
 /**
@@ -64,6 +66,21 @@ public class AgentPlanStep extends BaseEntity {
      * 步骤状态。
      */
     private String status;
+
+    /**
+     * 尝试次数（任务 J2）：每次置 RUNNING +1，用于失败分布与恢复观测。
+     */
+    private Integer attemptCount;
+
+    /**
+     * 本次执行开始时间（任务 J2）。
+     */
+    private Date startedAt;
+
+    /**
+     * 本次执行结束时间（任务 J2，完成/失败时落库）。
+     */
+    private Date finishedAt;
 
     /**
      * 结果摘要。

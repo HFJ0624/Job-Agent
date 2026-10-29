@@ -10,7 +10,7 @@
 | # | 优先级 | 任务 | 状态 |
 |---|---|---|---|
 | J1 | P0 | 完整多步骤求职任务 | ✅ 代码完成（2026-10-29，267 单测全绿）；用例集扩充待 VM 录入 |
-| J2 | P0 | 步骤级保存、失败续跑、执行防重 | ⬜ 待做（增量：执行器租约/批次号、外部结果核对） |
+| J2 | P0 | 步骤级保存、失败续跑、执行防重 | ✅ 执行批次号+持有权校验+步骤观测字段（2026-10-29，277 单测全绿）；sql/06 待 VM 执行 |
 | J3 | P0 | 打通至少一个真实连接器 | ✅ 简历导出真实化（2026-10-29，273 单测全绿）；真库 E2E 待 VM |
 | J4 | P1 | 长期记忆更新与遗忘规则 | 🟡 大部分已有（G7/TTL/冲突裁决），剩验证测试补齐 |
 | J5 | P1 | 岗位匹配可解释性 | ⬜ 待做（标注样本集 + NDCG@K） |
@@ -48,6 +48,7 @@ S1 简历分析(ResumeAnalyzeTool) → S2 岗位筛选(搜索/推荐二选一)
 
 ## 待办（VM/数据侧，沙箱无法完成）
 
+- [ ] **J2：执行 `sql/06_migration_j2_execution_epoch.sql`**（agent_plan.execution_epoch + agent_plan_step.attempt_count/started_at/finished_at）
 - [ ] J1：录入 30~50 条完整任务用例（正常流/参数缺失/工具失败三类各占一定比例），统计“完整任务成功率、参数正确率、人工补充次数、失败分布、耗时”五项指标
 - [ ] J3：VM 上验证真实导出闭环（配 MinIO → 确认导出 → 文件可下载核对 → 重复导出幂等）
 - [ ] J2/J3：真库与外部凭证验证（VM）
@@ -70,3 +71,21 @@ S1 简历分析(ResumeAnalyzeTool) → S2 岗位筛选(搜索/推荐二选一)
 **模块边界**：`AgentRuntimeContext` 从 Bootstrap 移至 Framework（`com.job.common.agent`）——连接器工具在 Mcp-Tools 模块，运行时上下文本就是跨模块共享基建；`ResumeExportExecutor` 接口定义在 Mcp-Tools、实现（依赖简历服务/文件存储）在 Bootstrap，端口-适配器模式解耦。
 
 **完成记录**：代码版本见 git log “J3”；测试：`ResumeExportConnectorToolTest` 7 例（预览/执行/参数/格式/归属/身份缺失/默认格式）+ `ResumeExportExecutorImplTest` 6 例（稳定键/忠于原文/parsedJson 回退/归属失败不碰存储/存储失败/非法参数）；全量 273 绿。剩余限制：真实 MinIO E2E 需 VM；PDF/DOCX 需文档生成器适配器（后续项）。
+
+---
+
+## J2｜P0：步骤级保存、失败续跑、执行防重 ✅（方案③）
+
+**已有基础**（G 线完成，不重做）：短事务（DB 状态与外部调用分离）、步骤状态/摘要/错误持久化、恢复模式复用已完成步骤（idempotentHit）、计划原子抢占（条件更新）、执行心跳（每步骤刷 update_time）+ 心跳超时判崩溃残留、按错误类型的重试退避。
+
+**本次补齐**（用户选定方案③：计划级 epoch + 步骤观测字段）：
+1. **执行批次号**：`agent_plan.execution_epoch` 每次成功抢占 +1（`sql/06` 迁移）；执行器持批次号执行；
+2. **回写持有权校验**：所有步骤状态回写（RUNNING/COMPLETED/FAILED/SKIPPED/恢复重置/Replan 放弃/计划终态）带条件——`plan_id IN (SELECT id FROM agent_plan WHERE id=? AND execution_epoch=?)`，旧执行器写入影响 0 行；
+3. **两种取代语义**：
+   - 置 RUNNING 被拒（工具还没调用）→ 立即中止，**零副作用**；
+   - 完成/失败回写被拒（工具已执行）→ **结果保留写回**（无条件，last-write-wins），让新执行器通过“已完成步骤采用历史结果”复用，**避免同一工具被重复执行**；记 `ExecutionSuperseded` 事件后中止；
+4. **步骤观测字段**：`attempt_count`（每次置 RUNNING +1）、`started_at`、`finished_at` 落库——验收指标“失败分布、恢复耗时”有数据落点；
+5. **RESULT_UNKNOWN**：新错误码；工具结果不明（如邮件发送后响应丢失）时**绝不触发 Replan**（盲目换路径重试=重复副作用），按失败处理转人工核对；
+6. **异常放行**：`ExecutionSupersededException` 在并行路径（ExecutionException 解包）和 executeToolStep 的 catch 里都原样抛出——它是编排级信号，不能被当成普通步骤失败（否则会继续调用后续工具）。
+
+**完成记录**：测试：执行器 22 例（含 4 个新用例：RUNNING 被取代零副作用中止/完成后被取代结果保留/RESULT_UNKNOWN 不重规划/attempt 与时间字段落库）；全量 277 绿。故障注入方式：mock 步骤回写返回 0 行模拟“被新执行器抢占”。剩余限制：sql/06 需 VM 执行；真实多执行器并发抢占的 E2E 需 VM。

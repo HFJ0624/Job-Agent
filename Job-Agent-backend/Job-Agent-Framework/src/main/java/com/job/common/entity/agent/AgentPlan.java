@@ -80,4 +80,10 @@ public class AgentPlan extends BaseEntity {
      * 步骤失败且还有预算时，执行器会让 Replanner 给出替代步骤；该字段用于有界控制与审计。
      */
     private Integer replanCount;
+
+    /**
+     * 执行批次号（任务 J2）：每次成功抢占 +1，所有步骤回写带批次校验，
+     * 旧执行器的写入影响 0 行，不会覆盖新执行器的状态。
+     */
+    private Integer executionEpoch;
 }

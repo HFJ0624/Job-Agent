@@ -50,5 +50,11 @@ public enum AgentToolErrorCode {
     /**
      * 工具被 Agent Guardrails 拦截。
      */
-    TOOL_GUARDRAIL_BLOCKED
+    TOOL_GUARDRAIL_BLOCKED,
+
+    /**
+     * 外部调用结果不确定（任务 J2）：如邮件发送后响应丢失，无法确认是否生效。
+     * 标记此错误的步骤绝不自动重试/重规划——盲目重试可能造成重复副作用，转人工核对。
+     */
+    RESULT_UNKNOWN
 }
