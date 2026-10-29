@@ -770,8 +770,8 @@ public class AgentChatServiceImpl implements AgentChatService {
      *
      * 设计说明:
      * - GENERAL_CHAT / JOB_MATCH / RESUME_ANALYZE 需要用户知识库（简历、岗位、公司、沟通记录）支撑回答，启用预检索。
-     * - JOB_SEARCH / INTERVIEW_PREPARE / MOCK_INTERVIEW / GREETING_GENERATE / JOB_FAVORITE 走结构化工具，
-     *   不依赖向量知识库，跳过预检索以节省 embedding 成本。
+     * - JOB_SEARCH / INTERVIEW_PREPARE / MOCK_INTERVIEW / GREETING_GENERATE / JOB_FAVORITE / JOB_SEEK_FLOW
+     *   走结构化工具（主流程也是纯工具链），不依赖向量知识库，跳过预检索以节省 embedding 成本。
      */
     private boolean ragEnabledFor(String intentCode) {
         if (!StringUtils.hasText(intentCode)) {

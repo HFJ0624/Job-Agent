@@ -35,8 +35,46 @@ public class AgentPlanTemplateFactory {
             case INTERVIEW_PREPARE -> interviewPreparePlan();
             case MOCK_INTERVIEW -> mockInterviewReviewPlan();
             case JOB_FAVORITE -> jobFavoritePlan();
+            case JOB_SEEK_FLOW -> jobSeekFlowPlan();
             default -> generalChatPlan();
         };
+    }
+
+    /**
+     * 求职主流程计划（任务 J1）：简历分析 → 岗位筛选 → Top1 匹配分析 → 投递话术。
+     *
+     * <p>设计说明:
+     * 1. 唯一必填参数是 resumeId：缺它时计划进入 NEED_CLARIFICATION，用户补充后按 planId 续跑
+     *    （复用既有澄清机制，不新造轮子）；
+     * 2. 步骤间数据传递用 {{step_N.output.xxx}} 占位符：S3/S4 的 jobId 取 S2 岗位列表的
+     *    第一个（数组下标，Executor 解析），resumeId 等共享参数从计划级 extractedParams 继承；
+     * 3. 收尾步骤是“生成投递话术”而不是“面试准备”：面试准备工具依赖真实投递记录
+     *    （applicationId），首轮流程里尚不存在，硬凑只会得到澄清阻塞；话术生成是匹配后的
+     *    自然动作，且带用户确认 + 可补偿（任务 G9），正好演示完整的写工具链路；
+     * 4. 岗位搜索步骤沿用“搜索/推荐二选一”表达，由 Executor 按用户目标词选择具体工具。
+     */
+    private AgentPlanTemplate jobSeekFlowPlan() {
+        return new AgentPlanTemplate(
+                "求职主流程计划",
+                "串联简历分析、岗位筛选、Top1 岗位匹配分析和投递话术生成：后续步骤通过占位符读取前序步骤的结构化结果，参数不足时先澄清再续跑。",
+                List.of("resumeId"),
+                List.of(
+                        step("解析并分析简历", "解析用户简历，输出评分、优势与待补齐项，为后续匹配提供依据。", "ResumeAnalyzeTool.analyzeResume",
+                                schema("ResumeAnalyzeTool.analyzeResume"),
+                                "返回简历评分、优势、不足和优化建议。"),
+                        step("按条件筛选岗位", "从用户目标中提取关键词和城市，检索候选岗位列表。", "JobSearchTool.searchJobs / JobRecommendTool.recommendJobs",
+                                schema("JobSearchTool.searchJobs / JobRecommendTool.recommendJobs"),
+                                "返回候选岗位列表（含 jobId、公司、薪资、地点）。"),
+                        step("对 Top1 岗位做匹配分析", "取岗位列表第一个做深度匹配，输出匹配分、优势与风险点。", "JobMatchTool.matchJob",
+                                schema("JobMatchTool.matchJob"),
+                                "返回匹配分、匹配等级、优势、风险点和建议。",
+                                Map.of("jobId", "{{step_2.output.jobs[0].jobId}}")),
+                        step("生成投递话术", "为 Top1 匹配岗位生成 HR 开场白（写操作，需用户确认后可补偿）。", "GreetingGenerateTool.generateGreeting",
+                                schema("GreetingGenerateTool.generateGreeting"),
+                                "返回可复制的话术并创建沟通记录；发送前需用户确认。",
+                                Map.of("jobId", "{{step_2.output.jobs[0].jobId}}"))
+                )
+        );
     }
 
     private AgentPlanTemplate resumeAnalyzePlan() {
@@ -171,6 +209,18 @@ public class AgentPlanTemplateFactory {
             String completionCriteria
     ) {
         return new AgentPlanStepTemplate(stepName, stepGoal, toolName, toolInputSchema, completionCriteria);
+    }
+
+    /** 带步骤级可执行参数的重载（任务 J1：主流程步骤间传参）。 */
+    private AgentPlanStepTemplate step(
+            String stepName,
+            String stepGoal,
+            String toolName,
+            Map<String, Object> toolInputSchema,
+            String completionCriteria,
+            Map<String, Object> stepParams
+    ) {
+        return new AgentPlanStepTemplate(stepName, stepGoal, toolName, toolInputSchema, completionCriteria, stepParams);
     }
 
     private Map<String, Object> schema(String toolExpression) {

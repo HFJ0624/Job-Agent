@@ -44,6 +44,18 @@ public class AgentIntentRouter {
         String text = message.trim().toLowerCase();
 
         /*
+         * 0. 求职主流程意图（任务 J1）。
+         * 必须放在最前面：完整流程类请求会同时包含“匹配/简历/岗位”等词，
+         * 不先拦截会被单目标意图（如 JOB_MATCH）抢走。
+         * 典型输入:
+         * - 帮我走完整求职流程：分析简历、找Java岗位、做匹配、生成话术
+         * - 从简历到投递一步步来
+         */
+        if (containsAny(text, "完整流程", "全流程", "求职流程", "主流程", "从简历到", "一步步", "走一遍", "系统安排", "完整规划", "一条龙")) {
+            return new IntentResolution(AgentIntentCode.JOB_SEEK_FLOW, true);
+        }
+
+        /*
          * 1. 岗位匹配意图。
          * 典型输入:
          * - 帮我看看这份简历和这个岗位匹配吗

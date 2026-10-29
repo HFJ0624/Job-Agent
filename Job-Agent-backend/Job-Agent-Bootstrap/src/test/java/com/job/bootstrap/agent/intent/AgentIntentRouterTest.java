@@ -24,6 +24,15 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    void shouldRouteJobSeekFlowBeforeSingleGoalIntents() {
+        // 主流程关键词必须优先于单目标意图：这句话同时含“简历/岗位/匹配”
+        assertThat(router.route("帮我走完整求职流程：分析简历、找Java岗位、做匹配、生成话术"))
+                .isEqualTo(AgentIntentCode.JOB_SEEK_FLOW);
+        assertThat(router.route("从简历到投递一步步来")).isEqualTo(AgentIntentCode.JOB_SEEK_FLOW);
+        assertThat(router.route("帮我系统安排一下求职主流程")).isEqualTo(AgentIntentCode.JOB_SEEK_FLOW);
+    }
+
+    @Test
     void shouldRouteResumeAnalyze() {
         // 关键词为连续子串“分析简历”，注意自然语言“分析一下简历”不会命中（见交付说明）
         assertThat(router.route("帮我分析简历")).isEqualTo(AgentIntentCode.RESUME_ANALYZE);

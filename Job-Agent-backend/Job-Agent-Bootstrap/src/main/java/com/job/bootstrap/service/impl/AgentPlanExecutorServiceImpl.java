@@ -136,10 +136,17 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
 
     /**
      * 步骤间数据传递占位符：{{step_N.output.xxx}}。
-     * N 为步骤序号，xxx 为该步工具输出里的字段路径（支持点号多级），缺省 output 表示整个输出。
+     * N 为步骤序号，xxx 为该步工具输出里的字段路径（支持点号多级与数组下标 [i]，
+     * 例如 {{step_2.output.jobs[0].jobId}}），缺省 output 表示整个输出。
      */
     private static final Pattern STEP_OUTPUT_PLACEHOLDER =
-            Pattern.compile("\\{\\{\\s*step_(\\d+)\\.output(\\.[\\w.]*)?\\s*\\}\\}");
+            Pattern.compile("\\{\\{\\s*step_(\\d+)\\.output((?:\\.[\\w.]+|\\[\\d+\\])*)\\s*\\}\\}");
+
+    /** 占位符路径里的“字段[下标]”片段，例如 jobs[0]。 */
+    private static final Pattern INDEXED_FIELD = Pattern.compile("([\\w.]+)\\[(\\d+)\\]");
+
+    /** 占位符路径里的“裸下标”片段，例如 [0]（输出本身是数组时使用）。 */
+    private static final Pattern BARE_INDEX = Pattern.compile("\\[(\\d+)\\]");
 
     private final AgentPlanMapper agentPlanMapper;
     private final AgentPlanStepMapper agentPlanStepMapper;
@@ -1335,28 +1342,58 @@ public class AgentPlanExecutorServiceImpl implements AgentPlanExecutorService {
         return value;
     }
 
-    // 解析单个占位符：stepNo 定位前序输出，path 按点号取字段；解析不到返回 fallback（保留原样）
+    // 解析单个占位符：stepNo 定位前序输出，path 按段取字段（支持 field 与 field[index]）；解析不到返回 fallback（保留原样）
     private Object resolveToken(String stepNoText, String path, Map<Integer, Object> stepOutputs, Object fallback) {
         try {
             Object output = stepOutputs.get(Integer.valueOf(stepNoText));
             if (output == null) {
                 return fallback;
             }
-            if (path == null || ".".equals(path)) {
+            if (path == null || path.isEmpty() || ".".equals(path)) {
                 return output;
             }
+            // 路径可能以 [0] 开头（输出本身是数组），此时不剥前导点号
+            String normalized = path.startsWith(".") ? path.substring(1) : path;
             Object current = output;
-            for (String part : path.substring(1).split("\\.")) {
-                if (current instanceof Map<?, ?> map) {
-                    current = map.get(part);
-                } else {
+            for (String part : normalized.split("\\.")) {
+                if (part.isEmpty()) {
+                    continue;
+                }
+                current = descendPath(current, part);
+                if (current == null) {
                     return fallback;
                 }
             }
-            return current == null ? fallback : current;
+            return current;
         } catch (Exception exception) {
             return fallback;
         }
+    }
+
+    /*
+     * 路径单段下降（任务 J1 数组下标支持）:
+     * 1. jobs[0]：先取 Map 字段 jobs，再取 List 下标 0；
+     * 2. [0]：当前节点本身是 List，直接取下标；
+     * 3. 普通字段：Map 取值；类型不匹配返回 null（调用方回落 fallback）。
+     */
+    private Object descendPath(Object current, String part) {
+        Matcher indexed = INDEXED_FIELD.matcher(part);
+        if (indexed.matches()) {
+            Object container = current instanceof Map<?, ?> map ? map.get(indexed.group(1)) : null;
+            return pickIndex(container, Integer.parseInt(indexed.group(2)));
+        }
+        Matcher bare = BARE_INDEX.matcher(part);
+        if (bare.matches()) {
+            return pickIndex(current, Integer.parseInt(bare.group(1)));
+        }
+        return current instanceof Map<?, ?> map ? map.get(part) : null;
+    }
+
+    private Object pickIndex(Object container, int index) {
+        if (container instanceof List<?> list && index >= 0 && index < list.size()) {
+            return list.get(index);
+        }
+        return null;
     }
 
     // 把工具输出 JSON 解析成对象（Map/List/标量），失败返回 null

@@ -46,5 +46,10 @@ public enum AgentIntentCode {
      */
     JOB_FAVORITE,
 
+    /**
+     * 求职主流程：简历分析 → 岗位筛选 → 匹配分析 → 投递话术的多步骤串联（任务 J1）。
+     */
+    JOB_SEEK_FLOW,
+
     MOCK_INTERVIEW,
 }

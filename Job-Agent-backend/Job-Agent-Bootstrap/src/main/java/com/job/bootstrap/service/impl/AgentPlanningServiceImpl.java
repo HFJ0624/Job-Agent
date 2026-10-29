@@ -267,7 +267,16 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
     ) {
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("expectedInput", stepTemplate.toolInputSchema());
-        schema.put("extractedParams", extractedParams);
+        /*
+         * 步骤级可执行参数（任务 J1）：模板步骤声明了自己的 stepParams 时，
+         * 以计划级 extractedParams 为基、步骤级覆盖——共享参数（如 resumeId）继承，
+         * 步骤特有参数（如 {{step_2.output.jobs[0].jobId}} 占位符）按步骤生效。
+         */
+        Map<String, Object> executableParams = new LinkedHashMap<>(extractedParams);
+        if (stepTemplate.stepParams() != null && !stepTemplate.stepParams().isEmpty()) {
+            executableParams.putAll(stepTemplate.stepParams());
+        }
+        schema.put("extractedParams", executableParams);
         schema.put("note", "Planner 生成工具约束，Executor 按计划步骤确定性调用工具。");
         return schema;
     }

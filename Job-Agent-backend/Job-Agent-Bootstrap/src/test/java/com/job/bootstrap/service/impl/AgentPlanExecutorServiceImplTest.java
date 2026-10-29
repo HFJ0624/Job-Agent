@@ -350,6 +350,65 @@ class AgentPlanExecutorServiceImplTest {
     }
 
     /**
+     * 用例（任务 J1）：占位符支持数组下标。步骤2 的 jobId 用
+     * {{step_1.output.jobs[0].jobId}} 引用步骤1 岗位列表的第一个。
+     */
+    @Test
+    void shouldResolveIndexedPlaceholderFromListOutput() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        AgentPlanStep step1 = buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name());
+        AgentPlanStep step2 = buildStep(2, "JobMatchTool.matchJob", AgentPlanStepStatus.PENDING.name());
+        step2.setToolInputSchema("{\"extractedParams\":{\"resumeId\":7,\"jobId\":\"{{step_1.output.jobs[0].jobId}}\"}}");
+        List<AgentPlanStep> steps = List.of(step1, step2);
+
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(eq("JobSearchTool.searchJobs"), any(), any())).thenReturn(
+                AgentToolExecutionResult.builder().success(true).toolName("JobSearchTool.searchJobs")
+                        .message("ok")
+                        .dataJson("{\"jobs\":[{\"jobId\":42,\"jobTitle\":\"Java开发\"},{\"jobId\":43}]}")
+                        .costTime(1L).build());
+        when(agentToolInvoker.invoke(eq("JobMatchTool.matchJob"), any(), any()))
+                .thenReturn(buildToolSuccess("JobMatchTool.matchJob"));
+
+        executor.executePlan(USER_ID, PLAN_ID);
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(agentToolInvoker).invoke(eq("JobMatchTool.matchJob"), captor.capture(), any());
+        // 取到列表第一个岗位的 jobId；resumeId 仍用自带值
+        assertThat(captor.getValue().get("jobId")).isEqualTo(42);
+        assertThat(captor.getValue().get("resumeId")).isEqualTo(7);
+    }
+
+    /**
+     * 用例（任务 J1）：下标越界/路径不存在时，占位符按既有语义保留原样（不猜值）。
+     */
+    @Test
+    void outOfRangeIndexShouldKeepPlaceholderAsIs() {
+        AgentPlan plan = buildPlan(AgentPlanStatus.PLANNED.name(), new Date());
+        AgentPlanStep step1 = buildStep(1, "JobSearchTool.searchJobs", AgentPlanStepStatus.PENDING.name());
+        AgentPlanStep step2 = buildStep(2, "JobMatchTool.matchJob", AgentPlanStepStatus.PENDING.name());
+        step2.setToolInputSchema("{\"extractedParams\":{\"jobId\":\"{{step_1.output.jobs[5].jobId}}\"}}");
+        List<AgentPlanStep> steps = List.of(step1, step2);
+
+        when(agentPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
+        when(agentPlanStepMapper.selectList(any())).thenReturn(steps);
+        when(agentPlanMapper.update(any(), any())).thenReturn(1);
+        when(agentToolInvoker.invoke(eq("JobSearchTool.searchJobs"), any(), any())).thenReturn(
+                AgentToolExecutionResult.builder().success(true).toolName("JobSearchTool.searchJobs")
+                        .message("ok").dataJson("{\"jobs\":[{\"jobId\":42}]}").costTime(1L).build());
+        when(agentToolInvoker.invoke(eq("JobMatchTool.matchJob"), any(), any()))
+                .thenReturn(buildToolSuccess("JobMatchTool.matchJob"));
+
+        executor.executePlan(USER_ID, PLAN_ID);
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(agentToolInvoker).invoke(eq("JobMatchTool.matchJob"), captor.capture(), any());
+        assertThat(captor.getValue().get("jobId")).isEqualTo("{{step_1.output.jobs[5].jobId}}");
+    }
+
+    /**
      * 用例9（任务 G2）：步骤失败且有预算时触发 Replan——失败步骤放弃（SKIPPED），
      * 替代步骤追加到计划尾部继续执行，计划最终 COMPLETED。
      */
