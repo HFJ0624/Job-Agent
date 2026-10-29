@@ -15,6 +15,7 @@ import com.job.exception.AgentToolException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -53,10 +54,11 @@ public class JobMatchTool {
             @P("简历ID，兼容旧入口；新对话优先使用简历名称") Long resumeId,
             @P("岗位ID，兼容旧入口；新对话优先使用岗位名称") Long jobId
     ) {
-        return matchJob(resumeId, null, jobId, null);
+        return matchJob(resumeId, null, jobId, null, null, null, null);
     }
 
-    public String matchJob(Long resumeId, String resumeName, Long jobId, String jobTitle) {
+    public String matchJob(Long resumeId, String resumeName, Long jobId, String jobTitle,
+                            String city, String keyword, Integer minSalary) {
         long start = System.currentTimeMillis();
 
         Long userId = AgentRuntimeContext.getRequiredUserId();
@@ -96,7 +98,23 @@ public class JobMatchTool {
             input.put("resolvedJobTitle", job.getJobTitle());
             Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
-            JobMatchVO result = jobMatchService.matchJob(userId, resume.getId(), job.getId());
+            /*
+             * 任务 J5：本轮显式条件（城市/关键词/薪资下限）优先于长期偏好，
+             * 作为硬性条件判定输入传给匹配服务。
+             */
+            Map<String, Object> explicitParams = new LinkedHashMap<>();
+            if (StringUtils.hasText(city)) {
+                explicitParams.put("city", city);
+            }
+            if (StringUtils.hasText(keyword)) {
+                explicitParams.put("keyword", keyword);
+            }
+            if (minSalary != null) {
+                explicitParams.put("minSalary", minSalary);
+            }
+            JobMatchVO result = explicitParams.isEmpty()
+                    ? jobMatchService.matchJob(userId, resume.getId(), job.getId())
+                    : jobMatchService.matchJob(userId, resume.getId(), job.getId(), explicitParams);
             agentTraceService.saveToolTrace(
                     userId,
                     conversationId,

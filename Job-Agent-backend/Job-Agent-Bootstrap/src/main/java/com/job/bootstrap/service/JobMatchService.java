@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.job.common.entity.match.JobMatchRecord;
 import com.job.common.vo.match.JobMatchVO;
 
+import java.util.Map;
+
 /**
  * 岗位匹配服务接口。
  *
@@ -25,6 +27,13 @@ public interface JobMatchService extends IService<JobMatchRecord> {
      * @return 匹配分析结果
      */
     JobMatchVO matchJob(Long userId, Long resumeId, Long jobId);
+
+    /**
+     * 执行匹配评分（任务 J5：本轮显式条件参与硬性条件判定）。
+     *
+     * @param explicitParams 本轮显式条件（city/keyword/minSalary，优先于长期偏好）
+     */
+    JobMatchVO matchJob(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams);
 
     /**
      * 查询最近一次匹配记录。

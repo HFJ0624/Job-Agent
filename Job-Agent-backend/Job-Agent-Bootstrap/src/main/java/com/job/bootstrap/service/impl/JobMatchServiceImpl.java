@@ -7,12 +7,18 @@ import com.job.bootstrap.mapper.JobMatchRecordMapper;
 import com.job.bootstrap.service.JobMatchService;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.bootstrap.service.JobResumeService;
+import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.bootstrap.service.match.HardConditionEvaluator;
+import com.job.bootstrap.service.match.MatchEvidenceExtractor;
 import com.job.common.entity.match.JobMatchRecord;
 import com.job.common.entity.position.JobPosition;
+import com.job.common.vo.preference.UserJobPreferenceVO;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.match.JobMatchVO;
+import com.job.common.vo.match.MatchEvidenceVO;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -54,15 +60,23 @@ import java.util.*;
  * </ol>
  * </p>
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMatchRecord> implements JobMatchService {
 
     private static final int NOT_DELETED = 0;
 
+    /** 任务 J5：硬性条件违反时的推荐分封顶值（低于“一般匹配”阈值 55）。 */
+    private static final BigDecimal HARD_VIOLATION_SCORE_CAP = new BigDecimal("50");
+
     private final JobResumeService jobResumeService;
     private final JobPositionService jobPositionService;
     private final ObjectMapper objectMapper;
+    // 任务 J5：求职偏好（硬性条件与偏好分的数据源）+ 硬性条件判定 + 证据提取
+    private final UserJobPreferenceService userJobPreferenceService;
+    private final HardConditionEvaluator hardConditionEvaluator;
+    private final MatchEvidenceExtractor matchEvidenceExtractor;
 
     /**
      * 执行简历与岗位的匹配评分。
@@ -85,6 +99,17 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     @Override
     @Transactional(rollbackFor = Exception.class)
     public JobMatchVO matchJob(Long userId, Long resumeId, Long jobId) {
+        // 兼容旧入口：无本轮显式参数
+        return matchJob(userId, resumeId, jobId, Map.of());
+    }
+
+    /**
+     * 执行匹配评分（任务 J5 版：显式参数参与硬性条件判定）。
+     *
+     * @param explicitParams 本轮显式条件（用户在对话里明说的 city/keyword/minSalary，优先于长期偏好）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public JobMatchVO matchJob(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams) {
         // 1. 校验简历归属，防止用户传别人的 resumeId。
         JobResume resume = jobResumeService.getUserResumeRequired(userId, resumeId);
 
@@ -110,8 +135,19 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
         // 5. 从岗位中提取技能关键词。
         List<String> requiredSkills = extractRequiredSkills(jobText, job.getSkillKeywords());
 
-        // 6. 计算四个维度分数。
-        MatchScoreDetail detail = calculateMatchScore(resumeText, jobText, job, requiredSkills);
+        // 6. 计算四个维度分数（任务 J5：偏好分基于 user_job_preference 真实计算，不再是占位分）。
+        UserJobPreferenceVO preference = loadPreferenceSafely(userId);
+        MatchScoreDetail detail = calculateMatchScore(resumeText, jobText, job, requiredSkills, preference);
+
+        // 6.5 硬性条件判定（任务 J5）：本轮显式 > 长期偏好；违反项进风险点且不建议投递。
+        HardConditionEvaluator.HardConditionResult hardResult = hardConditionEvaluator.evaluate(
+                new HardConditionEvaluator.HardConditionInput(
+                        preference, explicitParams == null ? Map.of() : explicitParams, job));
+
+        // 6.6 证据提取（任务 J5）：技能与基础条件的“要求 ↔ 简历原文”对。
+        List<MatchEvidenceVO> evidences = new ArrayList<>();
+        evidences.addAll(matchEvidenceExtractor.skillEvidences(resumeText, detail.matchedSkills()));
+        evidences.addAll(matchEvidenceExtractor.conditionEvidences(resumeText, job));
 
         // 7. 保存匹配记录。
         Date now = new Date();
@@ -120,20 +156,41 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
         record.setResumeId(resumeId);
         record.setJobId(jobId);
 
-        record.setMatchScore(detail.matchScore());
-        record.setRuleScore(detail.matchScore());
         record.setSkillScore(detail.skillScore());
         record.setProjectScore(detail.projectScore());
         record.setConditionScore(detail.conditionScore());
         record.setPreferenceScore(detail.preferenceScore());
 
-        record.setMatchLevel(resolveMatchLevel(detail.matchScore()));
-        record.setRecommendApply(detail.matchScore().doubleValue() >= 70 ? 1 : 0);
+        /*
+         * 任务 J5：硬性条件违反——技能分再高也不建议投递。
+         * 违反项并入风险点（持久化，后台可审计），等级显式标记“硬性条件不符”。
+         */
+        List<String> riskPoints = new ArrayList<>(hardResult.violations());
+        riskPoints.addAll(detail.riskPoints());
+        boolean hardPassed = hardResult.passed();
+
+        /*
+         * 任务 J5：硬性违反岗位分数封顶（HARD_VIOLATION_SCORE_CAP），但保留微序。
+         * 语义：matchScore 是“推荐分”不是“技能分”——用户明确不会投的岗位必须在排序上让位；
+         * 封顶值 50 - (100 - 原始分)/1000：全部低于 50（让位给通过者），
+         * 但违反者之间仍按原始分微序（技能更贴近的排前），避免打平后乱序；
+         * 各维度原始分仍完整保存在 scoreJson，后台可审计“技能 82 但城市不符”。
+         */
+        BigDecimal effectiveScore = hardPassed
+                ? detail.matchScore()
+                : HARD_VIOLATION_SCORE_CAP.subtract(
+                        BigDecimal.valueOf(100 - detail.matchScore().doubleValue())
+                                .divide(BigDecimal.valueOf(1000), 3, java.math.RoundingMode.HALF_UP));
+
+        record.setMatchScore(effectiveScore);
+        record.setRuleScore(effectiveScore);
+        record.setMatchLevel(hardPassed ? resolveMatchLevel(effectiveScore) : "硬性条件不符");
+        record.setRecommendApply(hardPassed && effectiveScore.doubleValue() >= 70 ? 1 : 0);
 
         record.setMatchedSkills(toJson(detail.matchedSkills()));
         record.setMissingSkills(toJson(detail.missingSkills()));
         record.setAdvantage(joinLines(detail.advantages()));
-        record.setRiskPoints(joinLines(detail.riskPoints()));
+        record.setRiskPoints(joinLines(riskPoints));
         record.setSuggestion(joinLines(detail.suggestions()));
         record.setScoreJson(toJson(detail));
 
@@ -142,7 +199,22 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
         record.setUpdateTime(now);
 
         save(record);
-        return JobMatchVO.from(record, objectMapper);
+        JobMatchVO vo = JobMatchVO.from(record, objectMapper);
+        // 证据与硬性判定是派生数据（可由记录重算），不落库，直接挂 VO
+        vo.setEvidences(evidences);
+        vo.setHardConditionViolations(hardResult.violations());
+        vo.setHardConditionPassed(hardPassed);
+        return vo;
+    }
+
+    // 偏好加载防御：偏好表无数据/查询异常都不阻断匹配（无偏好 = 无硬性条件）
+    private UserJobPreferenceVO loadPreferenceSafely(Long userId) {
+        try {
+            return userJobPreferenceService.getPreference(userId);
+        } catch (Exception exception) {
+            log.warn("求职偏好加载失败，按无偏好处理，userId={}, error={}", userId, exception.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -188,14 +260,15 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
             String resumeText,
             String jobText,
             JobPosition job,
-            List<String> requiredSkills
+            List<String> requiredSkills,
+            UserJobPreferenceVO preference
     ) {
         SkillMatchResult skillResult = calculateSkillScore(resumeText, requiredSkills);
 
         BigDecimal skillScore = skillResult.skillScore();
         BigDecimal projectScore = calculateProjectScore(resumeText, jobText, skillResult.matchedSkills());
         BigDecimal conditionScore = calculateConditionScore(resumeText, job);
-        BigDecimal preferenceScore = calculatePreferenceScore(resumeText, job);
+        BigDecimal preferenceScore = calculatePreferenceScore(job, preference);
 
         BigDecimal matchScore = skillScore.multiply(decimal(0.40))
                 .add(projectScore.multiply(decimal(0.25)))
@@ -317,38 +390,47 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
     }
 
     /**
-     * 计算求职偏好匹配分，满分 100。
+     * 计算求职偏好匹配分，满分 100（任务 J5：基于 user_job_preference 真实计算）。
      *
-     * <p>第一版未接入 user_job_preference 时，先按岗位本身信息给中高分。
-     * 若简历文本中出现岗位所在城市，或岗位有明确薪资范围，则适当加分。</p>
-     *
-     * @param resumeText 简历原文
-     * @param job        岗位信息
-     * @return 求职偏好匹配分
+     * <p>评分口径：城市相符 +15、薪资达标 +15（不达标 -10）、行业相符 +5、岗位方向相符 +5；
+     * 无偏好数据给中性分 60——不再用虚高的占位分制造“匹配良好”的假象。</p>
      */
-    private BigDecimal calculatePreferenceScore(String resumeText, JobPosition job) {
-        double score = 80;
-
-        if (StringUtils.hasText(job.getCity()) && resumeText.contains(job.getCity())) {
-            score += 10;
+    private BigDecimal calculatePreferenceScore(JobPosition job, UserJobPreferenceVO preference) {
+        if (preference == null) {
+            return decimal(60);
         }
 
-        if (job.getMinSalary() != null && job.getMaxSalary() != null) {
-            score += 10;
+        String jobText = buildJobText(job);
+        double score = 60;
+
+        if (StringUtils.hasText(preference.getExpectedCity())
+                && StringUtils.hasText(job.getCity())
+                && job.getCity().contains(preference.getExpectedCity().trim())) {
+            score += 15;
         }
 
-        return decimal(Math.min(score, 100));
+        if (preference.getMinSalary() != null && job.getMaxSalary() != null) {
+            if (job.getMaxSalary() >= preference.getMinSalary()) {
+                score += 15;
+            } else {
+                score -= 10;
+            }
+        }
+
+        if (StringUtils.hasText(preference.getExpectedIndustry())
+                && jobText.contains(preference.getExpectedIndustry().trim())) {
+            score += 5;
+        }
+
+        if (StringUtils.hasText(preference.getExpectedJobTitle())
+                && StringUtils.hasText(job.getJobTitle())
+                && job.getJobTitle().contains(preference.getExpectedJobTitle().trim())) {
+            score += 5;
+        }
+
+        return decimal(Math.min(Math.max(score, 0), 100));
     }
 
-    /**
-     * 从岗位文本和 skillKeywords 字段提取技能关键词。
-     *
-     * <p>优先使用岗位表 skill_keywords 字段，再从岗位描述中命中常见技术关键词做补充。</p>
-     *
-     * @param jobText       岗位文本
-     * @param skillKeywords 岗位表技能关键词字段
-     * @return 去重后的技能关键词列表
-     */
     private List<String> extractRequiredSkills(String jobText, String skillKeywords) {
         Set<String> result = new LinkedHashSet<>();
 

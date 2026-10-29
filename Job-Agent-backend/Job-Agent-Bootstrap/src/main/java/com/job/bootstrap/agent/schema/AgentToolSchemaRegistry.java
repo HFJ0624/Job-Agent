@@ -209,7 +209,11 @@ public class AgentToolSchemaRegistry {
                 null,
                 List.of(
                         param("resumeId", AgentToolValueType.LONG, true, "简历ID", "USER_INPUT_OR_FRONTEND_CONTEXT", "1", null),
-                        param("jobId", AgentToolValueType.LONG, true, "岗位ID", "USER_INPUT_OR_FRONTEND_CONTEXT", "2", null)
+                        param("jobId", AgentToolValueType.LONG, true, "岗位ID", "USER_INPUT_OR_FRONTEND_CONTEXT", "2", null),
+                        // 任务 J5：本轮显式条件（可选），参与硬性条件判定，优先于长期偏好
+                        param("city", AgentToolValueType.STRING, false, "用户明确要求的城市", "USER_INPUT", "上海", null),
+                        param("keyword", AgentToolValueType.STRING, false, "用户明确要求的岗位关键词", "USER_INPUT", "Java", null),
+                        param("minSalary", AgentToolValueType.INTEGER, false, "用户明确要求的薪资下限(K)", "USER_INPUT", "20", null)
                 ),
                 List.of(
                         output("matchScore", AgentToolValueType.INTEGER, "匹配分", true, "82"),

@@ -70,7 +70,11 @@ public class AgentToolInvoker {
                         getLong(params, "resumeId"),
                         getString(params, "resumeName"),
                         getLong(params, "jobId"),
-                        getString(params, "jobTitle")
+                        getString(params, "jobTitle"),
+                        // 任务 J5：本轮显式条件，参与硬性条件判定（优先于长期偏好）
+                        getString(params, "city"),
+                        getString(params, "keyword"),
+                        getInteger(params, "minSalary")
                 );
                 case "GreetingGenerateTool.generateGreeting" -> greetingGenerateTool.generateGreeting(
                         getLong(params, "resumeId"),
