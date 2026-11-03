@@ -6,6 +6,7 @@ import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.error.BusinessErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -124,7 +125,18 @@ public class GlobalExceptionHandler {
      * @return 返回请先登录响应
      */
     @ExceptionHandler({NotLoginException.class, SaTokenException.class})
-    public Result<Object> handleSaTokenException(Exception exception, HttpServletRequest request) {
+    public Result<Object> handleSaTokenException(Exception exception, HttpServletRequest request,
+                                                 HttpServletResponse response) {
+        /*
+         * SSE 场景：流式响应已提交（Content-Type=text/event-stream）时不能再写 JSON，
+         * 否则会抛 HttpMessageNotWritableException 并二次污染日志。
+         * 这类异常通常是异步回派线程上的重复鉴权，前端已拿到数据，直接跳过即可。
+         */
+        if (response.isCommitted()
+                || String.valueOf(response.getContentType()).startsWith("text/event-stream")) {
+            log.warn("SSE 请求中的鉴权异常，响应已提交，跳过 JSON 返回：{}", exception.getMessage());
+            return null;
+        }
         // 1. 认证失败只记录简短日志，不把内部异常细节返回给前端。
         printError("登录认证异常", ResultCodeEnum.LOGIN_AUTH.getCode(), exception.getMessage(), exception, request, false);
         log.warn("Sa-Token authentication failed: {}", exception.getMessage());
