@@ -1,56 +1,115 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<configuration scan="true" scanPeriod="60 seconds" debug="false">
-    <!-- 日志存储路径，默认当前用户目录下的logs/job-agent文件夹 -->
-    <property name="LOG_PATH" value="${user.home}/logs/job-agent" />
-    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n" />
+<!--
+  日志配置（调试友好版）
 
-    <!-- 控制台输出配置 -->
+  设计目标:
+  1. 控制台只打 INFO 及以上，保持可读；文件保留 DEBUG 细节，排查时翻文件；
+  2. ERROR 单独一个文件，出问题先看 error.log；
+  3. SQL 默认不打印（避免刷屏）；需要时设置环境变量 SQL_LOG_LEVEL=DEBUG，
+     SQL 会写到 sql.log（只进文件，不污染控制台）；
+  4. 按天 + 单文件 100MB 滚动，保留 15 天，总上限 2GB，不会撑爆磁盘。
+
+  可覆盖的环境变量:
+  - LOG_PATH        日志目录（默认 ~/logs/job-agent）
+  - APP_LOG_LEVEL   项目日志级别（默认 DEBUG，控制台仍只显示 INFO+）
+  - SQL_LOG_LEVEL   Mapper/SQL 日志级别（默认 OFF；设 DEBUG 开启）
+-->
+<configuration scan="true" scanPeriod="60 seconds" debug="false">
+
+    <property name="LOG_PATH" value="${LOG_PATH:-${user.home}/logs/job-agent}" />
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n" />
+
+    <!-- 控制台：只显示 INFO 及以上，调试细节进文件 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
             <pattern>${LOG_PATTERN}</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
 
-    <!-- 按天滚动的文件日志 -->
+    <!-- 全量业务日志（含 DEBUG），按天 + 大小滚动 -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_PATH}/job-agent.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <FileNamePattern>${LOG_PATH}/job-agent.%d{yyyy-MM-dd}.log</FileNamePattern>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${LOG_PATH}/job-agent.%d{yyyy-MM-dd}.%i.log</FileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
         </rollingPolicy>
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
             <pattern>${LOG_PATTERN}</pattern>
             <charset>UTF-8</charset>
         </encoder>
-        <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
-            <MaxFileSize>1GB</MaxFileSize> <!-- 单个日志文件最大1GB -->
-        </triggeringPolicy>
     </appender>
 
-    <!-- 非生产环境：默认就输出到控制台，避免没有激活 dev 时看不到异常日志 -->
+    <!-- 只收 ERROR：出问题先看这个文件 -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${LOG_PATH}/error.%d{yyyy-MM-dd}.%i.log</FileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- SQL 单独文件（默认 OFF；排查时 SQL_LOG_LEVEL=DEBUG） -->
+    <appender name="SQL_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/sql.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${LOG_PATH}/sql.%d{yyyy-MM-dd}.%i.log</FileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>3</maxHistory>
+            <totalSizeCap>300MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 非生产环境 -->
     <springProfile name="!prod">
-        <root level="info">
+        <root level="INFO">
             <appender-ref ref="CONSOLE" />
             <appender-ref ref="FILE" />
+            <appender-ref ref="ERROR_FILE" />
         </root>
 
-        <!-- 打印项目自身日志，方便本地排查接口问题 -->
-        <logger name="com.job" level="debug" additivity="false">
+        <!-- 项目日志：文件留 DEBUG 细节，控制台由 ThresholdFilter 只显示 INFO+ -->
+        <logger name="com.job" level="${APP_LOG_LEVEL:-DEBUG}" additivity="false">
             <appender-ref ref="CONSOLE" />
             <appender-ref ref="FILE" />
+            <appender-ref ref="ERROR_FILE" />
         </logger>
 
-        <!-- 打印MyBatis-Plus的Mapper日志 -->
-        <logger name="com.job.bootstrap.mapper" level="debug" additivity="false">
-            <appender-ref ref="CONSOLE" />
-            <appender-ref ref="FILE" />
+        <!--
+          MyBatis SQL：需同时满足
+          1) application-dev.yml 中 log-impl 为 Slf4jImpl；
+          2) SQL_LOG_LEVEL=DEBUG（默认 OFF 不打印）。
+          只写文件，不刷控制台。
+        -->
+        <logger name="com.job.bootstrap.mapper" level="${SQL_LOG_LEVEL:-OFF}" additivity="false">
+            <appender-ref ref="SQL_FILE" />
         </logger>
     </springProfile>
 
-    <!-- 生产环境：只打印WARN及以上日志，关闭控制台输出 -->
+    <!-- 生产环境：只写文件，WARN 及以上 -->
     <springProfile name="prod">
-        <root level="warn">
+        <root level="WARN">
             <appender-ref ref="FILE" />
+            <appender-ref ref="ERROR_FILE" />
         </root>
     </springProfile>
 </configuration>
