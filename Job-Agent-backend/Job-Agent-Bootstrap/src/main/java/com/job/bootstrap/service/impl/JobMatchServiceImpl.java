@@ -110,6 +110,21 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
      */
     @Transactional(rollbackFor = Exception.class)
     public JobMatchVO matchJob(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams) {
+        return computeMatch(userId, resumeId, jobId, explicitParams, true);
+    }
+
+    /**
+     * 只读预览（第二阶段 MatchAgent 复用）：
+     * 与 matchJob 完全相同的计算逻辑，但**不写匹配记录**——业务记录由父任务统一决定是否保存。
+     */
+    @Override
+    public JobMatchVO previewMatch(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams) {
+        return computeMatch(userId, resumeId, jobId, explicitParams, false);
+    }
+
+    // 共用计算：persist=true 时按旧行为保存匹配记录，false 时纯预览
+    private JobMatchVO computeMatch(Long userId, Long resumeId, Long jobId,
+                                    Map<String, Object> explicitParams, boolean persist) {
         // 1. 校验简历归属，防止用户传别人的 resumeId。
         JobResume resume = jobResumeService.getUserResumeRequired(userId, resumeId);
 
@@ -198,7 +213,10 @@ public class JobMatchServiceImpl extends ServiceImpl<JobMatchRecordMapper, JobMa
         record.setCreateTime(now);
         record.setUpdateTime(now);
 
-        save(record);
+        // 只有正式匹配才落库；预览（MatchAgent）不写业务记录，避免重复续跑重复写入
+        if (persist) {
+            save(record);
+        }
         JobMatchVO vo = JobMatchVO.from(record, objectMapper);
         // 证据与硬性判定是派生数据（可由记录重算），不落库，直接挂 VO
         vo.setEvidences(evidences);

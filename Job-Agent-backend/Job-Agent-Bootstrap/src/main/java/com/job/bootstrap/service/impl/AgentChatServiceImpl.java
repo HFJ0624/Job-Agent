@@ -8,6 +8,7 @@ import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
 import com.job.bootstrap.agent.search.ReactChatPreparationService;
+import com.job.bootstrap.agent.seek.JobSeekReactEntry;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
@@ -199,6 +200,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final ReactChatPreparationService reactChatPreparationService;
 
     /**
+     * 第二阶段：求职复合任务入口（简历画像 + 岗位搜索 + 匹配报告）。
+     */
+    private final JobSeekReactEntry jobSeekReactEntry;
+
+    /**
      * 统一 JSON 工具。
      */
     private final ObjectMapper objectMapper;
@@ -261,6 +267,12 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 3. 规则意图判断零成本（本地正则），不会触发 LLM 兜底。
          */
         AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
+
+        // 复合任务优先（简历 + 岗位/匹配）：三 Agent 协作
+        if (jobSeekReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+            return chatViaJobSeek(userId, conversationId, planId, message, retry);
+        }
+        // 独立岗位搜索：单 Agent ReAct
         if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
             return chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry);
         }
@@ -280,6 +292,30 @@ public class AgentChatServiceImpl implements AgentChatService {
             Boolean retry
     ) {
         return chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, null);
+    }
+
+    /**
+     * 求职复合任务分支（事务外执行，第二阶段）：
+     * 会话/用户消息短事务提交 → 父计划 + 三 Agent Workflow → 助手消息短事务落库。
+     */
+    private AgentChatVO chatViaJobSeek(Long userId, Long conversationId, Long planId,
+                                       String message, Boolean retry) {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        Long preparedConversationId = reactChatPreparationService.prepareConversation(
+                userId, conversationId, message);
+
+        JobSeekReactEntry.Result result = jobSeekReactEntry.execute(
+                userId, preparedConversationId, planId, traceId, message, Boolean.TRUE.equals(retry));
+
+        reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(preparedConversationId);
+        vo.setPlanId(result.planId());
+        vo.setAnswer(result.answer());
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
     }
 
     /**
@@ -334,8 +370,44 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param streamSink token 消费者，可为 null
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
+    ) {
+        /*
+         * 第二阶段：chat 与 streamChat **共用同一套分发**——
+         * 简历分析/独立搜索/复合任务都按同一引擎路由，不能同步接口走新链路而 SSE 默默落回旧链路。
+         * 新链路当前把最终答复作为单个 token 推送（token/done/error 协议不变，前端无需改造）。
+         */
+        AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
+        if (jobSeekReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+            return emitAsStream(chatViaJobSeek(userId, conversationId, planId, message, retry), streamSink);
+        }
+        if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
+            return emitAsStream(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);
+        }
+        return streamTransactional(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
+    }
+
+    // 新链路复用 token/done 协议：整段答复作为一个 token 推给前端
+    private AgentChatVO emitAsStream(AgentChatVO vo, TokenConsumer streamSink) {
+        if (streamSink != null && vo != null && StringUtils.hasText(vo.getAnswer())) {
+            try {
+                streamSink.onToken(vo.getAnswer());
+            } catch (Exception ignored) {
+                // 前端断连不影响已落库的结果
+            }
+        }
+        return vo;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public AgentChatVO streamTransactional(
             Long userId,
             Long conversationId,
             Long planId,

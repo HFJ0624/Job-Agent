@@ -21,7 +21,7 @@ import java.util.Map;
  * 3. 非法参数返回错误文案，由 Runner 触发一次修正机会。
  */
 @Component
-public class TerminalToolContract {
+public class TerminalToolContract implements TerminalContract<TerminalToolContract.TerminalProposal> {
 
     public static final String TOOL_NAME = "finish_job_search";
 
@@ -31,7 +31,13 @@ public class TerminalToolContract {
         this.objectMapper = objectMapper;
     }
 
+    @Override
+    public String toolName() {
+        return TOOL_NAME;
+    }
+
     /** 对模型暴露的工具定义（与 AgentDefinition.toolSpecs 一起下发）。 */
+    @Override
     public AiToolSpec spec() {
         Map<String, Object> properties = Map.of(
                 "outcome", Map.of("type", "string", "enum", List.of("FOUND", "EMPTY", "NEED_INPUT", "FAILED")),
@@ -63,8 +69,26 @@ public class TerminalToolContract {
     public record ParseResult(TerminalProposal proposal, String error) {
     }
 
+    @Override
+    public TerminalParseResult<TerminalProposal> parseTyped(String argumentsJson) {
+        ParseResult legacy = parse(argumentsJson);
+        return legacy.error() == null
+                ? TerminalParseResult.ok(legacy.proposal())
+                : TerminalParseResult.error(legacy.error());
+    }
+
+    @Override
+    public String outcomeOf(TerminalProposal proposal) {
+        return proposal == null ? "FAILED" : proposal.outcome();
+    }
+
+    @Override
+    public String summaryOf(TerminalProposal proposal) {
+        return proposal == null ? "" : proposal.summary();
+    }
+
     /**
-     * 解析并做第一层业务约束校验。
+     * 解析并做第一层业务约束校验（兼容旧调用）。
      */
     public ParseResult parse(String argumentsJson) {
         if (!StringUtils.hasText(argumentsJson)) {

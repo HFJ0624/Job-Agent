@@ -1,5 +1,6 @@
 package com.job.bootstrap.agent.run;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.job.bootstrap.mapper.AgentRunMapper;
 import com.job.common.entity.agent.AgentRun;
@@ -68,6 +69,44 @@ public class AgentRunService {
 
         transactionTemplate.executeWithoutResult(status -> agentRunMapper.insert(run));
         return run;
+    }
+
+    /**
+     * 节点化创建（第二阶段）：一个父计划下多个子 run，用 planId + nodeKey + inputVersion 定位。
+     */
+    public AgentRun createForNode(Long userId, Long conversationId, Long planId, String traceId,
+                                  String agentName, String inputText, String constraintsJson,
+                                  String nodeKey, String agentType, String inputVersion) {
+        AgentRun run = create(userId, conversationId, planId, traceId, agentName, inputText, constraintsJson);
+        run.setNodeKey(nodeKey);
+        run.setAgentType(agentType);
+        run.setInputVersion(inputVersion);
+        // 节点字段随创建一起落库（短事务内）
+        AgentRun patch = new AgentRun();
+        patch.setId(run.getId());
+        patch.setNodeKey(nodeKey);
+        patch.setAgentType(agentType);
+        patch.setInputVersion(inputVersion);
+        patch.setUpdateTime(new Date());
+        agentRunMapper.updateById(patch);
+        return run;
+    }
+
+    /**
+     * 按 计划 + 节点 + 输入版本 定位逻辑节点（恢复时不能只用 findLatestByPlan）。
+     */
+    public AgentRun findByPlanAndNode(Long planId, String nodeKey, String inputVersion) {
+        if (planId == null || nodeKey == null) {
+            return null;
+        }
+        QueryWrapper<AgentRun> wrapper = new QueryWrapper<AgentRun>()
+                .eq("plan_id", planId)
+                .eq("node_key", nodeKey)
+                .eq("is_deleted", NOT_DELETED);
+        if (inputVersion != null) {
+            wrapper.eq("input_version", inputVersion);
+        }
+        return agentRunMapper.selectOne(wrapper.orderByDesc("id").last("limit 1"));
     }
 
     /**

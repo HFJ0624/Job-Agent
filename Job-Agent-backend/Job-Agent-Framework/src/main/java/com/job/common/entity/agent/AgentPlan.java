@@ -86,4 +86,10 @@ public class AgentPlan extends BaseEntity {
      * 旧执行器的写入影响 0 行，不会覆盖新执行器的状态。
      */
     private Integer executionEpoch;
+
+    /**
+     * 执行引擎（第二阶段）：WORKFLOW_MULTI_AGENT / WORKFLOW_REACT / TEMPLATE。
+     * 创建时固定，恢复时优先按它路由——开关只影响新任务。
+     */
+    private String runtimeMode;
 }

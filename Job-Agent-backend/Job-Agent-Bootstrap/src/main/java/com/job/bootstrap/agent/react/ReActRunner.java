@@ -14,31 +14,31 @@ import org.springframework.util.StringUtils;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * 功能: 通用 ReAct 执行器（第一阶段内核）。
+ * 功能: 通用 ReAct 执行器（第二阶段泛化版）。
  *
  * 职责边界（与 Workflow 分工）:
  * 1. 本类只负责“在预算与白名单内让模型自主决策”：调模型 → 执行允许的工具 → 回填 Observation → 再决策；
  * 2. **不做**身份/权限/业务条件/最终结果验真——这些是 Workflow 的职责；
- * 3. 终结工具只返回“提议”（AgentResult），Workflow 必须回到真实工具结果复核后才能对外输出。
+ * 3. 终结工具只返回“提议”，Workflow 必须回到真实工具结果复核后才能对外输出。
  *
- * 协议约束:
- * 1. content 为空但 tool_calls 有值是合法响应；
- * 2. assistant 工具调用与 tool 结果按 toolCallId 严格配对，暂停/结束也补齐配对消息；
- * 3. 终结工具必须单独成轮（与业务工具混用返回协议错误并要求修正）；
- * 4. 非法终结参数给一次修正机会，再次非法按协议失败退出；
- * 5. 相同查询结果无变化时禁止循环（第二次重复直接失败）。
+ * 第二阶段泛化:
+ * 1. 工具反馈循环、配对消息、检查点、预算、错误处理**共用一份**；
+ * 2. 每个 Agent 提供自己的 {@link TerminalContract}（工具定义 + 第一层校验 + 结论提取），
+ *    搜索类继续走旧 {@link #run} 并保持兼容；
+ * 3. 业务结论（outcome）与运行时原因码（reasonCode）分离，互不冒充。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class ReActRunner {
 
-    /** 协议修正机会（截断/空响应/混用/重复查询）。 */
+    /** 协议修正机会（截断/空响应/混用/重复查询/ID 非法）。 */
     private static final int MAX_PROTOCOL_CORRECTIONS = 1;
     /** 终结参数修正机会。 */
     private static final int MAX_TERMINAL_CORRECTIONS = 1;
@@ -55,7 +55,7 @@ public class ReActRunner {
     @FunctionalInterface
     public interface ToolExecutor {
         /**
-         * @param javaToolName Java 工具名（ClassName.methodName）
+         * @param javaToolName Java 工具名或节点内能力名
          * @param arguments    模型生成的参数（已解析为 Map，仍需执行器校验）
          * @return 工具结果 JSON（写入 Observation）
          */
@@ -63,27 +63,74 @@ public class ReActRunner {
     }
 
     /**
-     * 执行一次 ReAct run。
+     * 通用运行结果：成功时 payload 非空、outcome 来自终结契约；失败时 reasonCode 非空。
      */
-    public AgentResult run(
-            AgentDefinition definition,
-            AgentRunContext context,
-            ToolExecutor toolExecutor,
-            Long userId,
-            String traceId
+    public record ReActRunResult<T>(
+            String outcome,
+            T payload,
+            String reasonCode,
+            String summary,
+            int toolCallsUsed,
+            int turnsUsed,
+            long elapsedMillis
     ) {
+
+        public boolean succeeded() {
+            return payload != null && reasonCode == null;
+        }
+
+        static <T> ReActRunResult<T> failure(String reasonCode, String summary,
+                                             int toolCalls, int turns, long elapsed) {
+            return new ReActRunResult<>(null, null, reasonCode, summary, toolCalls, turns, elapsed);
+        }
+    }
+
+    /**
+     * 搜索类兼容入口：使用 finish_job_search 契约，返回旧结构。
+     */
+    public AgentResult run(AgentDefinition definition, AgentRunContext context,
+                           ToolExecutor toolExecutor, Long userId, String traceId) {
+        ReActRunResult<TerminalToolContract.TerminalProposal> result =
+                runWithTerminal(definition, context, toolExecutor, userId, traceId, terminalToolContract);
+        if (!result.succeeded()) {
+            return AgentResult.failed(result.reasonCode(), result.summary(),
+                    result.toolCallsUsed(), result.turnsUsed(), result.elapsedMillis());
+        }
+        TerminalToolContract.TerminalProposal proposal = result.payload();
+        return new AgentResult(
+                AgentResult.Outcome.valueOf(proposal.outcome()),
+                proposal.candidateIds(),
+                proposal.missingFields(),
+                proposal.question(),
+                proposal.reasonCode(),
+                proposal.summary(),
+                result.toolCallsUsed(),
+                result.turnsUsed(),
+                result.elapsedMillis()
+        );
+    }
+
+    /**
+     * 通用执行入口（第二阶段）：任意 Agent 通过自己的 TerminalContract 提交结构化结论。
+     */
+    public <T> ReActRunResult<T> runWithTerminal(AgentDefinition definition,
+                                                 AgentRunContext context,
+                                                 ToolExecutor toolExecutor,
+                                                 Long userId,
+                                                 String traceId,
+                                                 TerminalContract<T> terminal) {
         int protocolCorrections = 0;
         int terminalCorrections = 0;
         Map<String, String> executedSignatures = new LinkedHashMap<>();
 
         while (true) {
             if (deadlineExceeded(definition, context)) {
-                return AgentResult.failed(AgentResult.ReasonCode.BUDGET_TIMEOUT,
+                return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TIMEOUT,
                         "已超过总时限 " + definition.deadlineSeconds() + " 秒",
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             }
             if (context.turnsExhausted(definition)) {
-                return AgentResult.failed(AgentResult.ReasonCode.BUDGET_TURNS_EXHAUSTED,
+                return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TURNS_EXHAUSTED,
                         "模型轮次已用尽（" + definition.maxTurns() + " 轮）",
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             }
@@ -101,45 +148,42 @@ public class ReActRunner {
             } catch (Exception exception) {
                 log.warn("ReAct 模型调用失败，agent={}, turn={}, error={}",
                         definition.agentName(), context.turn(), exception.getMessage());
-                return AgentResult.failed(AgentResult.ReasonCode.MODEL_ERROR,
+                return ReActRunResult.failure(AgentResult.ReasonCode.MODEL_ERROR,
                         "模型调用失败：" + exception.getMessage(),
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             }
 
-            /*
-             * R5：模型返回后立即检查截止时间——迟到的成功结果同样不能接受。
-             * 此刻 assistant 消息还没写入，直接放弃（无需补齐配对）。
-             */
+            // R5：模型返回后立即检查截止时间——迟到的成功结果同样不能接受
             if (deadlineExceeded(definition, context)) {
-                return AgentResult.failed(AgentResult.ReasonCode.BUDGET_TIMEOUT,
+                return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TIMEOUT,
                         "模型返回时已超过总时限 " + definition.deadlineSeconds() + " 秒",
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             }
 
-            // 1. 输出截断：给一次修正机会，再次截断按协议失败（截断的参数不可信）
+            // 1. 输出截断：一次修正机会
             if (response.truncated()) {
                 context.append(AiChatMessage.assistant(response.content(), null));
                 if (++protocolCorrections > MAX_PROTOCOL_CORRECTIONS) {
-                    return AgentResult.failed(AgentResult.ReasonCode.PROTOCOL_ERROR,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR,
                             "模型输出连续被截断", context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
                 context.append(AiChatMessage.user("上一轮输出被截断。请精简内容后重新提交工具调用或终结结果。"));
                 continue;
             }
 
-            // 2. 既没有工具调用也没有终结：协议错误，提示必须用终结工具提交结果
+            // 2. 既没有工具调用也没有终结：提示必须用终结工具
             if (!response.hasToolCalls()) {
                 context.append(AiChatMessage.assistant(response.content(), null));
                 if (++protocolCorrections > MAX_PROTOCOL_CORRECTIONS) {
-                    return AgentResult.failed(AgentResult.ReasonCode.PROTOCOL_ERROR,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR,
                             "模型未通过终结工具提交结果", context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
                 context.append(AiChatMessage.user(
-                        "请通过 " + definition.terminalToolName() + " 工具提交结构化结果，不要只用文本回答。"));
+                        "请通过 " + terminal.toolName() + " 工具提交结构化结果，不要只用文本回答。"));
                 continue;
             }
 
-            // 3. 先做 toolCallId 校验（非空且本轮唯一），再写入 assistant 消息
+            // 3. toolCallId 校验（非空且本轮唯一）
             String idError = validateToolCallIds(response.toolCalls());
             if (idError != null) {
                 context.append(AiChatMessage.assistant(response.content(), response.toolCalls()));
@@ -147,7 +191,7 @@ public class ReActRunner {
                     context.append(AiChatMessage.tool(call.id(), protocolError(idError)));
                 }
                 if (++protocolCorrections > MAX_PROTOCOL_CORRECTIONS) {
-                    return AgentResult.failed(AgentResult.ReasonCode.PROTOCOL_ERROR, idError,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR, idError,
                             context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
                 context.append(AiChatMessage.user("工具调用 ID 不合法：" + idError + " 请重新提交。"));
@@ -157,7 +201,7 @@ public class ReActRunner {
             context.append(AiChatMessage.assistant(response.content(), response.toolCalls()));
 
             boolean hasTerminal = response.toolCalls().stream()
-                    .anyMatch(call -> definition.terminalToolName().equals(call.name()));
+                    .anyMatch(call -> terminal.toolName().equals(call.name()));
 
             // 4. 终结工具必须单独成轮
             if (hasTerminal && response.toolCalls().size() > 1) {
@@ -166,28 +210,27 @@ public class ReActRunner {
                             protocolError("终结工具不能与业务工具在同一轮提交，请先完成查询，再单独提交终结结果。")));
                 }
                 if (++protocolCorrections > MAX_PROTOCOL_CORRECTIONS) {
-                    return AgentResult.failed(AgentResult.ReasonCode.PROTOCOL_ERROR,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR,
                             "终结工具与业务工具多次混用", context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
                 context.append(AiChatMessage.user("请把终结结果放到单独一轮提交，不要与业务查询混合。"));
                 continue;
             }
 
-            // 5. 终结结果：解析 + 业务约束第一层校验（候选真伪留待 Workflow 复核）
+            // 5. 终结结果：解析 + 第一层校验（真伪留待 Workflow 复核）
             if (hasTerminal) {
                 AiToolCall call = response.toolCalls().get(0);
-                // R5：终结结果接受前再检查一次截止时间；超时也要补齐配对 tool 消息
                 if (deadlineExceeded(definition, context)) {
                     context.append(AiChatMessage.tool(call.id(), protocolError("已超过总时限，结果不再接受")));
-                    return AgentResult.failed(AgentResult.ReasonCode.BUDGET_TIMEOUT,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TIMEOUT,
                             "终结结果到达时已超过总时限 " + definition.deadlineSeconds() + " 秒",
                             context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
-                TerminalToolContract.ParseResult parsed = terminalToolContract.parse(call.argumentsJson());
+                TerminalContract.TerminalParseResult<T> parsed = terminal.parseTyped(call.argumentsJson());
                 if (parsed.error() != null) {
                     context.append(AiChatMessage.tool(call.id(), protocolError(parsed.error())));
                     if (++terminalCorrections > MAX_TERMINAL_CORRECTIONS) {
-                        return AgentResult.failed(AgentResult.ReasonCode.PROTOCOL_ERROR,
+                        return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR,
                                 "终结结果连续非法：" + parsed.error(),
                                 context.toolCalls(), context.turn(), context.elapsedMillis());
                     }
@@ -196,15 +239,14 @@ public class ReActRunner {
                 }
                 // 文档要求：结束时也要为终结工具保存配对的 tool 消息
                 context.append(AiChatMessage.tool(call.id(), "{\"accepted\":true,\"note\":\"待工作流复核\"}"));
+                AgentRunExecutionHooks.checkpoint(context.messages());
 
-                TerminalToolContract.TerminalProposal proposal = parsed.proposal();
-                return new AgentResult(
-                        AgentResult.Outcome.valueOf(proposal.outcome()),
-                        proposal.candidateIds(),
-                        proposal.missingFields(),
-                        proposal.question(),
-                        proposal.reasonCode(),
-                        proposal.summary(),
+                T proposal = parsed.proposal();
+                return new ReActRunResult<>(
+                        terminal.outcomeOf(proposal),
+                        proposal,
+                        null,
+                        terminal.summaryOf(proposal),
                         context.toolCalls(),
                         context.turn(),
                         context.elapsedMillis()
@@ -236,22 +278,21 @@ public class ReActRunner {
                     continue;
                 }
 
-                // R5：每次工具执行前检查截止时间
+                // 每次工具执行前检查截止时间
                 if (deadlineExceeded(definition, context)) {
                     closePendingCalls(context, response.toolCalls(), call, "已超过总时限，未执行");
-                    return AgentResult.failed(AgentResult.ReasonCode.BUDGET_TIMEOUT,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TIMEOUT,
                             "工具执行前已超过总时限 " + definition.deadlineSeconds() + " 秒",
                             context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
 
                 // 重复查询熔断：相同工具+参数且结果无变化，第二次直接失败（禁止循环）
-                String signature = call.name() + "|" + String.valueOf(arguments);
+                String signature = call.name() + "|" + arguments;
                 if (executedSignatures.containsKey(signature)) {
                     context.append(AiChatMessage.tool(call.id(),
-                            protocolError("相同查询已执行过且结果无变化，请调整关键词/页码或提交终结结果。")));
-                    // R5：中途退出也要为本轮尚未处理的调用补齐“未执行”，否则悬空导致历史不合法
+                            protocolError("相同查询已执行过且结果无变化，请调整参数或提交终结结果。")));
                     closePendingCalls(context, response.toolCalls(), null, "已中止，未执行");
-                    return AgentResult.failed(AgentResult.ReasonCode.PROTOCOL_ERROR,
+                    return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR,
                             "重复相同查询且结果无变化", context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
 
@@ -266,12 +307,12 @@ public class ReActRunner {
                     context.append(AiChatMessage.tool(call.id(), protocolError("工具执行失败：" + exception.getMessage())));
                 }
             }
-            // 每轮工具结果落地后写检查点（R6：进程中断也能恢复到已完成的结果）
+            // 每轮工具结果落地后写检查点（进程中断也能恢复到已完成的结果）
             AgentRunExecutionHooks.checkpoint(context.messages());
 
             if (budgetExhausted) {
                 closePendingCalls(context, response.toolCalls(), null, "预算已用尽，未执行");
-                return AgentResult.failed(AgentResult.ReasonCode.BUDGET_TOOL_CALLS_EXHAUSTED,
+                return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TOOL_CALLS_EXHAUSTED,
                         "业务工具调用次数已用尽（" + definition.maxToolCalls() + " 次）",
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             }
@@ -298,12 +339,11 @@ public class ReActRunner {
     }
 
     /*
-     * 为本轮尚未处理的调用补齐“未执行/已取消”的 tool 消息（R5 配对闭合）。
-     * 已写入 assistant 消息的全部 toolCalls 都必须有配对结果，否则保存的历史不合法、无法续跑。
+     * 为本轮尚未处理的调用补齐“未执行/已取消”的 tool 消息（配对闭合）。
      */
     private void closePendingCalls(AgentRunContext context, List<AiToolCall> calls,
                                    AiToolCall skip, String reason) {
-        Set<String> answered = new HashSet<>();
+        Set<String> answered = new LinkedHashSet<>();
         for (AiChatMessage message : context.messages()) {
             if ("tool".equals(message.role()) && message.toolCallId() != null) {
                 answered.add(message.toolCallId());

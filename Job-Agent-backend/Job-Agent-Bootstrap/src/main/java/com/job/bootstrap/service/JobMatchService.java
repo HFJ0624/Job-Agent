@@ -36,6 +36,13 @@ public interface JobMatchService extends IService<JobMatchRecord> {
     JobMatchVO matchJob(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams);
 
     /**
+     * 只读预览（第二阶段）：同一套计算但不保存匹配记录，供 MatchAgent 在父任务内复用。
+     */
+    default JobMatchVO previewMatch(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams) {
+        return matchJob(userId, resumeId, jobId, explicitParams);
+    }
+
+    /**
      * 查询最近一次匹配记录。
      *
      * @param userId 当前登录用户ID

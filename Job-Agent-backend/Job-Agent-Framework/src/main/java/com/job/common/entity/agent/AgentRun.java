@@ -58,4 +58,13 @@ public class AgentRun extends BaseEntity {
 
     /** 版本号。 */
     private Integer version;
+
+    /** 节点标识（第二阶段）：一个父计划下多个子 run，用 planId + nodeKey + inputVersion 定位。 */
+    private String nodeKey;
+
+    /** Agent 类型：RESUME / JOB_SEARCH / MATCH。 */
+    private String agentType;
+
+    /** 输入版本（条件版本/上游产物版本）。 */
+    private String inputVersion;
 }
