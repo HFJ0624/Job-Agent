@@ -5,6 +5,7 @@ import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
 import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.agent.seek.JobSeekReactEntry;
+import com.job.bootstrap.agent.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.cache.AgentCacheProperties;
 import com.job.bootstrap.agent.cache.InMemorySemanticCacheStore;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
@@ -103,7 +104,7 @@ class AgentChatCacheTest {
                 agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
                 agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,
                 answerCacheService, mock(JobSearchReactEntry.class), mock(ReactChatPreparationService.class),
-                mock(JobSeekReactEntry.class), objectMapper);
+                mock(JobSeekReactEntry.class), mock(ResumeReactEntry.class), objectMapper);
     }
 
     @BeforeEach

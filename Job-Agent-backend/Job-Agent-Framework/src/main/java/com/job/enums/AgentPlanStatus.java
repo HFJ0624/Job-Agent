@@ -13,6 +13,11 @@ public enum AgentPlanStatus {
     PLANNED,
 
     /**
+     * 用户显式取消（第三阶段）。
+     */
+    CANCELLED,
+
+    /**
      * 缺少必要参数，需要用户补充信息。
      */
     NEED_CLARIFICATION,

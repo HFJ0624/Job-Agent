@@ -1,5 +1,6 @@
 package com.job.bootstrap.agent.react;
 
+import com.job.bootstrap.agent.task.TaskExecutionBudget;
 import com.job.bootstrap.ai.turn.AiChatMessage;
 
 import java.util.List;
@@ -25,8 +26,9 @@ public final class AgentRunExecutionHooks {
     /**
      * @param deadlineAtMillis 绝对截止时间戳（null = 不限制）
      * @param checkpoint       消息检查点回调（null = 不保存）
+     * @param budget           父任务共享预算（null = 不限制；第三阶段）
      */
-    public record Hooks(Long deadlineAtMillis, Checkpoint checkpoint) {
+    public record Hooks(Long deadlineAtMillis, Checkpoint checkpoint, TaskExecutionBudget budget) {
     }
 
     @FunctionalInterface
@@ -40,18 +42,40 @@ public final class AgentRunExecutionHooks {
     }
 
     public static void set(Long deadlineAtMillis, Checkpoint checkpoint) {
-        HOLDER.set(new Hooks(deadlineAtMillis, checkpoint));
+        HOLDER.set(new Hooks(deadlineAtMillis, checkpoint, null));
+    }
+
+    /** 第三阶段：带父任务预算的钩子（子节点继承同一份预算）。 */
+    public static void set(Long deadlineAtMillis, Checkpoint checkpoint, TaskExecutionBudget budget) {
+        HOLDER.set(new Hooks(deadlineAtMillis, checkpoint, budget));
+    }
+
+    /** 当前父任务预算（可空）。 */
+    public static TaskExecutionBudget budget() {
+        Hooks hooks = HOLDER.get();
+        return hooks == null ? null : hooks.budget();
     }
 
     public static Hooks get() {
         return HOLDER.get();
     }
 
-    /** 是否已超过绝对截止时间。 */
+    /** 是否已超过绝对截止时间（含父预算截止）。 */
     public static boolean deadlineExceeded() {
         Hooks hooks = HOLDER.get();
-        return hooks != null && hooks.deadlineAtMillis() != null
-                && System.currentTimeMillis() >= hooks.deadlineAtMillis();
+        if (hooks == null) {
+            return false;
+        }
+        if (hooks.deadlineAtMillis() != null && System.currentTimeMillis() >= hooks.deadlineAtMillis()) {
+            return true;
+        }
+        return hooks.budget() != null && hooks.budget().deadlineExceeded();
+    }
+
+    /** 父任务是否已取消（第三阶段）。 */
+    public static boolean cancelled() {
+        TaskExecutionBudget budget = budget();
+        return budget != null && budget.isCancelled();
     }
 
     /** 触发检查点（无回调时静默跳过）。 */

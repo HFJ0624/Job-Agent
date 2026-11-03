@@ -67,6 +67,15 @@ public class ResumeAgentNode {
      */
     public Result execute(Long userId, Long conversationId, Long planId, String traceId,
                           JobResume resume, String resumeVersion, String targetRoleHint) {
+        return execute(userId, conversationId, planId, traceId, resume, resumeVersion, targetRoleHint, null);
+    }
+
+    /**
+     * 执行画像节点（第三阶段：继承父任务预算）。
+     */
+    public Result execute(Long userId, Long conversationId, Long planId, String traceId,
+                          JobResume resume, String resumeVersion, String targetRoleHint,
+                          com.job.bootstrap.agent.task.TaskExecutionBudget budget) {
         List<ResumeSections.Section> sections = ResumeSections.of(resume, objectMapper);
         String rawResume = normalize(resume.getRawText());
 
@@ -80,7 +89,8 @@ public class ResumeAgentNode {
 
         AgentRunExecutionHooks.set(
                 System.currentTimeMillis() + DEADLINE_SECONDS * 1000,
-                messages -> agentRunService.saveMessages(run.getId(), attempt, toJson(messages))
+                messages -> agentRunService.saveMessages(run.getId(), attempt, toJson(messages)),
+                budget
         );
         try {
             AgentDefinition definition = definition(sections, targetRoleHint);

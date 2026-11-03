@@ -12,6 +12,7 @@ import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
 import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.agent.seek.JobSeekReactEntry;
+import com.job.bootstrap.agent.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
@@ -76,6 +77,7 @@ class AgentChatRagFallbackTest {
     private final JobSearchReactEntry jobSearchReactEntry = mock(JobSearchReactEntry.class);
     private final ReactChatPreparationService reactChatPreparationService = mock(ReactChatPreparationService.class);
     private final JobSeekReactEntry jobSeekReactEntry = mock(JobSeekReactEntry.class);
+    private final ResumeReactEntry resumeReactEntry = mock(ResumeReactEntry.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AgentChatServiceImpl service = new AgentChatServiceImpl(
@@ -83,7 +85,7 @@ class AgentChatRagFallbackTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
             agentGuardrailService, agentContextBuilder, queryRewriter, answerCacheService,
-            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, objectMapper);
+            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, objectMapper);
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {

@@ -2,6 +2,9 @@ package com.job.bootstrap.agent.seek;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.artifact.AgentArtifactService;
+import com.job.bootstrap.agent.progress.AgentProgressEvent;
+import com.job.bootstrap.agent.progress.TaskProgressPublisher;
+import com.job.bootstrap.agent.task.TaskExecutionBudget;
 import com.job.bootstrap.agent.match.MatchAgentNode;
 import com.job.bootstrap.agent.match.MatchReport;
 import com.job.bootstrap.agent.plan.AgentPlanParameterExtractor;
@@ -94,9 +97,23 @@ public class JobSeekWorkflow {
     }
 
     public JobSeekOutcome execute(JobSeekInput input) {
+        return execute(input, TaskProgressPublisher.NOOP, null);
+    }
+
+    /**
+     * 执行复合任务（第三阶段：进度事件 + 父任务共享预算）。
+     */
+    public JobSeekOutcome execute(JobSeekInput input, TaskProgressPublisher publisher,
+                                  TaskExecutionBudget budget) {
+        TaskProgressPublisher progress = publisher == null ? TaskProgressPublisher.NOOP : publisher;
+        publish(progress, AgentProgressEvent.TASK_STARTED, input.planId(), null, null, null,
+                "RUNNING", "开始处理求职任务");
+
         // ---------- PREPARE_CONTEXT：简历与条件 ----------
         ResumeResolution resumeResolution = resolveResume(input);
         if (resumeResolution.question != null) {
+            publish(progress, AgentProgressEvent.WAITING_INPUT, input.planId(), null, "PREPARE_CONTEXT", null,
+                    "WAITING_INPUT", resumeResolution.question);
             return new JobSeekOutcome("NEED_INPUT", resumeResolution.question, "NEED_CLARIFICATION",
                     null, null, null, null, resumeResolution.missingFields, resumeResolution.question);
         }
@@ -118,10 +135,14 @@ public class JobSeekWorkflow {
                     loadCandidatesArtifact(input, constraintVersion);
 
             if (parallel) {
+                publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "RESUME_AGENT", "RESUME",
+                        "RUNNING", reusableProfile != null ? "复用已完成的简历分析" : "正在分析简历");
                 Future<NodeOutput> resumeFuture = nodeExecutor.submit(
                         () -> reusableProfile != null
                                 ? new NodeOutput(null, reusableProfile, List.of())
-                                : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint));
+                                : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint, budget));
+                publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
+                        "RUNNING", reusableCandidates != null ? "复用已完成的岗位搜索结果" : "正在搜索岗位");
                 Future<NodeOutput> searchFuture = nodeExecutor.submit(
                         () -> reusableCandidates != null
                                 ? new NodeOutput(null, null, reusableCandidates)
@@ -137,13 +158,23 @@ public class JobSeekWorkflow {
                 profile = (ResumeProfile) resumeOut.payload();
                 candidates = candidatesOf(searchOut);
             } else {
+                // 取消检查：已取消不再启动后续节点（第三阶段）
+                if (budget != null && !budget.canContinue()) {
+                    String reason = budget.isCancelled() ? "TASK_CANCELLED" : "BUDGET_TIMEOUT";
+                    return new JobSeekOutcome("FAILED", "任务已取消或超时，已完成结果已保留。", "FAILED",
+                            null, null, null, resume.getId(), List.of(), null);
+                }
+                publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "RESUME_AGENT", "RESUME",
+                        "RUNNING", reusableProfile != null ? "复用已完成的简历分析" : "正在分析简历");
                 NodeOutput resumeOut = reusableProfile != null
                         ? new NodeOutput(null, reusableProfile, List.of())
-                        : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint);
+                        : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint, budget);
                 if (!resumeOut.ok()) {
                     return failed(input, resumeOut, "RESUME_NODE_FAILED");
                 }
                 profile = (ResumeProfile) resumeOut.payload();
+                publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "RESUME_AGENT", "RESUME",
+                        "SUCCEEDED", "简历分析完成（" + profile.skills().size() + " 项技能）");
                 // 无明确关键词时，用画像推断的方向作为召回词（目标方向仍受约束）
                 SearchConstraints searchConstraints = constraints;
                 if (!StringUtils.hasText(constraints.keyword())
@@ -151,6 +182,8 @@ public class JobSeekWorkflow {
                     searchConstraints = SearchConstraints.merge(
                             Map.of("keyword", profile.targetRole()), constraints, null);
                 }
+                publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
+                        "RUNNING", reusableCandidates != null ? "复用已完成的岗位搜索结果" : "正在搜索岗位");
                 NodeOutput searchOut = reusableCandidates != null
                         ? new NodeOutput(null, null, reusableCandidates)
                         : searchNode(input, searchConstraints);
@@ -158,9 +191,13 @@ public class JobSeekWorkflow {
                     return failed(input, searchOut, "SEARCH_NODE_FAILED");
                 }
                 candidates = candidatesOf(searchOut);
+                publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
+                        "SUCCEEDED", "岗位搜索完成（" + candidates.size() + " 个候选）");
             }
         } catch (Exception exception) {
             log.warn("复合任务节点执行异常，error={}", exception.getMessage());
+            publish(progress, AgentProgressEvent.TASK_FAILED, input.planId(), null, null, null,
+                    "FAILED", "任务执行失败");
             return new JobSeekOutcome("FAILED", "任务执行失败：" + exception.getMessage(), "FAILED",
                     null, null, null, resume.getId(), List.of(), null);
         }
@@ -172,6 +209,8 @@ public class JobSeekWorkflow {
 
         // ---------- JOIN_RESULTS：搜索为空直接返回，不编造匹配 ----------
         if (candidates.isEmpty()) {
+            publish(progress, AgentProgressEvent.TASK_COMPLETED, input.planId(), null, null, null,
+                    "EMPTY", "搜索完成，无符合条件的岗位");
             return new JobSeekOutcome("EMPTY",
                     "我按条件查询了岗位，但当前没有符合条件的结果。可以放宽城市或关键词，要我调整后再查一次吗？",
                     "COMPLETED", profileArtifactId, candidatesArtifactId, null, resume.getId(),
@@ -181,11 +220,15 @@ public class JobSeekWorkflow {
         // ---------- MatchAgent（有界候选） ----------
         List<JobCandidates.JobCandidateItem> matchCandidates = candidates.stream()
                 .limit(MATCH_CANDIDATE_LIMIT).toList();
+        publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "MATCH_AGENT", "MATCH",
+                "RUNNING", "正在比较岗位与简历");
         MatchAgentNode.Result matchResult = matchAgentNode.execute(
                 input.userId(), input.conversationId(), input.planId(), input.traceId(),
                 resume, profile, matchCandidates, constraints, TOP_K, constraintVersion,
-                profileArtifactId, candidatesArtifactId);
+                profileArtifactId, candidatesArtifactId, budget);
         if (matchResult.report() == null) {
+            publish(progress, AgentProgressEvent.TASK_FAILED, input.planId(), matchResult.runId(), "MATCH_AGENT", "MATCH",
+                    "FAILED", "匹配分析失败，可重试该节点");
             return new JobSeekOutcome("FAILED",
                     "匹配分析失败（" + matchResult.reasonCode() + "），岗位结果已保留，可稍后重试匹配。",
                     "FAILED", profileArtifactId, candidatesArtifactId, null, resume.getId(),
@@ -197,6 +240,10 @@ public class JobSeekWorkflow {
 
         // ---------- VALIDATE_REPORT + RESPOND（可信字段重建） ----------
         String answer = buildAnswer(matchCandidates, matchResult.report());
+        publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), matchResult.runId(), "MATCH_AGENT", "MATCH",
+                "SUCCEEDED", "匹配完成（" + matchResult.report().rankedItems().size() + " 个推荐）");
+        publish(progress, AgentProgressEvent.TASK_COMPLETED, input.planId(), null, null, null,
+                "SUCCEEDED", "任务完成");
         return new JobSeekOutcome("SUCCEEDED", answer, "COMPLETED",
                 profileArtifactId, candidatesArtifactId, reportArtifactId, resume.getId(),
                 List.of(), null);
@@ -211,10 +258,10 @@ public class JobSeekWorkflow {
     }
 
     private NodeOutput resumeNode(JobSeekInput input, JobResume resume, String resumeVersion,
-                                  String targetRoleHint) {
+                                  String targetRoleHint, TaskExecutionBudget budget) {
         ResumeAgentNode.Result result = resumeAgentNode.execute(
                 input.userId(), input.conversationId(), input.planId(), input.traceId(),
-                resume, resumeVersion, targetRoleHint);
+                resume, resumeVersion, targetRoleHint, budget);
         if (result.profile() == null) {
             return new NodeOutput(result.reasonCode(), null, List.of());
         }
@@ -453,6 +500,16 @@ public class JobSeekWorkflow {
 
     private List<String> limit(List<String> values, int max) {
         return values.size() > max ? values.subList(0, max) : values;
+    }
+
+    // 进度事件（不暴露内部参数/Prompt/推理）
+    private void publish(TaskProgressPublisher publisher, String event, Long planId, Long runId,
+                         String nodeKey, String agentType, String status, String summary) {
+        if (publisher == null) {
+            return;
+        }
+        publisher.publish(new AgentProgressEvent(event, planId, runId, nodeKey, agentType,
+                0, status, summary, System.currentTimeMillis()));
     }
 
     // ---------- 工具方法 ----------

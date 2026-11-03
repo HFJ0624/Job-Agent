@@ -2,6 +2,9 @@ package com.job.bootstrap.agent.seek;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.plan.AgentPlanParameterExtractor;
+import com.job.bootstrap.agent.progress.TaskProgressPublisher;
+import com.job.bootstrap.agent.task.TaskBudgetRegistry;
+import com.job.bootstrap.agent.task.TaskExecutionBudget;
 import com.job.bootstrap.agent.search.ReactSearchProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import com.job.bootstrap.agent.task.AgentTaskService;
@@ -40,6 +43,7 @@ public class JobSeekReactEntry {
     private final JobSeekWorkflow jobSeekWorkflow;
     private final AgentPlanParameterExtractor parameterExtractor;
     private final ObjectMapper objectMapper;
+    private final TaskBudgetRegistry taskBudgetRegistry;
 
     /**
      * 入口结果。
@@ -80,6 +84,15 @@ public class JobSeekReactEntry {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Result execute(Long userId, Long conversationId, Long planId, String traceId,
                           String message, boolean recover) {
+        return execute(userId, conversationId, planId, traceId, message, recover, TaskProgressPublisher.NOOP);
+    }
+
+    /**
+     * 执行复合任务（第三阶段：进度发布器 + 父任务共享预算）。
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public Result execute(Long userId, Long conversationId, Long planId, String traceId,
+                          String message, boolean recover, TaskProgressPublisher publisher) {
         AgentPlan plan;
         if (planId != null) {
             plan = agentTaskService.loadOwned(userId, planId);
@@ -97,17 +110,35 @@ public class JobSeekReactEntry {
                     "JOB_SEEK_FLOW", message, AgentTaskService.RUNTIME_MULTI_AGENT, snapshot);
         }
 
+        // 父任务预算：补参恢复延续已用额度，但重置活动时间窗口（等待用户不计时）
+        TaskExecutionBudget budget = taskBudgetRegistry.getOrCreate(plan.getId());
+        budget.restore(
+                plan.getModelCallsUsed() == null ? 0 : plan.getModelCallsUsed(),
+                plan.getToolCallsUsed() == null ? 0 : plan.getToolCallsUsed(),
+                0L);
+
         JobSeekWorkflow.JobSeekOutcome outcome = jobSeekWorkflow.execute(
                 new JobSeekWorkflow.JobSeekInput(userId, conversationId, plan.getId(), traceId,
-                        message, plan.getExtractedParamsJson()));
+                        message, plan.getExtractedParamsJson()), publisher, budget);
+
+        // 额度落库（补参/重试延续，不清零）
+        agentTaskService.updateBudgetUsage(plan.getId(), budget.modelCallsUsed(), budget.toolCallsUsed());
+
+        if (budget.isCancelled()) {
+            agentTaskService.markCancelled(plan.getId(), budget.cancelReason());
+            return new Result(true, "任务已取消，已完成的结果已保留。", "CANCELLED", plan.getId(),
+                    AgentPlanStatus.CANCELLED.name());
+        }
 
         AgentPlanStatus planStatus = switch (outcome.status()) {
             case "SUCCEEDED", "EMPTY" -> AgentPlanStatus.COMPLETED;
             case "NEED_INPUT" -> AgentPlanStatus.NEED_CLARIFICATION;
             default -> AgentPlanStatus.FAILED;
         };
+        // 待补充问题落库：前端刷新后据此恢复“缺什么、能选什么”
         agentTaskService.updateStatus(plan.getId(), planStatus,
-                "FAILED".equals(outcome.status()) ? outcome.answer() : null);
+                "FAILED".equals(outcome.status()) ? outcome.answer() : null,
+                "NEED_INPUT".equals(outcome.status()) ? outcome.question() : null);
 
         return new Result(true, outcome.answer(), outcome.status(), plan.getId(), planStatus.name());
     }

@@ -94,11 +94,13 @@ public class AgentArtifactService {
      * 列出某计划下某类型的全部产物（版本变化审计/调试用）。
      */
     public List<AgentArtifact> listByPlan(Long userId, Long planId, String type) {
-        return agentArtifactMapper.selectList(new QueryWrapper<AgentArtifact>()
+        QueryWrapper<AgentArtifact> wrapper = new QueryWrapper<AgentArtifact>()
                 .eq("user_id", userId)
                 .eq("plan_id", planId)
-                .eq("type", type)
-                .eq("is_deleted", NOT_DELETED)
-                .orderByAsc("id"));
+                .eq("is_deleted", NOT_DELETED);
+        if (StringUtils.hasText(type)) {
+            wrapper.eq("type", type);
+        }
+        return agentArtifactMapper.selectList(wrapper.orderByAsc("id"));
     }
 }

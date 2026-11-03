@@ -217,6 +217,17 @@ public class AgentRunService {
                 .last("limit 1"));
     }
 
+    /** 列出计划下所有子 run（状态快照用）。 */
+    public List<AgentRun> listByPlan(Long planId) {
+        if (planId == null) {
+            return List.of();
+        }
+        return agentRunMapper.selectList(new QueryWrapper<AgentRun>()
+                .eq("plan_id", planId)
+                .eq("is_deleted", NOT_DELETED)
+                .orderByAsc("id"));
+    }
+
     public AgentRun findById(Long runId) {
         return runId == null ? null : agentRunMapper.selectById(runId);
     }

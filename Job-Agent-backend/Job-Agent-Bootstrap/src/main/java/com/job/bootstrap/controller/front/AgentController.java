@@ -1,6 +1,9 @@
 package com.job.bootstrap.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.job.bootstrap.agent.progress.SseTaskProgressPublisher;
+import com.job.bootstrap.agent.task.AgentTaskStatusService;
+import com.job.bootstrap.agent.task.TaskBudgetRegistry;
 import com.job.bootstrap.service.AgentChatService;
 import com.job.bootstrap.service.AgentHistoryService;
 import com.job.common.dto.agent.AgentChatRequestDTO;
@@ -30,6 +33,10 @@ import java.util.concurrent.Executor;
 @RequiredArgsConstructor
 @RequestMapping("/front/agent")
 public class AgentController {
+
+    /** 第三阶段：任务状态快照与取消。 */
+    private final AgentTaskStatusService agentTaskStatusService;
+    private final TaskBudgetRegistry taskBudgetRegistry;
 
     /**
      * SSE 流式超时时间（毫秒）。
@@ -94,6 +101,9 @@ public class AgentController {
 
         agentSseExecutor.execute(() -> {
             try {
+                // 节点进度事件：与 token/done/error 共存，旧客户端忽略未知事件即可
+                SseTaskProgressPublisher publisher = new SseTaskProgressPublisher(
+                        request.getPlanId(), (name, data) -> sendEvent(emitter, name, data));
                 AgentChatVO result = agentChatService.streamChat(
                         userId,
                         request.getConversationId(),
@@ -101,7 +111,8 @@ public class AgentController {
                         request.getMessage(),
                         request.getConfirmedToolNames(),
                         request.getRetry(),
-                        token -> sendToken(emitter, token)
+                        token -> sendToken(emitter, token),
+                        publisher
                 );
                 sendEvent(emitter, "done", result);
                 emitter.complete();
@@ -132,6 +143,36 @@ public class AgentController {
         } catch (Exception exception) {
             log.debug("SSE 事件推送失败，name={}, error={}", name, exception.getMessage());
         }
+    }
+
+    /**
+     * 查询任务状态快照（第三阶段：页面刷新/断线恢复）。
+     *
+     * 返回父任务状态、待补充问题、子节点状态与产物清单；必须登录且校验归属。
+     */
+    @GetMapping("/task/{planId}")
+    public Result<java.util.Map<String, Object>> taskStatus(@PathVariable Long planId) {
+        Long userId = StpUtil.getLoginIdAsLong();
+        java.util.Map<String, Object> snapshot = agentTaskStatusService.snapshot(userId, planId);
+        if (snapshot == null) {
+            throw new com.job.exception.BizException("任务不存在或不属于当前用户");
+        }
+        return Result.build(snapshot, ResultCodeEnum.SUCCESS);
+    }
+
+    /**
+     * 显式取消任务（第三阶段）：设置共享取消信号并置 CANCELLED，已完成产物保留。
+     */
+    @PostMapping("/task/{planId}/cancel")
+    public Result<Boolean> cancelTask(@PathVariable Long planId) {
+        Long userId = StpUtil.getLoginIdAsLong();
+        java.util.Map<String, Object> snapshot = agentTaskStatusService.snapshot(userId, planId);
+        if (snapshot == null) {
+            throw new com.job.exception.BizException("任务不存在或不属于当前用户");
+        }
+        taskBudgetRegistry.cancel(planId, "USER_CANCELLED");
+        agentTaskStatusService.toString(); // no-op，保持依赖可读
+        return Result.build(Boolean.TRUE, ResultCodeEnum.SUCCESS);
     }
 
     /**

@@ -8,7 +8,9 @@ import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
 import com.job.bootstrap.agent.search.ReactChatPreparationService;
+import com.job.bootstrap.agent.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.seek.JobSeekReactEntry;
+import com.job.bootstrap.agent.progress.TaskProgressPublisher;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
@@ -205,6 +207,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final JobSeekReactEntry jobSeekReactEntry;
 
     /**
+     * 第三阶段：独立简历分析入口（复用 ResumeAgentNode）。
+     */
+    private final ResumeReactEntry resumeReactEntry;
+
+    /**
      * 统一 JSON 工具。
      */
     private final ObjectMapper objectMapper;
@@ -270,7 +277,11 @@ public class AgentChatServiceImpl implements AgentChatService {
 
         // 复合任务优先（简历 + 岗位/匹配）：三 Agent 协作
         if (jobSeekReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
-            return chatViaJobSeek(userId, conversationId, planId, message, retry);
+            return chatViaJobSeek(userId, conversationId, planId, message, retry, TaskProgressPublisher.NOOP);
+        }
+        // 独立简历分析：ResumeAgent
+        if (resumeReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+            return chatViaResume(userId, conversationId, planId, message);
         }
         // 独立岗位搜索：单 Agent ReAct
         if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
@@ -295,17 +306,37 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     /**
+     * 独立简历分析分支（事务外执行，第三阶段）：会话短事务 → ResumeAgent → 助手消息短事务。
+     */
+    private AgentChatVO chatViaResume(Long userId, Long conversationId, Long planId, String message) {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        Long preparedConversationId = reactChatPreparationService.prepareConversation(
+                userId, conversationId, message);
+        ResumeReactEntry.Result result = resumeReactEntry.execute(
+                userId, preparedConversationId, planId, traceId, message, TaskProgressPublisher.NOOP);
+        reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(preparedConversationId);
+        vo.setPlanId(result.planId());
+        vo.setAnswer(result.answer());
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
+    }
+
+    /**
      * 求职复合任务分支（事务外执行，第二阶段）：
      * 会话/用户消息短事务提交 → 父计划 + 三 Agent Workflow → 助手消息短事务落库。
      */
     private AgentChatVO chatViaJobSeek(Long userId, Long conversationId, Long planId,
-                                       String message, Boolean retry) {
+                                       String message, Boolean retry, TaskProgressPublisher publisher) {
         String traceId = UUID.randomUUID().toString().replace("-", "");
         Long preparedConversationId = reactChatPreparationService.prepareConversation(
                 userId, conversationId, message);
 
         JobSeekReactEntry.Result result = jobSeekReactEntry.execute(
-                userId, preparedConversationId, planId, traceId, message, Boolean.TRUE.equals(retry));
+                userId, preparedConversationId, planId, traceId, message, Boolean.TRUE.equals(retry), publisher);
 
         reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
 
@@ -379,6 +410,21 @@ public class AgentChatServiceImpl implements AgentChatService {
             Boolean retry,
             TokenConsumer streamSink
     ) {
+        return streamChat(userId, conversationId, planId, message, confirmedToolNames, retry,
+                streamSink, TaskProgressPublisher.NOOP);
+    }
+
+    @Override
+    public AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink,
+            TaskProgressPublisher progressPublisher
+    ) {
         /*
          * 第二阶段：chat 与 streamChat **共用同一套分发**——
          * 简历分析/独立搜索/复合任务都按同一引擎路由，不能同步接口走新链路而 SSE 默默落回旧链路。
@@ -386,7 +432,10 @@ public class AgentChatServiceImpl implements AgentChatService {
          */
         AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
         if (jobSeekReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
-            return emitAsStream(chatViaJobSeek(userId, conversationId, planId, message, retry), streamSink);
+            return emitAsStream(chatViaJobSeek(userId, conversationId, planId, message, retry, progressPublisher), streamSink);
+        }
+        if (resumeReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+            return emitAsStream(chatViaResume(userId, conversationId, planId, message), streamSink);
         }
         if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
             return emitAsStream(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);

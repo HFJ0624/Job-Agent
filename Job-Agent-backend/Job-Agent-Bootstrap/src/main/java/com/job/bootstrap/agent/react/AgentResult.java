@@ -46,6 +46,10 @@ public record AgentResult(
         public static final String PROTOCOL_ERROR = "PROTOCOL_ERROR";
         public static final String MODEL_ERROR = "MODEL_ERROR";
         public static final String TOOL_ERROR = "TOOL_ERROR";
+        /** 父任务模型请求额度用尽（第三阶段）。 */
+        public static final String BUDGET_MODEL_CALLS_EXHAUSTED = "BUDGET_MODEL_CALLS_EXHAUSTED";
+        /** 用户显式取消（第三阶段）。 */
+        public static final String TASK_CANCELLED = "TASK_CANCELLED";
 
         private ReasonCode() {
         }

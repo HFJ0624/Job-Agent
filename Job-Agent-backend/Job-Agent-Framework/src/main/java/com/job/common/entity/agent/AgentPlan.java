@@ -92,4 +92,16 @@ public class AgentPlan extends BaseEntity {
      * 创建时固定，恢复时优先按它路由——开关只影响新任务。
      */
     private String runtimeMode;
+
+    /** 等待用户补充时的具体问题（第三阶段，前端刷新后据此恢复）。 */
+    private String pendingQuestion;
+
+    /** 用户显式取消时间（第三阶段）。 */
+    private java.util.Date cancelledAt;
+
+    /** 父任务已用模型请求次数（第三阶段，补参恢复不得清零）。 */
+    private Integer modelCallsUsed;
+
+    /** 父任务已用业务工具次数（第三阶段）。 */
+    private Integer toolCallsUsed;
 }

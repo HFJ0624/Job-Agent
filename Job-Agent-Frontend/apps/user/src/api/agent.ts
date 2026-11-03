@@ -33,7 +33,8 @@ export function chatWithAgent(payload: AgentChatPayload) {
  */
 export async function streamChatWithAgent(
     payload: AgentChatPayload,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    onProgress?: (event: AgentProgressEvent) => void
 ): Promise<AgentChatInfo> {
     const { tokenName, tokenValue } = getToken();
     const headers = new Headers({ "Content-Type": "application/json" });
@@ -78,6 +79,8 @@ export async function streamChatWithAgent(
                 finalResult = event.data as AgentChatInfo;
             } else if (event.name === "error") {
                 throw new Error(String(event.data));
+            } else if (PROGRESS_EVENTS.has(event.name)) {
+                onProgress?.({ ...(event.data as AgentProgressEvent), event: event.name as any });
             }
         }
     }
@@ -140,4 +143,69 @@ export function deleteAgentConversation(conversationId: number) {
     return request<void>(`/front/agent/conversations/${conversationId}`, {
         method: "DELETE"
     });
+}
+
+
+/**
+ * 任务进度事件（第三阶段）。
+ *
+ * 与 token/done/error 共存：旧页面忽略未知事件即可；新页面用它展示节点进度。
+ */
+export interface AgentProgressEvent {
+    event:
+        | "task_started"
+        | "node_started"
+        | "node_completed"
+        | "waiting_input"
+        | "task_failed"
+        | "task_completed";
+    planId?: number | null;
+    runId?: number | null;
+    nodeKey?: string | null;
+    agentType?: string | null;
+    seq?: number;
+    status?: string | null;
+    summary?: string | null;
+    timestamp?: number;
+}
+
+const PROGRESS_EVENTS = new Set([
+    "task_started",
+    "node_started",
+    "node_completed",
+    "waiting_input",
+    "task_failed",
+    "task_completed"
+]);
+
+/**
+ * 查询任务状态快照（第三阶段：刷新/断线恢复）。
+ */
+export async function fetchAgentTaskStatus(planId: number): Promise<any> {
+    const { tokenName, tokenValue } = getToken();
+    const headers = new Headers();
+    if (tokenValue) {
+        headers.set(tokenName, tokenValue);
+    }
+    const response = await fetch(`/front/agent/task/${planId}`, { method: "GET", headers });
+    const body = await response.json();
+    if (!response.ok) {
+        throw new Error(body?.message || `查询任务状态失败：HTTP ${response.status}`);
+    }
+    return body?.data;
+}
+
+/**
+ * 显式取消任务（第三阶段）：仅在用户主动点击取消时调用，关闭页面不算取消。
+ */
+export async function cancelAgentTask(planId: number): Promise<void> {
+    const { tokenName, tokenValue } = getToken();
+    const headers = new Headers();
+    if (tokenValue) {
+        headers.set(tokenName, tokenValue);
+    }
+    const response = await fetch(`/front/agent/task/${planId}/cancel`, { method: "POST", headers });
+    if (!response.ok) {
+        throw new Error(`取消任务失败：HTTP ${response.status}`);
+    }
 }

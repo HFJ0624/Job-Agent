@@ -88,6 +88,12 @@ public class AgentTaskService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void updateStatus(Long planId, AgentPlanStatus status, String failReason) {
+        updateStatus(planId, status, failReason, null);
+    }
+
+    /** 更新状态并可携带待补充问题（第三阶段：刷新后恢复展示）。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void updateStatus(Long planId, AgentPlanStatus status, String failReason, String pendingQuestion) {
         if (planId == null) {
             return;
         }
@@ -95,6 +101,36 @@ public class AgentTaskService {
         plan.setId(planId);
         plan.setStatus(status.name());
         plan.setFailReason(failReason);
+        plan.setPendingQuestion(pendingQuestion);
+        plan.setUpdateTime(new Date());
+        agentPlanMapper.updateById(plan);
+    }
+
+    /** 保存父任务已用额度（第三阶段：补参恢复延续，不清零）。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void updateBudgetUsage(Long planId, int modelCallsUsed, int toolCallsUsed) {
+        if (planId == null) {
+            return;
+        }
+        AgentPlan plan = new AgentPlan();
+        plan.setId(planId);
+        plan.setModelCallsUsed(modelCallsUsed);
+        plan.setToolCallsUsed(toolCallsUsed);
+        plan.setUpdateTime(new Date());
+        agentPlanMapper.updateById(plan);
+    }
+
+    /** 显式取消（第三阶段）：置 CANCELLED，保留已完成产物。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void markCancelled(Long planId, String reason) {
+        if (planId == null) {
+            return;
+        }
+        AgentPlan plan = new AgentPlan();
+        plan.setId(planId);
+        plan.setStatus(AgentPlanStatus.CANCELLED.name());
+        plan.setFailReason(reason);
+        plan.setCancelledAt(new Date());
         plan.setUpdateTime(new Date());
         agentPlanMapper.updateById(plan);
     }

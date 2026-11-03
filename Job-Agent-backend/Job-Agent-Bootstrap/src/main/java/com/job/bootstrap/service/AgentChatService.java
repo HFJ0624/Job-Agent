@@ -77,4 +77,22 @@ public interface AgentChatService {
             Boolean retry,
             TokenConsumer streamSink
     );
+
+    /**
+     * 流式对话（第三阶段）：附带任务进度发布器（SSE 节点事件）。
+     *
+     * <p>默认委托旧方法，保证既有实现/测试无需改动；新链路实现类会重写本方法。</p>
+     */
+    default AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            com.job.bootstrap.ai.TokenConsumer streamSink,
+            com.job.bootstrap.agent.progress.TaskProgressPublisher progressPublisher
+    ) {
+        return streamChat(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
+    }
 }

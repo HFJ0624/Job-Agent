@@ -1,6 +1,7 @@
 package com.job.bootstrap.agent.react;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.task.TaskExecutionBudget;
 import com.job.bootstrap.ai.turn.AiChatMessage;
 import com.job.bootstrap.ai.turn.AiChatTurnRequest;
 import com.job.bootstrap.ai.turn.AiChatTurnResponse;
@@ -124,6 +125,11 @@ public class ReActRunner {
         Map<String, String> executedSignatures = new LinkedHashMap<>();
 
         while (true) {
+            // 父任务取消：不再开始新轮次（第三阶段）
+            if (AgentRunExecutionHooks.cancelled()) {
+                return ReActRunResult.failure(AgentResult.ReasonCode.TASK_CANCELLED,
+                        "任务已被取消", context.toolCalls(), context.turn(), context.elapsedMillis());
+            }
             if (deadlineExceeded(definition, context)) {
                 return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TIMEOUT,
                         "已超过总时限 " + definition.deadlineSeconds() + " 秒",
@@ -133,6 +139,22 @@ public class ReActRunner {
                 return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TURNS_EXHAUSTED,
                         "模型轮次已用尽（" + definition.maxTurns() + " 轮）",
                         context.toolCalls(), context.turn(), context.elapsedMillis());
+            }
+
+            // 第三阶段：父预算原子占用（额度用尽/取消/超时即终止，不能先调再统计）
+            TaskExecutionBudget budget = AgentRunExecutionHooks.budget();
+            if (budget != null) {
+                if (!budget.canContinue()) {
+                    String reason = budget.isCancelled()
+                            ? AgentResult.ReasonCode.TASK_CANCELLED : AgentResult.ReasonCode.BUDGET_TIMEOUT;
+                    return ReActRunResult.failure(reason, "父任务预算已结束",
+                            context.toolCalls(), context.turn(), context.elapsedMillis());
+                }
+                if (!budget.tryReserveModelCall()) {
+                    return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_MODEL_CALLS_EXHAUSTED,
+                            "父任务模型请求额度已用尽（" + budget.maxModelCalls() + " 次）",
+                            context.toolCalls(), context.turn(), context.elapsedMillis());
+                }
             }
 
             context.nextTurn();
@@ -294,6 +316,16 @@ public class ReActRunner {
                     closePendingCalls(context, response.toolCalls(), null, "已中止，未执行");
                     return ReActRunResult.failure(AgentResult.ReasonCode.PROTOCOL_ERROR,
                             "重复相同查询且结果无变化", context.toolCalls(), context.turn(), context.elapsedMillis());
+                }
+
+                // 第三阶段：业务工具额度也要过父预算
+                TaskExecutionBudget toolBudget = AgentRunExecutionHooks.budget();
+                if (toolBudget != null && !toolBudget.tryReserveToolCall()) {
+                    context.append(AiChatMessage.tool(call.id(),
+                            protocolError("父任务业务工具额度已用尽（" + toolBudget.maxToolCalls() + " 次）")));
+                    closePendingCalls(context, response.toolCalls(), null, "额度用尽，未执行");
+                    return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_TOOL_CALLS_EXHAUSTED,
+                            "父任务业务工具额度已用尽", context.toolCalls(), context.turn(), context.elapsedMillis());
                 }
 
                 context.countToolCall();

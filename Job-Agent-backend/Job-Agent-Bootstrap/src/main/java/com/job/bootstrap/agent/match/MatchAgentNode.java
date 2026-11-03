@@ -86,6 +86,16 @@ public class MatchAgentNode {
                           JobResume resume, ResumeProfile profile, List<JobCandidates.JobCandidateItem> candidates,
                           SearchConstraints constraints, int topK, String constraintVersion,
                           Long profileArtifactId, Long candidatesArtifactId) {
+        return execute(userId, conversationId, planId, traceId, resume, profile, candidates,
+                constraints, topK, constraintVersion, profileArtifactId, candidatesArtifactId, null);
+    }
+
+    /** 执行匹配节点（第三阶段：继承父任务预算）。 */
+    public Result execute(Long userId, Long conversationId, Long planId, String traceId,
+                          JobResume resume, ResumeProfile profile, List<JobCandidates.JobCandidateItem> candidates,
+                          SearchConstraints constraints, int topK, String constraintVersion,
+                          Long profileArtifactId, Long candidatesArtifactId,
+                          com.job.bootstrap.agent.task.TaskExecutionBudget budget) {
         Set<Long> candidateIds = candidates.stream()
                 .map(JobCandidates.JobCandidateItem::jobId).collect(Collectors.toSet());
         Map<Long, BigDecimal> previewedScores = new HashMap<>();
@@ -101,7 +111,8 @@ public class MatchAgentNode {
 
         AgentRunExecutionHooks.set(
                 System.currentTimeMillis() + DEADLINE_SECONDS * 1000,
-                messages -> agentRunService.saveMessages(run.getId(), attempt, toJson(messages))
+                messages -> agentRunService.saveMessages(run.getId(), attempt, toJson(messages)),
+                budget
         );
         try {
             AgentDefinition definition = definition(candidates, profile, topK, sections);
