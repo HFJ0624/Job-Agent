@@ -24,15 +24,6 @@ spring:
       port: 6379
   #  password: ${REDIS_PASSWORD:}
 
-  # Flyway：数据库 Schema 版本化管理（任务4）
-  flyway:
-    enabled: true
-    # 现有库首次启动自动打基线（不执行历史脚本）；全新库从 V1__baseline.sql 重建
-    baseline-on-migrate: true
-    baseline-version: 1
-    # 迁移脚本目录：Job-Agent-Bootstrap/src/main/resources/db/migration，命名 V{n}__desc.sql
-    locations: classpath:db/migration
-
 # 自定义配置 访问权限路由配置
 job:
   minio:
