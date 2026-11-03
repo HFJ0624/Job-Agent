@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.ai.AiGatewayProperties;
 import com.job.bootstrap.ai.AiModelCallResponse;
+import com.job.bootstrap.ai.turn.AiChatTurnRequest;
+import com.job.bootstrap.ai.turn.AiChatTurnResponse;
 import com.job.bootstrap.ai.AiModelHttpClient;
 import com.job.bootstrap.ai.AiModelRateLimiter;
 import com.job.bootstrap.ai.AiRetryPolicy;
@@ -229,6 +231,93 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
         }
 
         throw new BizException("AI 模型调用失败：" + (lastException == null ? "没有可用模型" : lastException.getMessage()));
+    }
+
+    /**
+     * 结构化轮次调用（第一阶段 ReAct）：与 chat 共用路由/限流/熔断/重试/调用日志，
+     * 差异只有“请求与响应是结构化消息/工具调用”这一层。
+     *
+     * 说明:
+     * 1. 不做 Prompt 模板渲染——system prompt 由 AgentDefinition 放进 messages；
+     * 2. 调用日志的 promptVersion 记 null（本链路不依赖 Prompt 模板版本）；
+     * 3. 重试/熔断/限流策略与 chat 完全一致，模型失败同样计入预算（由 Runner 统计）。
+     */
+    @Override
+    public AiChatTurnResponse chatTurn(
+            String sceneCode,
+            AiModelTier tier,
+            AiChatTurnRequest request,
+            Long userId,
+            String traceId
+    ) {
+        AiModelTier effectiveTier = tier == null ? AiModelTier.STANDARD : tier;
+        AiModelRoute route = resolveRoute(sceneCode, effectiveTier, Map.of(), userId, traceId);
+        List<AiModelConfig> modelCandidates = resolveModelCandidates(route);
+
+        if (!aiModelRateLimiter.tryAcquireScene(sceneCode) || !aiModelRateLimiter.tryAcquireUser(userId)) {
+            throw new BizException("触发模型网关限流，请稍后重试");
+        }
+
+        Exception lastException = null;
+        for (int modelIndex = 0; modelIndex < modelCandidates.size(); modelIndex++) {
+            AiModelConfig model = modelCandidates.get(modelIndex);
+            boolean fallbackUsed = modelIndex > 0;
+
+            if (isCircuitOpen(model)) {
+                lastException = new BizException("模型熔断中：" + model.getModelCode());
+                recordCircuitOpenObservation(
+                        traceId, userId, sceneCode, route.getPromptCode(), null, model, fallbackUsed);
+                continue;
+            }
+
+            int maxAttempts = Math.max(1, safeInt(model.getMaxRetries(), 0) + 1);
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                long start = System.currentTimeMillis();
+                try {
+                    AiChatTurnResponse response = aiModelHttpClient.chatTurn(model, request);
+                    recordCallLog(
+                            traceId, userId, sceneCode, route.getPromptCode(), null, model, fallbackUsed,
+                            response.inputTokens(), response.outputTokens(),
+                            System.currentTimeMillis() - start,
+                            AiModelCallStatus.SUCCESS.name(), null);
+                    closeCircuit(model);
+                    return response;
+                } catch (Exception exception) {
+                    lastException = exception;
+                    recordCallLog(
+                            traceId, userId, sceneCode, route.getPromptCode(), null, model, fallbackUsed,
+                            estimateTokens(describeTurnRequest(request)), 0,
+                            System.currentTimeMillis() - start,
+                            AiModelCallStatus.FAILED.name(), exception.getMessage());
+                    openCircuitIfNeeded(model, exception);
+
+                    boolean retryable = aiRetryPolicy.isRetryable(exception);
+                    if (attempt < maxAttempts && retryable) {
+                        long backoffMs = aiRetryPolicy.backoffDelayMs(attempt);
+                        log.warn("模型轮次调用失败，退避后重试，modelCode={}, attempt={}/{}, backoffMs={}, error={}",
+                                model.getModelCode(), attempt, maxAttempts, backoffMs, exception.getMessage());
+                        sleep(backoffMs);
+                    } else if (attempt < maxAttempts) {
+                        log.warn("模型轮次调用失败且不可重试，切换备用模型，modelCode={}, attempt={}/{}, error={}",
+                                model.getModelCode(), attempt, maxAttempts, exception.getMessage());
+                        break;
+                    }
+                }
+            }
+        }
+
+        throw new BizException("AI 模型轮次调用失败：" + (lastException == null ? "没有可用模型" : lastException.getMessage()));
+    }
+
+    // 失败日志的 token 估算：把消息序列拼成文本长度粗估（仅用于日志，不参与计费）
+    private String describeTurnRequest(AiChatTurnRequest request) {
+        if (request == null || request.messages() == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        request.messages().forEach(message ->
+                builder.append(message.role()).append(':').append(message.content() == null ? "" : message.content()).append('\n'));
+        return builder.toString();
     }
 
     /**

@@ -58,6 +58,29 @@ public interface AiModelGatewayService {
      * @param consumer token 消费者（降级时只会收到一个 token）
      * @return 完整模型输出文本
      */
+    /**
+     * 结构化轮次调用（第一阶段 ReAct）：完整消息序列 + 工具清单。
+     *
+     * <p>默认实现直接抛错——**不允许静默退化为一次文本 chat**：ReAct 链路依赖工具调用，
+     * 悄悄降级会让上层误以为“ReAct 成功”。只有真正支持工具协议的实现类才能重写本方法。</p>
+     *
+     * @param sceneCode 业务场景编码（复用路由/限流/熔断/调用日志）
+     * @param tier      模型档位，为空按 STANDARD
+     * @param request   消息序列与工具清单
+     * @param userId    用户 ID
+     * @param traceId   链路 ID
+     * @return 结构化轮次响应
+     */
+    default com.job.bootstrap.ai.turn.AiChatTurnResponse chatTurn(
+            String sceneCode,
+            AiModelTier tier,
+            com.job.bootstrap.ai.turn.AiChatTurnRequest request,
+            Long userId,
+            String traceId
+    ) {
+        throw new com.job.exception.BizException("当前模型网关不支持结构化轮次调用（chatTurn）");
+    }
+
     default String chatStream(
             String sceneCode,
             AiModelTier tier,

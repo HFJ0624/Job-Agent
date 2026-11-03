@@ -36,4 +36,18 @@ public interface AiModelHttpClient {
      * @param consumer      token 消费者
      */
     void chatStream(AiModelConfig model, String systemPrompt, String userMessage, TokenConsumer consumer);
+
+    /**
+     * 结构化轮次调用（第一阶段 ReAct）：完整消息序列 + 工具清单。
+     *
+     * 说明:
+     * 1. content 为空但 tool_calls 有值是合法响应（模型选择调用工具）；
+     * 2. 既无 content 也无 tool_calls、响应无法解析时抛异常，由网关按失败处理；
+     * 3. finish_reason=length（输出截断）不在这里抛异常——返回给 Runner 按协议错误处理。
+     *
+     * @param model   模型配置
+     * @param request 消息序列与工具清单
+     * @return 结构化轮次响应
+     */
+    com.job.bootstrap.ai.turn.AiChatTurnResponse chatTurn(AiModelConfig model, com.job.bootstrap.ai.turn.AiChatTurnRequest request);
 }
