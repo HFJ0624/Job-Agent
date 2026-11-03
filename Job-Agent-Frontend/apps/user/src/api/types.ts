@@ -364,6 +364,8 @@ export interface GreetingInfo {
 export interface AgentChatInfo {
   conversationId: number;
   planId?: number | null;
+  /** 第三阶段：独立搜索任务的 run 标识（无父计划时使用，不能当 planId）。 */
+  runId?: number | null;
   answer: string;
   requiresUserConfirmation?: boolean;
   requiredConfirmationToolNames?: string[];

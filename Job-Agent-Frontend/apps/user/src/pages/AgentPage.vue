@@ -48,6 +48,62 @@
       </aside>
 
       <section class="agent-chat-card">
+        <!-- 第三阶段：轻量任务卡片（复用现有样式语言，不重设计页面） -->
+        <div v-if="taskCard" class="agent-task-card">
+          <div class="task-head">
+            <strong>任务进度</strong>
+            <span class="task-status" :class="taskCard.status.toLowerCase()">
+              {{ TASK_STATUS_LABELS[taskCard.status] || taskCard.status }}
+            </span>
+          </div>
+
+          <div class="task-nodes">
+            <span
+              v-for="node in taskCard.nodes"
+              :key="node.key"
+              class="task-node"
+              :class="node.status.toLowerCase()"
+            >
+              {{ node.label }} · {{ NODE_STATUS_LABELS[node.status] || node.status }}
+            </span>
+          </div>
+
+          <p v-if="taskCard.summaries.length" class="task-summary">
+            {{ taskCard.summaries[taskCard.summaries.length - 1] }}
+          </p>
+          <p v-if="taskCard.status === 'WAITING_INPUT' && taskCard.pendingQuestion" class="task-question">
+            {{ taskCard.pendingQuestion }}
+          </p>
+          <p v-if="taskCard.status === 'CANCELLED' && taskCard.failReason" class="task-summary">
+            {{ taskCard.failReason }}
+          </p>
+          <p v-else-if="taskCard.failReason" class="task-error">{{ taskCard.failReason }}</p>
+
+          <div class="task-actions">
+            <button
+              v-if="taskCard.status === 'FAILED'"
+              class="primary-button"
+              type="button"
+              :disabled="loading"
+              @click="retryTask"
+            >
+              重试
+            </button>
+            <button
+              v-if="taskCard.status === 'RUNNING' || taskCard.status === 'WAITING_INPUT'"
+              class="danger-button"
+              type="button"
+              :disabled="cancelling"
+              @click="cancelTask"
+            >
+              {{ cancelling ? "取消中…" : "取消任务" }}
+            </button>
+            <button class="ghost-button" type="button" @click="startNewTaskFromCard">
+              新任务
+            </button>
+          </div>
+        </div>
+
         <div ref="messageListRef" class="agent-message-list">
           <div
             v-for="(message, index) in messages"
@@ -112,15 +168,18 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   chatWithAgent,
   streamChatWithAgent,
   deleteAgentConversation,
+  fetchAgentTaskStatus,
+  cancelAgentTask,
   listAgentConversations,
   listAgentMessages
 } from "../api/agent";
+import type { AgentProgressEvent } from "../api/agent";
 import type { AgentChatPayload } from "../api/agent";
 import type {
   AgentChatMessage,
@@ -138,6 +197,328 @@ const conversationId = ref<number | null>(null);
  * 左侧会话列表。
  */
 const conversations = ref<AgentConversationInfo[]>([]);
+
+/* ===================== 第三阶段：任务进度与任务控制 ===================== */
+
+type TaskNodeStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
+
+interface TaskNodeView {
+  key: string;
+  label: string;
+  status: TaskNodeStatus;
+  summary: string;
+}
+
+interface TaskCard {
+  planId: number | null;
+  runId: number | null;
+  /** 规范化后的状态：RUNNING / WAITING_INPUT / SUCCEEDED / FAILED / CANCELLED */
+  status: string;
+  nodes: TaskNodeView[];
+  summaries: string[];
+  pendingQuestion: string;
+  failReason: string;
+}
+
+const NODE_LABELS: Record<string, string> = {
+  RESUME_AGENT: "简历分析",
+  JOB_SEARCH_AGENT: "岗位搜索",
+  MATCH_AGENT: "匹配分析"
+};
+
+/* 后端计划状态 → 页面状态，集中一处映射，避免各组件各写一套 */
+const PLAN_STATUS_MAP: Record<string, string> = {
+  NEED_CLARIFICATION: "WAITING_INPUT",
+  PLANNED: "RUNNING",
+  COMPLETED: "SUCCEEDED",
+  CANCELLED: "CANCELLED",
+  FAILED: "FAILED"
+};
+
+const TASK_STATUS_LABELS: Record<string, string> = {
+  RUNNING: "执行中",
+  WAITING_INPUT: "等待补充",
+  SUCCEEDED: "已完成",
+  FAILED: "失败",
+  CANCELLED: "已取消"
+};
+
+const NODE_STATUS_LABELS: Record<string, string> = {
+  PENDING: "等待",
+  RUNNING: "进行中",
+  SUCCEEDED: "完成",
+  FAILED: "失败",
+  SKIPPED: "跳过"
+};
+
+const taskCard = ref<TaskCard | null>(null);
+const cancelling = ref(false);
+let taskPollTimer: ReturnType<typeof setTimeout> | null = null;
+let taskPollCount = 0;
+
+function taskStorageKey(cid: number | null) {
+  return `jobAgentTask:${cid ?? "new"}`;
+}
+
+function persistTaskPlanId(cid: number | null, planId: number | null) {
+  try {
+    if (planId) {
+      window.localStorage.setItem(taskStorageKey(cid), String(planId));
+    } else {
+      window.localStorage.removeItem(taskStorageKey(cid));
+    }
+  } catch {
+    /* 本地存储不可用时忽略，不影响主流程 */
+  }
+}
+
+function readPersistedPlanId(cid: number | null): number | null {
+  try {
+    const raw = window.localStorage.getItem(taskStorageKey(cid));
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function ensureTaskCard(planId: number): TaskCard {
+  if (!taskCard.value || taskCard.value.planId !== planId) {
+    taskCard.value = {
+      planId,
+      runId: null,
+      status: "RUNNING",
+      nodes: Object.keys(NODE_LABELS).map(key => ({
+        key,
+        label: NODE_LABELS[key],
+        status: "PENDING" as TaskNodeStatus,
+        summary: ""
+      })),
+      summaries: [],
+      pendingQuestion: "",
+      failReason: ""
+    };
+  }
+  return taskCard.value;
+}
+
+function updateNode(key: string | null | undefined, status: TaskNodeStatus, summary?: string | null) {
+  if (!taskCard.value || !key || !NODE_LABELS[key]) {
+    return;
+  }
+  const node = taskCard.value.nodes.find(item => item.key === key);
+  if (!node) {
+    return;
+  }
+  // 幂等：不回退已完成的节点；重复事件直接覆盖为同一状态无副作用
+  if (node.status === "SUCCEEDED" && status !== "SUCCEEDED") {
+    return;
+  }
+  node.status = status;
+  if (summary) {
+    node.summary = summary;
+  }
+}
+
+/**
+ * 处理 SSE 进度事件。
+ *
+ * 说明:
+ * 1. 只看当前任务的 planId——其它任务/历史批次迟到的事件直接丢弃；
+ * 2. 节点状态各自独立（并行节点可同时 RUNNING），不按全局 seq 串行推进；
+ * 3. 最终状态以 done 后的 /task 快照为准，事件只负责即时反馈。
+ */
+function applyProgressEvent(event: AgentProgressEvent) {
+  if (!event) {
+    return;
+  }
+  const planId = event.planId ?? null;
+  if (planId) {
+    if (taskCard.value?.planId && taskCard.value.planId !== planId) {
+      return; // 旧任务迟到事件
+    }
+    ensureTaskCard(planId);
+    persistTaskPlanId(conversationId.value, planId);
+  }
+  if (!taskCard.value) {
+    return;
+  }
+  if (event.runId) {
+    taskCard.value.runId = event.runId;
+  }
+  if (event.summary) {
+    taskCard.value.summaries.push(event.summary);
+    if (taskCard.value.summaries.length > 8) {
+      taskCard.value.summaries.splice(0, taskCard.value.summaries.length - 8);
+    }
+  }
+  switch (event.event) {
+    case "task_started":
+      taskCard.value.status = "RUNNING";
+      break;
+    case "node_started":
+      updateNode(event.nodeKey, "RUNNING", event.summary);
+      break;
+    case "node_completed":
+      updateNode(event.nodeKey, "SUCCEEDED", event.summary);
+      break;
+    case "waiting_input":
+      taskCard.value.status = "WAITING_INPUT";
+      taskCard.value.pendingQuestion = event.summary || "";
+      break;
+    case "task_failed":
+      taskCard.value.status = "FAILED";
+      taskCard.value.failReason = event.summary || "";
+      break;
+    case "task_completed":
+      taskCard.value.status = event.status === "EMPTY" ? "SUCCEEDED" : "SUCCEEDED";
+      break;
+    default:
+      break;
+  }
+}
+
+/**
+ * 用后端任务快照校正页面状态（刷新恢复 / 事件之后的可信来源）。
+ */
+async function syncTaskFromServer(planId: number, poll = true) {
+  try {
+    const snapshot = await fetchAgentTaskStatus(planId);
+    const status = PLAN_STATUS_MAP[String(snapshot?.status ?? "")] ?? String(snapshot?.status ?? "RUNNING");
+    const card = ensureTaskCard(planId);
+    card.status = status;
+    card.pendingQuestion = snapshot?.pendingQuestion || "";
+    card.failReason = snapshot?.failReason || "";
+    persistTaskPlanId(conversationId.value, planId);
+
+    const runs: any[] = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
+    for (const run of runs) {
+      const nodeStatus = String(run?.status ?? "");
+      const mapped: TaskNodeStatus =
+        nodeStatus === "SUCCEEDED"
+          ? "SUCCEEDED"
+          : nodeStatus === "FAILED"
+            ? "FAILED"
+            : nodeStatus === "WAITING_INPUT"
+              ? "PENDING"
+              : "RUNNING";
+      if (updateNodeIfNewer(run?.nodeKey, mapped, run?.errorMsg)) {
+        card.runId = run?.runId ?? card.runId;
+      }
+    }
+
+    if (status === "RUNNING" && poll) {
+      startTaskPolling(planId);
+    } else {
+      stopTaskPolling();
+    }
+  } catch (error) {
+    // 查询失败不把任务标记为失败（可能只是网络问题）；保留现有展示
+    console.warn("[Job-Agent] 任务状态查询失败", error);
+  }
+}
+
+// 快照里的节点状态是权威的：允许从 PENDING 推进，但不回退已完成节点
+function updateNodeIfNewer(key: string | null | undefined, status: TaskNodeStatus, summary?: string | null) {
+  if (!taskCard.value || !key || !NODE_LABELS[key]) {
+    return false;
+  }
+  const node = taskCard.value.nodes.find(item => item.key === key);
+  if (!node || node.status === "SUCCEEDED") {
+    return false;
+  }
+  node.status = status;
+  if (summary) {
+    node.summary = summary;
+  }
+  return true;
+}
+
+function startTaskPolling(planId: number) {
+  stopTaskPolling();
+  taskPollCount = 0;
+  const tick = async () => {
+    taskPollCount += 1;
+    // 有界轮询：最多 40 次（约 2 分钟），终态/切换会话/卸载即停
+    if (taskPollCount > 40) {
+      stopTaskPolling();
+      return;
+    }
+    await syncTaskFromServer(planId, false);
+    const status = taskCard.value?.status;
+    if (status === "RUNNING") {
+      taskPollTimer = setTimeout(tick, 3000);
+    } else {
+      stopTaskPolling();
+    }
+  };
+  taskPollTimer = setTimeout(tick, 3000);
+}
+
+function stopTaskPolling() {
+  if (taskPollTimer) {
+    clearTimeout(taskPollTimer);
+    taskPollTimer = null;
+  }
+}
+
+/** 打开会话/刷新后恢复任务卡片（按明确 planId 查询，不重发聊天请求）。 */
+async function restoreTaskForConversation(cid: number | null) {
+  stopTaskPolling();
+  taskCard.value = null;
+  const planId = readPersistedPlanId(cid);
+  if (!planId) {
+    return;
+  }
+  await syncTaskFromServer(planId, true);
+}
+
+/** 重试：携带原任务标识 + retry=true，复用已完成的上游产物。 */
+async function retryTask() {
+  if (!taskCard.value?.planId || loading.value) {
+    return;
+  }
+  const planId = taskCard.value.planId;
+  taskCard.value.status = "RUNNING";
+  taskCard.value.failReason = "";
+  messages.value.push({ role: "USER", content: "重试该任务" });
+  loading.value = true;
+  errorMessage.value = "";
+  await runAgentTurn({ conversationId: conversationId.value, planId, message: "重试该任务", retry: true });
+}
+
+/** 取消：仅对稳定父任务标识调用；取消后迟到事件不能把状态改回成功。 */
+async function cancelTask() {
+  if (!taskCard.value?.planId || cancelling.value) {
+    return;
+  }
+  const planId = taskCard.value.planId;
+  cancelling.value = true;
+  try {
+    await cancelAgentTask(planId);
+    if (taskCard.value) {
+      taskCard.value.status = "CANCELLED";
+      taskCard.value.failReason = "已按你的要求取消，已完成的结果保留。";
+    }
+    ElMessage.success("已提交取消请求");
+    await syncTaskFromServer(planId, false);
+    if (taskCard.value) {
+      taskCard.value.status = "CANCELLED"; // 迟到事件不能回写成成功
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "取消失败");
+  } finally {
+    cancelling.value = false;
+  }
+}
+
+/** 新任务：只清理续跑标识，不删除历史、不自动取消上一个任务。 */
+function startNewTaskFromCard() {
+  persistTaskPlanId(conversationId.value, null);
+  taskCard.value = null;
+  stopTaskPolling();
+  ElMessage.info("已切换到新任务，下一条消息不会附加到旧任务");
+}
 
 /**
  * 右侧聊天消息。
@@ -217,6 +598,8 @@ async function openConversation(id: number) {
     }
 
     await scrollToBottom();
+    // 第三阶段：进入会话时按已保存的 planId 恢复任务卡片（不重发聊天请求）
+    await restoreTaskForConversation(id);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "历史消息加载失败";
     ElMessage.error(errorMessage.value);
@@ -234,6 +617,9 @@ function startNewConversation() {
   conversationId.value = null;
   inputMessage.value = "";
   errorMessage.value = "";
+  // 第三阶段：新会话不继承旧任务的续跑标识
+  taskCard.value = null;
+  stopTaskPolling();
   clearPendingConfirmation();
   messages.value = [
     {
@@ -309,7 +695,15 @@ async function sendMessage() {
   errorMessage.value = "";
 
   await scrollToBottom();
-  await runAgentTurn({ conversationId: conversationId.value, message });
+  /*
+   * 第三阶段：任务处于 WAITING_INPUT 时，补充消息带回原 planId 续跑原任务，
+   * 不被当作新任务重新分类/重新创建。
+   */
+  const payload: AgentChatPayload = { conversationId: conversationId.value, message };
+  if (taskCard.value?.status === "WAITING_INPUT" && taskCard.value.planId) {
+    payload.planId = taskCard.value.planId;
+  }
+  await runAgentTurn(payload);
 }
 
 /**
@@ -358,24 +752,32 @@ async function confirmToolExecution() {
  * @param payload 对话请求参数
  */
 async function runAgentTurn(payload: AgentChatPayload) {
-  const bubble = { role: "ASSISTANT", content: "" };
+  const bubble: AgentChatMessage = { role: "ASSISTANT", content: "" };
   messages.value.push(bubble);
 
   try {
-    const result = await streamChatWithAgent(payload, (token) => {
-      bubble.content += token;
-      scrollToBottom();
-    });
+    const result = await streamChatWithAgent(
+      payload,
+      token => {
+        bubble.content += token;
+        scrollToBottom();
+      },
+      applyProgressEvent
+    );
     // 流式结束：以服务端最终答案为准
     bubble.content = result.answer;
     await applyAgentResultState(result);
+    // 最终任务状态以快照为准（不能只看 token 是否结束）
+    if (result.planId) {
+      await syncTaskFromServer(result.planId, true);
+    }
   } catch (streamError) {
     // 流式失败：回退阻塞接口（先移除空气泡，避免残留半截内容）
     console.warn("[Job-Agent] 流式对话失败，回退阻塞接口", streamError);
     messages.value.splice(messages.value.indexOf(bubble), 1);
     try {
       const result = await chatWithAgent(payload);
-      messages.value.push({ role: "ASSISTANT", content: result.answer });
+      messages.value.push({ role: "ASSISTANT" as const, content: result.answer });
       await applyAgentResultState(result);
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
@@ -447,6 +849,20 @@ async function scrollToBottom() {
     messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
   }
 }
+
+/**
+ * 第三阶段：组件卸载时清理轮询计时器，避免旧回调写已卸载组件。
+ */
+onUnmounted(() => {
+  stopTaskPolling();
+});
+
+/**
+ * 第三阶段：首次进入页面时恢复当前会话的任务卡片（按 planId 查询，不重发请求）。
+ */
+onMounted(() => {
+  restoreTaskForConversation(conversationId.value);
+});
 </script>
 
 <style scoped>
@@ -704,6 +1120,65 @@ async function scrollToBottom() {
 
   .message-bubble {
     max-width: 86%;
+  }
+
+  /* 第三阶段：任务卡片 */
+  .agent-task-card {
+    margin: 12px 16px 0;
+    padding: 12px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fafbfc;
+    font-size: 13px;
+    color: #374151;
+
+    .task-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .task-status {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4338ca;
+
+      &.waiting_input { background: #fef3c7; color: #92400e; }
+      &.failed { background: #fee2e2; color: #b91c1c; }
+      &.cancelled { background: #f3f4f6; color: #4b5563; }
+      &.succeeded { background: #dcfce7; color: #166534; }
+    }
+
+    .task-nodes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .task-node {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #f3f4f6;
+      color: #6b7280;
+
+      &.running { background: #e0f2fe; color: #075985; }
+      &.succeeded { background: #dcfce7; color: #166534; }
+      &.failed { background: #fee2e2; color: #b91c1c; }
+    }
+
+    .task-summary { margin: 4px 0; color: #4b5563; }
+    .task-question { margin: 6px 0; color: #92400e; }
+    .task-error { margin: 6px 0; color: #b91c1c; }
+
+    .task-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
   }
 }
 </style>

@@ -6,6 +6,8 @@ export interface AgentChatPayload {
     message: string;
     planId?: number | null;
     confirmedToolNames?: string[];
+    /** 第三阶段：显式重试（仅对失败/过期任务生效，复用已有上游产物）。 */
+    retry?: boolean;
 }
 
 /**

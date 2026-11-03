@@ -8,6 +8,8 @@ import com.job.bootstrap.ai.AiGatewayProperties;
 import com.job.bootstrap.ai.AiModelCallResponse;
 import com.job.bootstrap.ai.turn.AiChatTurnRequest;
 import com.job.bootstrap.ai.turn.AiChatTurnResponse;
+import com.job.bootstrap.agent.task.TaskBudgetContext;
+import com.job.bootstrap.agent.task.TaskExecutionBudget;
 import com.job.bootstrap.ai.AiModelHttpClient;
 import com.job.bootstrap.ai.AiModelRateLimiter;
 import com.job.bootstrap.ai.AiRetryPolicy;
@@ -272,6 +274,22 @@ public class AiModelGatewayServiceImpl implements AiModelGatewayService {
 
             int maxAttempts = Math.max(1, safeInt(model.getMaxRetries(), 0) + 1);
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                /*
+                 * 第三阶段收口：网关内部每次真实 HTTP 尝试都计入父任务额度；
+                 * 剩余时间不足以支撑一次调用时不再重试/切备用模型。
+                 */
+                TaskExecutionBudget budget = TaskBudgetContext.get();
+                if (budget != null) {
+                    if (!budget.canContinue()) {
+                        throw new BizException("父任务已取消或超时，停止模型调用");
+                    }
+                    if (!budget.tryReserveModelCall()) {
+                        throw new BizException("父任务模型请求额度已用尽（" + budget.maxModelCalls() + " 次）");
+                    }
+                    if (budget.remainingMillis() < 1_000L) {
+                        throw new BizException("父任务剩余时间不足，停止模型调用");
+                    }
+                }
                 long start = System.currentTimeMillis();
                 try {
                     AiChatTurnResponse response = aiModelHttpClient.chatTurn(model, request);

@@ -1,6 +1,7 @@
 package com.job.bootstrap.agent.react;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.task.TaskBudgetContext;
 import com.job.bootstrap.agent.task.TaskExecutionBudget;
 import com.job.bootstrap.ai.turn.AiChatMessage;
 import com.job.bootstrap.ai.turn.AiChatTurnRequest;
@@ -160,6 +161,11 @@ public class ReActRunner {
             context.nextTurn();
             AiChatTurnResponse response;
             try {
+                /*
+                 * 第三阶段收口：把父预算放进线程上下文——网关内部的重试/备用模型
+                 * 会用同一截止时间与请求额度，不能只在 Runner 外层扣一次额度。
+                 */
+                TaskBudgetContext.set(budget);
                 response = aiModelGatewayService.chatTurn(
                         SCENE_AGENT_REACT,
                         AiModelTier.STANDARD,
@@ -173,6 +179,8 @@ public class ReActRunner {
                 return ReActRunResult.failure(AgentResult.ReasonCode.MODEL_ERROR,
                         "模型调用失败：" + exception.getMessage(),
                         context.toolCalls(), context.turn(), context.elapsedMillis());
+            } finally {
+                TaskBudgetContext.clear();
             }
 
             // R5：模型返回后立即检查截止时间——迟到的成功结果同样不能接受
