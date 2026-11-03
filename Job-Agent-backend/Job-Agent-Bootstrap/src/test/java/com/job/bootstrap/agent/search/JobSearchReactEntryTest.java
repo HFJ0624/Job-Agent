@@ -64,6 +64,7 @@ class JobSearchReactEntryTest {
     private AgentRun run(Long id, String status, int attempt) {
         AgentRun run = new AgentRun();
         run.setId(id);
+        run.setUserId(USER_ID);
         run.setAttempt(attempt);
         run.setStatus(status);
         run.setAgentName(JobSearchWorkflow.AGENT_NAME);
@@ -133,6 +134,7 @@ class JobSearchReactEntryTest {
     void resumeShouldReusePersistedMessages() throws Exception {
         properties.setEnabled(true);
         AgentRun waiting = run(5L, AgentRunStatus.WAITING_INPUT.name(), 1);
+        waiting.setUserId(USER_ID); // 归属校验：任务必须属于当前用户
         waiting.setMessagesJson(objectMapper.writeValueAsString(List.of(
                 AiChatMessage.system("系统提示"),
                 AiChatMessage.user("找上海 Java"),

@@ -7,6 +7,7 @@ import com.job.bootstrap.ai.turn.AiChatTurnResponse;
 import com.job.bootstrap.ai.turn.AiToolCall;
 import com.job.bootstrap.ai.turn.AiToolSpec;
 import com.job.bootstrap.service.AiModelGatewayService;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -210,6 +211,51 @@ class ReActRunnerTest {
         assertThat(result.outcome()).isEqualTo(AgentResult.Outcome.FAILED);
         assertThat(result.reasonCode()).isEqualTo(AgentResult.ReasonCode.PROTOCOL_ERROR);
         assertThat(result.summary()).contains("重复");
+    }
+
+    @Test
+    void completedToolResultsShouldBeCheckpointed() {
+        stubTurns(
+                toolCall("c1", "job_search", "{\"city\":\"上海\"}"),
+                finish("{\"outcome\":\"FOUND\",\"candidateIds\":[7],\"summary\":\"ok\"}"));
+
+        AtomicReference<List<AiChatMessage>> checkpoint = new AtomicReference<>();
+        AgentRunExecutionHooks.set(null, messages -> checkpoint.set(List.copyOf(messages)));
+        try {
+            runner.run(definition, context, (tool, args) -> "{\"jobId\":7}", USER_ID, TRACE_ID);
+        } finally {
+            AgentRunExecutionHooks.clear();
+        }
+
+        // 检查点必须包含已完成的工具结果（进程中断可恢复，不丢 >1000 字符）
+        assertThat(checkpoint.get()).isNotNull();
+        assertThat(checkpoint.get()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo("tool");
+            assertThat(message.toolCallId()).isEqualTo("c1");
+            assertThat(message.content()).contains("jobId");
+        });
+    }
+
+    @Test
+    void longToolResultShouldBeCheckpointedInFull() {
+        stubTurns(
+                toolCall("c1", "job_search", "{}"),
+                finish("{\"outcome\":\"EMPTY\",\"summary\":\"ok\"}"));
+
+        String longResult = "{\"note\":\"" + "长".repeat(3000) + "\"}";
+        AtomicReference<List<AiChatMessage>> checkpoint = new AtomicReference<>();
+        AgentRunExecutionHooks.set(null, messages -> checkpoint.set(List.copyOf(messages)));
+        try {
+            runner.run(definition, context, (tool, args) -> longResult, USER_ID, TRACE_ID);
+        } finally {
+            AgentRunExecutionHooks.clear();
+        }
+
+        assertThat(checkpoint.get()).anySatisfy(message -> {
+            if ("tool".equals(message.role()) && "c1".equals(message.toolCallId())) {
+                assertThat(message.content().length()).isGreaterThan(1000);
+            }
+        });
     }
 
     @Test

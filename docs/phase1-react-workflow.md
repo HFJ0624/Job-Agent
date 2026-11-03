@@ -1,7 +1,9 @@
 # 第一阶段：ReAct + Workflow（JobSearchAgent）
 
-> 状态：**代码完成（2026-11-03），三提交**：协议层 `37d2b8f`、ReAct 内核 `5463fd2`、Workflow/状态/入口（本提交）。
+> 状态：**代码完成 + 验收修复完成（2026-11-03）**：协议层 `37d2b8f`、ReAct 内核 `5463fd2`、Workflow/状态/入口（C 提交）、验收修复（本提交）。
 > 本阶段只把“岗位搜索”一条链路做实；ResumeAgent / MatchAgent 只留接口形态（同一套 `AgentDefinition` + `ReActRunner`），未实现。
+>
+> **外部验收（11 个针对性回归用例）已全部转绿**，见第 8 节。
 
 ## 1. 架构边界
 
@@ -103,3 +105,30 @@ mvn -pl Job-Agent-Bootstrap -am test
 2. `agent_plan.runtime_mode` 字段已建但尚未写入：当前入口在“无计划”状态下创建 run，未把 `runtimeMode` 固化到计划；后续接 ResumeAgent/MatchAgent 时补。
 3. `JobRecommendTool` 不返回总数/分页，适配层按“未知置空”处理，不做推断。
 4. 发邮件/导出/日历等写工具未纳入 JobSearchAgent 白名单（符合文档要求）。
+
+## 8. 验收修复记录（2026-11-03，对应外部审查 R1-R7）
+
+外部验收在 d1f5529 上补充了 11 个针对性回归用例（真实工具调用边界、状态分发、结果验真、超时、消息配对、薪资单位），
+初跑 11/11 失败。本轮逐条修复后 **11/11 通过**，全量 **356 测试全绿**（Bootstrap；Mcp-Tools 20 独立运行）。
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| R1 | 新入口提前返回，真实工具拿不到 `AgentRuntimeContext` | 在**工具执行边界**用服务端可信身份（userId/conversationId/traceId）设置上下文，`finally` 恢复原上下文；保留 Guard，绝不让模型传 userId |
+| R2 | 无稳定任务标识；开关关掉后旧任务无法续跑；RUNNING 仍新建 run；写回冲突仍返回成功 | `shouldHandle` 先按已有任务路由、开关只控新任务；状态分发（RUNNING 拒绝/SUCCEEDED 复用/WAITING_INPUT 续跑/FAILED 显式重试）；`claimForRetry` 支持 FAILED+过期 RUNNING；`finish` 失败返回 `CONFLICT` 不返回成功答复；按会话找回待续跑任务；归属校验 |
+| R3 | 续跑丢失原硬条件；候选池每次重建 | 三级合并（本轮显式 > 原 `constraintsJson` > 偏好，来源标记 `PREVIOUS`）；续跑替换 system Prompt；条件未变播种旧候选、变化则失效；参数抽取器新增**自然语言学历要求**（“要求本科/本科及以上”，不把用户自身学历当条件） |
+| R4 | 有合格候选仍可声明 EMPTY；混合伪造 ID 只过滤不拒绝；Python 岗位顶替 Java 目标；追加模型 summary | EMPTY 校验“查询成功且合格池为空”；FOUND 全量验真（真实、无重复、满足硬条件，任一不合法整单失败）；新增不可变 `targetRole` 独立复核；答复只由服务端可信字段构造，**移除 summary 追加** |
+| R5 | 只在轮首检查截止时间；中途退出留下悬空 tool 调用 | 模型返回后/工具执行前/终结结果接受前均检查；`AgentRunExecutionHooks` 提供绝对截止时间；中途退出为本轮未处理调用补齐“未执行”配对消息；校验 toolCallId 非空且本轮唯一 |
+| R6 | 检查点方法未接入循环；外层长事务靠 NOT_SUPPORTED 悬挂 | Runner 每轮工具结果落地后回调检查点 → `saveMessages` 短事务；`chat()` 改为**非事务分发器**，ReAct 分支的会话/用户消息先短事务提交（`ReactChatPreparationService`）再执行，旧链路整体保留在 `chatTransactional()` 事务方法内 |
+| R7 | 薪资单位错误（20000-30000K）；公司字段为空 | 内部统一元/月，展示转 `20-30K/月`；公司缺失显示“公司未知”，不编造 |
+
+新增/修订测试：
+- 外部审查回归 11 例（`Phase1ReviewRegressionTest`，作为验收门禁长期保留）
+- 检查点 2 例（含 >1000 字符完整保存）、学历抽取 1 例、条件/薪资口径随实现修正
+
+## 9. 仍未执行 / 已知限制（如实记录）
+
+1. **真实模型与真实数据库端到端未执行**：上述结果全部为 mock 模型 + Mockito 单测；`AGENT_REACT` 场景与真库联调需在具备 API Key 与 MySQL 的环境执行（步骤见 §4）。
+2. **首次请求仍不创建 `agent_plan`**：`AgentChatVO` 已暴露 `runId`；续跑通过 `conversationId`（会话内找回 WAITING_INPUT 任务）或已有 `planId` 完成，未引入新的请求参数。`agent_plan.runtime_mode` 字段已建但仍未写入（等计划创建落地后启用）。
+3. **短事务/CAS/崩溃恢复的真库验证未执行**：单测覆盖了条件更新与旧 attempt 拒绝的分支，但数据库锁行为与进程崩溃恢复需要在真库验证。
+4. **SSE 流式未接 ReAct 分支**：`streamChat` 仍走旧链路；本阶段不重做前端，流式 + ReAct 留待后续。
+5. 写工具（邮件/导出/日历/同步）不在 JobSearchAgent 白名单，符合第一阶段范围。

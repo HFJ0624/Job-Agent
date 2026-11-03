@@ -30,6 +30,9 @@ public class AgentRunService {
 
     private static final int NOT_DELETED = 0;
 
+    /** 过期 RUNNING 判定阈值（毫秒）：显式重试允许接管。 */
+    private static final long STALE_RUNNING_MILLIS = 10 * 60_000L;
+
     private final AgentRunMapper agentRunMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -72,6 +75,30 @@ public class AgentRunService {
      *
      * @return true=领取成功（attempt 已 +1），false=已被其他执行器领取
      */
+    /**
+     * 显式重试领取（R2）：允许 FAILED 或超过心跳阈值（默认 10 分钟）的 RUNNING。
+     * 仍然是原子条件更新，旧 attempt 的写回会被拒绝。
+     */
+    public boolean claimForRetry(Long runId, int expectedAttempt) {
+        Boolean claimed = transactionTemplate.execute(status -> {
+            Date staleBefore = new Date(System.currentTimeMillis() - STALE_RUNNING_MILLIS);
+            int rows = agentRunMapper.update(null, new UpdateWrapper<AgentRun>()
+                    .eq("id", runId)
+                    .eq("attempt", expectedAttempt)
+                    .and(wrapper -> wrapper
+                            .eq("status", AgentRunStatus.FAILED.name())
+                            .or()
+                            .eq("status", AgentRunStatus.RUNNING.name())
+                            .lt("update_time", staleBefore))
+                    .set("status", AgentRunStatus.RUNNING.name())
+                    .setSql("attempt = attempt + 1")
+                    .setSql("version = version + 1")
+                    .set("update_time", new Date()));
+            return rows > 0;
+        });
+        return Boolean.TRUE.equals(claimed);
+    }
+
     public boolean claim(Long runId, int expectedAttempt) {
         Boolean claimed = transactionTemplate.execute(status -> {
             AgentRun update = new AgentRun();
@@ -131,6 +158,24 @@ public class AgentRunService {
             return rows > 0;
         });
         return Boolean.TRUE.equals(saved);
+    }
+
+    /**
+     * 按会话查找最近一个“待续跑/执行中”的 run（R2：首次请求没有 planId 时的续跑通道）。
+     * 只返回该用户自己的任务。
+     */
+    public AgentRun findLatestResumableByConversation(Long conversationId, Long userId) {
+        if (conversationId == null || userId == null) {
+            return null;
+        }
+        return agentRunMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<AgentRun>()
+                .eq("conversation_id", conversationId)
+                .eq("user_id", userId)
+                .in("status", List.of(AgentRunStatus.WAITING_INPUT.name(), AgentRunStatus.RUNNING.name(),
+                        AgentRunStatus.PENDING.name()))
+                .eq("is_deleted", NOT_DELETED)
+                .orderByDesc("id")
+                .last("limit 1"));
     }
 
     public AgentRun findById(Long runId) {

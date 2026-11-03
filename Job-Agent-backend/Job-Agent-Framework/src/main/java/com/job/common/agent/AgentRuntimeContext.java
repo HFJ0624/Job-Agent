@@ -167,6 +167,22 @@ public class AgentRuntimeContext {
     }
 
     /**
+     * 恢复之前的上下文（工具执行边界用）。
+     *
+     * 说明: 新入口在工具调用前设置可信身份，执行完必须恢复原上下文（而不是一律 clear），
+     * 避免外层已有上下文被误清（例如旧的 Agent 链路里嵌套调用）。
+     *
+     * @param context 之前保存的上下文（可为 null，等价于 clear）
+     */
+    public static void restore(Context context) {
+        if (context == null) {
+            CONTEXT_HOLDER.remove();
+            return;
+        }
+        CONTEXT_HOLDER.set(context);
+    }
+
+    /**
      * 清理上下文。
      * 注意:
      * 1. 这个方法必须在 finally 中调用。

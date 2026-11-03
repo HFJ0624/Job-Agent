@@ -3,6 +3,7 @@ package com.job.bootstrap.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
+import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.agent.cache.AgentCacheProperties;
 import com.job.bootstrap.agent.cache.InMemorySemanticCacheStore;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
@@ -100,7 +101,7 @@ class AgentChatCacheTest {
                 ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService,
                 agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
                 agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,
-                answerCacheService, mock(JobSearchReactEntry.class), objectMapper);
+                answerCacheService, mock(JobSearchReactEntry.class), mock(ReactChatPreparationService.class), objectMapper);
     }
 
     @BeforeEach

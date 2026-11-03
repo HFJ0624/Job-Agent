@@ -43,6 +43,20 @@ public class AgentRunContext {
         messages.add(message);
     }
 
+    /**
+     * 替换 system 消息（任务 R3：续跑时条件可能已更新，旧 Prompt 不能当新条件）。
+     * 只替换第一条 system 消息；不存在则插入到最前。
+     */
+    public void replaceSystemPrompt(String systemPrompt) {
+        for (int i = 0; i < messages.size(); i++) {
+            if ("system".equals(messages.get(i).role())) {
+                messages.set(i, AiChatMessage.system(systemPrompt));
+                return;
+            }
+        }
+        messages.add(0, AiChatMessage.system(systemPrompt));
+    }
+
     /** 消息快照（外部只读）。 */
     public List<AiChatMessage> messages() {
         return Collections.unmodifiableList(messages);

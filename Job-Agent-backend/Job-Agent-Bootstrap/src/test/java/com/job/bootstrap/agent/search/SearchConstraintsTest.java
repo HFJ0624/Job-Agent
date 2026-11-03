@@ -40,19 +40,21 @@ class SearchConstraintsTest {
 
         assertThat(constraints.city()).isEqualTo("杭州");
         assertThat(constraints.sources()).containsEntry("city", SearchConstraints.SOURCE_EXPLICIT);
-        assertThat(constraints.minSalary()).isEqualTo(25);
+        // 偏好里的 25 按 K 表达 → 统一为 25000 元/月
+        assertThat(constraints.minSalary()).isEqualTo(25000);
         assertThat(constraints.sources()).containsEntry("minSalary", SearchConstraints.SOURCE_PREFERENCE);
     }
 
     @Test
     void resultAcceptShouldCheckCityAndSalary() {
-        SearchConstraints constraints = SearchConstraints.merge(Map.of("city", "上海", "minSalary", 25), null);
+        // 硬条件薪资下限 25000 元/月
+        SearchConstraints constraints = SearchConstraints.merge(Map.of("city", "上海", "minSalary", 25000), null);
 
-        assertThat(constraints.accepts(item("上海-浦东", 30))).isTrue();
-        assertThat(constraints.accepts(item("北京", 30))).isFalse();
-        assertThat(constraints.accepts(item("上海", 20))).isFalse();
+        assertThat(constraints.accepts(item("上海-浦东", 30000))).isTrue();
+        assertThat(constraints.accepts(item("北京", 30000))).isFalse();
+        assertThat(constraints.accepts(item("上海", 20000))).isFalse();
         // 无法验证（缺城市/缺薪资）→ 不接受
-        assertThat(constraints.accepts(item(null, 30))).isFalse();
+        assertThat(constraints.accepts(item(null, 30000))).isFalse();
         assertThat(constraints.accepts(item("上海", null))).isFalse();
     }
 
@@ -70,7 +72,7 @@ class SearchConstraintsTest {
 
         assertThat(constraints.keyword()).isEqualTo("Java");
         assertThat(constraints.city()).isEqualTo("上海");
-        assertThat(constraints.minSalary()).isEqualTo(25);
+        assertThat(constraints.minSalary()).isEqualTo(25000);
         assertThat(constraints.sources()).containsEntry("city", SearchConstraints.SOURCE_PREFERENCE);
     }
 }

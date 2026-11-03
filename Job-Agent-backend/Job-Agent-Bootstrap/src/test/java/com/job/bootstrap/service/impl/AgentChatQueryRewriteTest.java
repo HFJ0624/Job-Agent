@@ -9,6 +9,7 @@ import com.job.bootstrap.agent.intent.AgentIntentLlmClassifier;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
+import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
@@ -74,6 +75,7 @@ class AgentChatQueryRewriteTest {
     private final AgentObservationService agentObservationService = mock(AgentObservationService.class);
     private final AgentAnswerCacheService answerCacheService = mock(AgentAnswerCacheService.class);
     private final JobSearchReactEntry jobSearchReactEntry = mock(JobSearchReactEntry.class);
+    private final ReactChatPreparationService reactChatPreparationService = mock(ReactChatPreparationService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 真改写器（网关与观测用 mock）：验证“主链路真的接了改写”
@@ -85,7 +87,7 @@ class AgentChatQueryRewriteTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService,
             agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
             agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,
-            answerCacheService, jobSearchReactEntry, objectMapper);
+            answerCacheService, jobSearchReactEntry, reactChatPreparationService, objectMapper);
 
     @BeforeEach
     void setUp() {

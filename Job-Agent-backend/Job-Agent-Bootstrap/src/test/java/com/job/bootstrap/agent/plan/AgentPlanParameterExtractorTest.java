@@ -30,4 +30,13 @@ class AgentPlanParameterExtractorTest {
         assertEquals(1L, params.get("resumeId"));
         assertEquals(2L, params.get("jobId"));
     }
+
+    @Test
+    void shouldExtractEducationRequirementFromNaturalLanguage() {
+        // 明确作为岗位要求
+        assertEquals("本科", extractor.extract("帮我找上海Java岗位，要求本科以上").get("educationReq"));
+        assertEquals("硕士", extractor.extract("找硕士及以上的后端岗位").get("educationReq"));
+        // 用户自身学历不能被当成岗位要求
+        assertEquals(false, extractor.extract("我本科毕业，想找Java岗位").containsKey("educationReq"));
+    }
 }

@@ -7,6 +7,7 @@ import com.job.bootstrap.agent.context.AgentContextBuilder;
 import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
+import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
@@ -193,6 +194,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final JobSearchReactEntry jobSearchReactEntry;
 
     /**
+     * ReAct 分支的短事务会话准备（R6：会话/用户消息先提交，再进模型执行）。
+     */
+    private final ReactChatPreparationService reactChatPreparationService;
+
+    /**
      * 统一 JSON 工具。
      */
     private final ObjectMapper objectMapper;
@@ -201,7 +207,6 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 兼容旧调用方的对话入口，等价于 retry=false（不恢复失败计划）。
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public AgentChatVO chat(
             Long userId,
             Long conversationId,
@@ -239,7 +244,6 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @return Agent 回复，包含会话 ID、计划 ID、回复正文、是否需要用户确认及待确认工具名
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public AgentChatVO chat(
             Long userId,
             Long conversationId,
@@ -248,7 +252,74 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<String> confirmedToolNames,
             Boolean retry
     ) {
+        /*
+         * 第一阶段 ReAct 预分发（任务 R6 事务边界修复）:
+         * 1. 本方法**不再包事务**——ReAct 分支不能在旧链路的长事务里执行，
+         *    否则模型等待期间事务一直悬挂（NOT_SUPPORTED 只是挂起，不会提交）；
+         * 2. 只有“开关开启的岗位搜索新任务”或“已有 ReAct 任务续跑”才走新分支，
+         *    其余请求原样交给 chatTransactional（旧链路事务语义不变）；
+         * 3. 规则意图判断零成本（本地正则），不会触发 LLM 兜底。
+         */
+        AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
+        if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
+            return chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry);
+        }
+        return chatTransactional(userId, conversationId, planId, message, confirmedToolNames, retry);
+    }
+
+    /**
+     * 旧链路的统一事务边界（模板计划 + 缓存 + Executor）。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public AgentChatVO chatTransactional(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry
+    ) {
         return chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, null);
+    }
+
+    /**
+     * ReAct 岗位搜索分支（事务外执行）：
+     * 1. 会话与用户消息先走**短事务提交**（ReactChatPreparationService）；
+     * 2. 模型调用与工具执行在事务外（入口本身 NOT_SUPPORTED，且此时无外层事务）；
+     * 3. 助手消息再走一次短事务落库。
+     */
+    private AgentChatVO chatViaReactSearch(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            AgentIntentRouter.IntentResolution ruleIntent,
+            Boolean retry
+    ) {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        Long preparedConversationId = reactChatPreparationService.prepareConversation(
+                userId, conversationId, message);
+
+        JobSearchReactEntry.Result result = jobSearchReactEntry.execute(
+                userId,
+                preparedConversationId,
+                planId,
+                traceId,
+                ruleIntent.intentCode().name(),
+                message,
+                Boolean.TRUE.equals(retry)
+        );
+
+        reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(preparedConversationId);
+        vo.setPlanId(planId);
+        vo.setRunId(result.runId());
+        vo.setAnswer(result.answer());
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
     }
 
     /**
@@ -350,28 +421,6 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 7. 保存用户消息。
          */
         saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
-
-        /*
-         * 7.05 第一阶段 ReAct 岗位搜索（开关默认关闭）：
-         * 1. 位置在语义缓存之前——ReAct 任务绕过最终答案缓存，避免旧答案跳过真实查询；
-         * 2. 入口方法以 NOT_SUPPORTED 挂起本方法的事务，模型调用与工具执行在事务外；
-         * 3. 失败时如实返回失败状态，不静默回退旧链路冒充成功。
-         */
-        if (jobSearchReactEntry.shouldHandle(intentCode.name(), planId)) {
-            JobSearchReactEntry.Result reactResult = jobSearchReactEntry.execute(
-                    userId, conversation.getId(), planId, traceId, intentCode.name(), message);
-            if (reactResult.handled()) {
-                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, reactResult.answer(), null);
-                touchConversation(conversation);
-                AgentChatVO vo = new AgentChatVO();
-                vo.setConversationId(conversation.getId());
-                vo.setPlanId(planId);
-                vo.setAnswer(reactResult.answer());
-                vo.setRequiresUserConfirmation(false);
-                vo.setRequiredConfirmationToolNames(List.of());
-                return vo;
-            }
-        }
 
         /*
          * 7.1 捕获用户自然语言里的长期记忆。

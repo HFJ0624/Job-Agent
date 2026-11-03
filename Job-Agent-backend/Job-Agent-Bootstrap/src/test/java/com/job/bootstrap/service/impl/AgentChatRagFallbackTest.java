@@ -10,6 +10,7 @@ import com.job.bootstrap.agent.intent.AgentIntentLlmClassifier;
 import com.job.bootstrap.agent.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
+import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
@@ -72,6 +73,7 @@ class AgentChatRagFallbackTest {
     private final AgentQueryRewriter queryRewriter = mock(AgentQueryRewriter.class);
     private final AgentAnswerCacheService answerCacheService = mock(AgentAnswerCacheService.class);
     private final JobSearchReactEntry jobSearchReactEntry = mock(JobSearchReactEntry.class);
+    private final ReactChatPreparationService reactChatPreparationService = mock(ReactChatPreparationService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AgentChatServiceImpl service = new AgentChatServiceImpl(
@@ -79,7 +81,7 @@ class AgentChatRagFallbackTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
             agentGuardrailService, agentContextBuilder, queryRewriter, answerCacheService,
-            jobSearchReactEntry, objectMapper);
+            jobSearchReactEntry, reactChatPreparationService, objectMapper);
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {

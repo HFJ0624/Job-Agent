@@ -50,6 +50,16 @@ public class AgentPlanParameterExtractor {
             "(?:岗位名称|职位名称|岗位|职位)\\s*[:=：#-]?\\s*[「『“\"]?([^」』”\"，,。]+)[」』”\"]?"
     );
 
+    /** 学历要求（任务 R3）：只认“明确作为岗位要求”的表达，避免把用户自身学历误当硬条件。 */
+    private static final Pattern EDUCATION_REQUIRED_PATTERN = Pattern.compile(
+            "(?:要求|需要|学历\\s*[:=：]?)\\s*(大专|专科|本科|硕士|研究生|博士)"
+    );
+
+    /** 学历要求：X及以上 / X以上。 */
+    private static final Pattern EDUCATION_OR_ABOVE_PATTERN = Pattern.compile(
+            "(大专|专科|本科|硕士|研究生|博士)\\s*(?:及以上|以上)"
+    );
+
     private static final List<String> CITY_WORDS = List.of(
             "北京", "上海", "广州", "深圳", "杭州", "南京", "苏州", "成都", "武汉", "西安",
             "长沙", "郑州", "沈阳", "大连", "天津", "重庆", "厦门", "合肥", "青岛", "远程"
@@ -80,6 +90,7 @@ public class AgentPlanParameterExtractor {
         putLongIfPresent(params, "mockSessionId", MOCK_SESSION_ID_PATTERN, message);
         putNameParamsIfPresent(params, message);
         putSalaryIfPresent(params, message);
+        putEducationIfPresent(params, message);
         putCityIfPresent(params, message);
         putKeywordIfPresent(params, message);
         return params;
@@ -99,6 +110,22 @@ public class AgentPlanParameterExtractor {
 
         putStringIfPresent(params, "resumeName", RESUME_NAME_PATTERN, message);
         putStringIfPresent(params, "jobTitle", JOB_TITLE_PATTERN, message);
+    }
+
+    /**
+     * 抽取学历要求（任务 R3）：优先“要求本科”，其次“本科及以上”。
+     * 只提取明确表达的要求，不把“我本科毕业”当成岗位硬条件。
+     */
+    private void putEducationIfPresent(Map<String, Object> params, String message) {
+        Matcher required = EDUCATION_REQUIRED_PATTERN.matcher(message);
+        if (required.find()) {
+            params.putIfAbsent("educationReq", required.group(1));
+            return;
+        }
+        Matcher orAbove = EDUCATION_OR_ABOVE_PATTERN.matcher(message);
+        if (orAbove.find()) {
+            params.putIfAbsent("educationReq", orAbove.group(1));
+        }
     }
 
     private void putLongIfPresent(Map<String, Object> params, String key, Pattern pattern, String message) {

@@ -91,8 +91,8 @@ class JobSearchWorkflowTest {
     void foundShouldRebuildAnswerFromRealCandidates() {
         stubSearchResult("""
                 {"total":2,"page":1,"pageSize":5,"jobs":[
-                  {"jobId":11,"jobTitle":"Java 后端开发","companyName":"A公司","city":"上海","minSalary":20,"maxSalary":35},
-                  {"jobId":12,"jobTitle":"Java 架构师","companyName":"B公司","city":"北京","minSalary":30,"maxSalary":50}
+                  {"jobId":11,"jobTitle":"Java 后端开发","companyName":"A公司","city":"上海","minSalary":20000,"maxSalary":35000},
+                  {"jobId":12,"jobTitle":"Java 架构师","companyName":"B公司","city":"北京","minSalary":30000,"maxSalary":50000}
                 ]}
                 """);
         stubTurns(search("{\"keyword\":\"Java\"}"),
@@ -110,7 +110,7 @@ class JobSearchWorkflowTest {
     void fabricatedCandidateShouldFail() {
         stubSearchResult("""
                 {"total":1,"page":1,"pageSize":5,"jobs":[
-                  {"jobId":11,"jobTitle":"Java 后端开发","companyName":"A公司","city":"上海","minSalary":20,"maxSalary":35}
+                  {"jobId":11,"jobTitle":"Java 后端开发","companyName":"A公司","city":"上海","minSalary":20000,"maxSalary":35000}
                 ]}
                 """);
         stubTurns(search("{}"), finish("{\"outcome\":\"FOUND\",\"candidateIds\":[999],\"summary\":\"ok\"}"));
@@ -127,7 +127,7 @@ class JobSearchWorkflowTest {
         // 工具返回了北京岗位（模拟数据异常），候选虽真实但不满足城市硬条件
         stubSearchResult("""
                 {"total":1,"page":1,"pageSize":5,"jobs":[
-                  {"jobId":12,"jobTitle":"Java 架构师","companyName":"B公司","city":"北京","minSalary":30,"maxSalary":50}
+                  {"jobId":12,"jobTitle":"Java 架构师","companyName":"B公司","city":"北京","minSalary":30000,"maxSalary":50000}
                 ]}
                 """);
         stubTurns(search("{}"), finish("{\"outcome\":\"FOUND\",\"candidateIds\":[12],\"summary\":\"ok\"}"));
