@@ -62,6 +62,23 @@ public class JobSearchTool {
             @P("学历要求，例如 本科、硕士、不限，可以为空") String educationReq,
             @P("经验要求，例如 1-3年、3-5年、应届生，可以为空") String experienceReq
     ) {
+        // 旧入口保持原语义：第一页 5 条
+        return searchJobs(keyword, city, educationReq, experienceReq, 1, 5);
+    }
+
+    /**
+     * 受限分页搜索（第一阶段 ReAct）：页大小上限 10，页码从 1 开始。
+     *
+     * 说明: 供结构化 Agent 链路使用；旧 @Tool 入口委托到这里，行为不变。
+     */
+    public String searchJobs(
+            String keyword,
+            String city,
+            String educationReq,
+            String experienceReq,
+            Integer page,
+            Integer pageSize
+    ) {
         long start = System.currentTimeMillis();
 
         Long userId = AgentRuntimeContext.getRequiredUserId();
@@ -80,13 +97,14 @@ public class JobSearchTool {
             Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
             /*
-             * 调用已有岗位分页查询能力。
-             * pageNo=1, pageSize=5:
-             * 只给 Agent 返回少量候选岗位，避免一次上下文太长。
+             * 调用已有岗位分页查询能力（第一阶段：受限分页，默认第一页 5 条）。
+             * 页码/页大小都有硬上限，模型不能把上下文撑爆。
              */
-            IPage<JobPosition> page = jobPositionService.pagePositions(
-                    1L,
-                    5L,
+            long pageNo = page == null || page < 1 ? 1L : Math.min(page, 20);
+            long size = pageSize == null || pageSize < 1 ? 5L : Math.min(pageSize, 10);
+            IPage<JobPosition> resultPage = jobPositionService.pagePositions(
+                    pageNo,
+                    size,
                     normalize(keyword),
                     null,
                     normalize(city),
@@ -103,14 +121,15 @@ public class JobSearchTool {
              * 只挑选模型真正需要的字段返回。
              * 不建议直接返回完整实体，避免字段过多、token 浪费。
              */
-            List<Map<String, Object>> jobs = page.getRecords().stream()
+            List<Map<String, Object>> jobs = resultPage.getRecords().stream()
                     .map(this::toSimpleJob)
                     .toList();
 
-            Map<String, Object> output = Map.of(
-                    "total", page.getTotal(),
-                    "jobs", jobs
-            );
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("total", resultPage.getTotal());
+            output.put("page", pageNo);
+            output.put("pageSize", size);
+            output.put("jobs", jobs);
 
             agentTraceService.saveToolTrace(
                     userId,

@@ -6,6 +6,7 @@ import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.context.AgentContextBuilder;
 import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
+import com.job.bootstrap.agent.search.JobSearchReactEntry;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
@@ -187,6 +188,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AgentAnswerCacheService answerCacheService;
 
     /**
+     * 第一阶段 ReAct 岗位搜索入口：开关开启且路由命中时接管（绕过缓存与模板链路）。
+     */
+    private final JobSearchReactEntry jobSearchReactEntry;
+
+    /**
      * 统一 JSON 工具。
      */
     private final ObjectMapper objectMapper;
@@ -344,6 +350,28 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 7. 保存用户消息。
          */
         saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
+
+        /*
+         * 7.05 第一阶段 ReAct 岗位搜索（开关默认关闭）：
+         * 1. 位置在语义缓存之前——ReAct 任务绕过最终答案缓存，避免旧答案跳过真实查询；
+         * 2. 入口方法以 NOT_SUPPORTED 挂起本方法的事务，模型调用与工具执行在事务外；
+         * 3. 失败时如实返回失败状态，不静默回退旧链路冒充成功。
+         */
+        if (jobSearchReactEntry.shouldHandle(intentCode.name(), planId)) {
+            JobSearchReactEntry.Result reactResult = jobSearchReactEntry.execute(
+                    userId, conversation.getId(), planId, traceId, intentCode.name(), message);
+            if (reactResult.handled()) {
+                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, reactResult.answer(), null);
+                touchConversation(conversation);
+                AgentChatVO vo = new AgentChatVO();
+                vo.setConversationId(conversation.getId());
+                vo.setPlanId(planId);
+                vo.setAnswer(reactResult.answer());
+                vo.setRequiresUserConfirmation(false);
+                vo.setRequiredConfirmationToolNames(List.of());
+                return vo;
+            }
+        }
 
         /*
          * 7.1 捕获用户自然语言里的长期记忆。

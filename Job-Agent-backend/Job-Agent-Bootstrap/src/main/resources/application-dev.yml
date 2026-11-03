@@ -42,6 +42,9 @@ job:
     bucketName: job-agent-bucket
 
   agent:
+    # 第一阶段 ReAct 岗位搜索开关（默认关闭；开启后仅 JOB_SEARCH 场景走新 Workflow）
+    react-search:
+      enabled: false
     draft:
       # Agent 草稿过期时间，单位：分钟
       ttl-minutes: 15

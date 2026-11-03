@@ -87,7 +87,9 @@ public class AgentToolInvoker {
                         getString(params, "keyword"),
                         getString(params, "city"),
                         getString(params, "educationReq"),
-                        getString(params, "experienceReq")
+                        getString(params, "experienceReq"),
+                        getInteger(params, "page"),
+                        getInteger(params, "pageSize")
                 );
                 case "JobRecommendTool.recommendJobs" -> jobRecommendTool.recommendJobs(
                         getString(params, "keyword"),
