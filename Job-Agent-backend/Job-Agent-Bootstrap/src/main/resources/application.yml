@@ -3,6 +3,11 @@ spring:
     name: job-agent
   profiles:
     active: dev,local
-
-
-
+  # 数据库迁移（任务4 脚手架）：基线脚本尚未落地，默认关闭，避免对已有业务库直接执行迁移。
+  # 需要启用时设置环境变量 FLYWAY_ENABLED=true，并把基线放入 classpath:db/migration。
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    table: flyway_schema_history

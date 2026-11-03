@@ -131,3 +131,21 @@ curl -N -X POST http://localhost:8080/front/agent/chat/stream \
 **定点验证**：`JobCandidateArtifactCodecTest`（F4）、`JobSeekWorkflowTest`（复用/版本）；后端 **361** 单测全绿；前端 `vue-tsc` + `vite build` 通过。
 
 **仍未执行**：真实模型 + MySQL + SSE 端到端（三组人工场景：正常复合 / 补参与失败恢复 / 取消与刷新恢复）；`sql/10` 需在真库执行。**状态如实**：以上为代码修复 + 编译/单测/构建验证，不是真实环境联调结论。
+
+
+## 11. 启动修复（2026-11-03，Flyway 误连 PostgreSQL）
+
+**现象**：启动报 `Unsupported Database: PostgreSQL 18.3`（Flyway 初始化失败）。
+**根因**：`RagConfig` 声明了 pgvector 的 `DataSource`（`ragDataSource`），Spring Boot 的 `DataSourceAutoConfiguration` 见到已存在 `DataSource` 就退让——上下文里只剩 PG 数据源，MyBatis 与 Flyway 都指向 PostgreSQL；Flyway 的 `flyway-mysql` 模块也不含 PG 支持，于是启动失败。
+
+**修复**：
+1. 新增 `PrimaryDataSourceConfig`：按 `spring.datasource.*` 显式创建 MySQL 主数据源并标 `@Primary`，MyBatis-Plus / Flyway / 事务回到业务库；RAG 仍用 `@Qualifier("ragDataSource")` 的 PG 池；
+2. `JobAgentApplication` 排除 `FlywayAutoConfiguration`：任务4 只是脚手架、`db/migration` 为空、业务库一直由 `sql/` 手工脚本维护，默认不该自动迁移（将来启用需移除 exclude + 放 `V1__baseline.sql` + `FLYWAY_ENABLED=true`）；
+3. `application.yml` 保留 flyway 配置（默认 `enabled:false`）作为启用说明；
+4. `RagConfig` 的 PG 池设置 `initializationFailTimeout=-1`：PG 暂不可达不阻断应用启动，首次检索时再建连（按已有降级逻辑处理）。
+
+**验证**：
+- 新增 `PrimaryDataSourceConfigTest`（主数据源必须是 MySQL 且 @Primary）；
+- 打包启动实测：`flywayInitializer` 不再出现（0 次），原始 PG 报错消失；
+- 后端 **363** 单测全绿；
+- 沙箱环境无 MySQL 口令 / MinIO 密钥，后续启动会停在环境配置（非代码问题）：本地需设置 `DB_PASSWORD` 与 MinIO 的 access/secret。

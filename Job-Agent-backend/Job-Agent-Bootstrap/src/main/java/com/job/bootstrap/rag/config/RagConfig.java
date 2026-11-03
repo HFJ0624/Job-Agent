@@ -50,6 +50,11 @@ public class RagConfig {
         ));
         config.setMaximumPoolSize(datasourceProperties.getMaximumPoolSize());
         config.setMinimumIdle(datasourceProperties.getMinimumIdle());
+        /*
+         * 启动不强制建连：RAG 是旁路能力，PG 暂时不可达时不应阻断整个应用启动；
+         * 首次检索时才建立连接（失败按已有降级逻辑处理）。
+         */
+        config.setInitializationFailTimeout(-1);
 
         return new HikariDataSource(config);
     }
