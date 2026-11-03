@@ -44,6 +44,8 @@ import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -217,6 +219,17 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final ObjectMapper objectMapper;
 
     /**
+     * 旧链路事务模板：chatInternal 通过它包一层事务。
+     * 说明: 之前用 @Transactional 方法自调用（this.chatTransactional）不会经过代理，
+     * 事务实际不生效；这里显式用 TransactionTemplate，语义确定可控。
+     */
+    private final PlatformTransactionManager transactionManager;
+
+    private TransactionTemplate transactionTemplate() {
+        return new TransactionTemplate(transactionManager);
+    }
+
+    /**
      * 兼容旧调用方的对话入口，等价于 retry=false（不恢复失败计划）。
      */
     @Override
@@ -293,7 +306,6 @@ public class AgentChatServiceImpl implements AgentChatService {
     /**
      * 旧链路的统一事务边界（模板计划 + 缓存 + Executor）。
      */
-    @Transactional(rollbackFor = Exception.class)
     public AgentChatVO chatTransactional(
             Long userId,
             Long conversationId,
@@ -302,7 +314,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<String> confirmedToolNames,
             Boolean retry
     ) {
-        return chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, null);
+        long start = System.currentTimeMillis();
+        try {
+            return transactionTemplate().execute(status ->
+                    chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, null));
+        } finally {
+            log.info("[chat] 旧链路完成 userId={}, planId={}, elapsed={}ms",
+                    userId, planId, System.currentTimeMillis() - start);
+        }
     }
 
     /**
@@ -456,7 +475,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         return vo;
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public AgentChatVO streamTransactional(
             Long userId,
             Long conversationId,
@@ -466,7 +484,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             Boolean retry,
             TokenConsumer streamSink
     ) {
-        return chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
+        long start = System.currentTimeMillis();
+        try {
+            return transactionTemplate().execute(status ->
+                    chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink));
+        } finally {
+            log.info("[chat] 流式旧链路完成 userId={}, planId={}, elapsed={}ms",
+                    userId, planId, System.currentTimeMillis() - start);
+        }
     }
 
     /**
@@ -515,10 +540,13 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 4. 识别用户意图：规则优先，规则没命中时用 LLM 兜底分类（任务5 阶段一）。
          *    意图用于 Trace 分类与后续编排；LLM 兜底失败或置信度不足时保持规则的 GENERAL_CHAT。
          */
+        log.info("[chat] 护栏通过，开始意图识别 userId={}, chars={}", userId, safeMessage.length());
         AgentIntentRouter.IntentResolution intentResolution = agentIntentRouter.routeDetailed(safeMessage);
         AgentIntentCode intentCode = intentResolution.ruleMatched()
                 ? intentResolution.intentCode()
                 : agentIntentLlmClassifier.classify(userId, traceId, safeMessage).orElse(intentResolution.intentCode());
+        log.info("[chat] 意图={} (规则命中={}), userId={}, conversationId={}, planId={}",
+                intentCode, intentResolution.ruleMatched(), userId, conversationId, planId);
 
         /*
          * 5. 如果前端传入 planId，说明这是“继续执行已有计划”。
@@ -587,7 +615,9 @@ public class AgentChatServiceImpl implements AgentChatService {
          *    缓存命中不会造成记忆库污染；
          * 4. 缓存故障（embedding 不可用等）内部降级为未命中，不影响主流程。
          */
+        log.info("[chat] 开始语义缓存查询");
         Optional<String> cachedAnswer = answerCacheService.lookup(userId, planningMessage);
+        log.info("[chat] 语义缓存查询完成，命中={}", cachedAnswer.isPresent());
         if (cachedAnswer.isPresent()) {
             return buildCacheHitResult(
                     userId,

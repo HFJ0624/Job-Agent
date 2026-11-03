@@ -12,6 +12,7 @@ import com.job.bootstrap.agent.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.search.JobSearchReactEntry;
 import com.job.bootstrap.agent.search.ReactChatPreparationService;
 import com.job.bootstrap.agent.seek.JobSeekReactEntry;
+import com.job.bootstrap.support.SimpleTransactionManager;
 import com.job.bootstrap.agent.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
@@ -85,7 +86,7 @@ class AgentChatRagFallbackTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
             agentGuardrailService, agentContextBuilder, queryRewriter, answerCacheService,
-            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, objectMapper);
+            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, objectMapper, new SimpleTransactionManager());
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {
