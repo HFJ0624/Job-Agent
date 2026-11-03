@@ -81,11 +81,37 @@ curl -N -X POST http://localhost:8080/front/agent/chat/stream \
 | SSE 节点进度 | ✅ 后端事件 + 前端 API 回调 | ⚠️ 仅编译，未跑真实 SSE | ❌ |
 | 共享预算/取消 | ✅ | ⚠️ 未写专项单测（时间原因） | ❌ |
 | 独立简历分析 | ✅ | ⚠️ 未写专项单测 | ❌ |
-| 前端进度展示（页面 UI） | ❌ 仅 API 层（`onProgress`/状态/取消函数） | — | — |
+| 前端进度展示（页面 UI） | ✅ `AgentPage` 任务卡片（节点/摘要/等待问题/失败原因/操作按钮） | ✅ `vue-tsc` + `vite build` 通过 | ❌ 未跑真实 SSE |
+| 页面续跑/重试/取消/新任务 | ✅ 四个动作 + 按会话保存 planId + 有界轮询恢复 | ✅ 类型检查/构建 | ❌ |
+| 网关重试共享父预算 | ✅ `TaskBudgetContext`：真实 HTTP 尝试计入额度，剩余时间不足即停 | ✅ 编译 + 既有回归 | ❌ |
 
-**未完成**：① AgentPage 进度区域与“继续/重试/新任务”按钮未做（仅 API 接入）；② 预算/取消/独立简历未写专项单测；③ 真实模型、MySQL、SSE 端到端未执行；④ 并发池拒绝降级的专项验证未做。
+**未完成**：① 预算/取消/独立简历未写专项单测；② 真实模型、MySQL、SSE 端到端未执行；③ 并发池拒绝降级的专项验证未做；④ 多份简历选择后续跑的端到端演示未跑。
 
 ## 8. 改动清单
 
 - 新增：`agent/task/TaskExecutionBudget`、`TaskBudgetRegistry`、`AgentTaskStatusService`；`agent/progress/AgentProgressEvent`、`TaskProgressPublisher`、`SseTaskProgressPublisher`；`agent/resume/ResumeReactEntry`；`sql/09_migration_phase3_task_interaction.sql`
 - 修改：`ReActRunner`（预算占用/取消/原因码）、`AgentRunExecutionHooks`（budget）、`JobSeekWorkflow`（进度事件+预算透传）、`ResumeAgentNode`/`MatchAgentNode`（budget 参数重载）、`JobSeekReactEntry`（预算/进度/待办问题/取消）、`AgentChatServiceImpl`（简历分发 + publisher）、`AgentController`（status/cancel + SSE publisher）、`AgentPlan`/`AgentPlanStatus`（pendingQuestion/cancelledAt/额度/CANCELLED）、`apps/user/src/api/agent.ts`（进度/状态/取消 API）
+
+
+## 9. 页面交互（最后一轮收口，2026-11-03）
+
+**AgentPage 任务卡片**（轻量，复用现有样式，不重设计页面）：
+- 展示任务状态（执行中/等待补充/已完成/失败/已取消）、三个节点状态、最近动作摘要、等待问题、失败/取消原因；
+- 并行节点各自独立状态，不按全局 seq 串行推进；节点完成后不回退（幂等）；
+- 只显示实际执行的节点（独立简历分析只显示简历节点）。
+
+**四个动作**：
+| 动作 | 行为 | 关键约束 |
+|---|---|---|
+| 继续/补充 | WAITING_INPUT 时发送自动带 `planId` | 不重新分类/重新创建任务 |
+| 重试 | `retry=true` + 原 `planId` | 复用已完成上游产物，只重跑失败节点 |
+| 取消 | `POST /task/{planId}/cancel` | 取消后迟到 token/done 不能把状态改回成功；已完成结果保留 |
+| 新任务 | 清理本地续跑标识 | 不删除历史、不自动取消上一任务 |
+
+**刷新恢复**：按会话保存 `planId`（localStorage `jobAgentTask:{conversationId}`），进入会话时 `GET /task/{planId}` 恢复；RUNNING 有界轮询（3s × 最多 40 次），终态/切会话/卸载即停；不自动重发聊天请求；查询失败不把任务显示为失败。
+
+**字段映射**：`PLAN_STATUS_MAP`（NEED_CLARIFICATION→WAITING_INPUT、COMPLETED→SUCCEEDED 等）集中在页面一处；事件与快照状态统一归一化。
+
+**构建验证**：后端 `mvn -pl Job-Agent-Bootstrap -am test` → **359 全绿**；前端 `npx vue-tsc --noEmit` 无错误、`npm run build` 成功（chunk 体积警告为既有问题）。
+
+**未执行**：真实模型 + MySQL + SSE 端到端；多份简历选择后续跑的真实演示；真实并行事件顺序下的视觉验收。
