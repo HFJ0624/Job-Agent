@@ -52,7 +52,7 @@ mybatis-plus:
   type-aliases-package: com.job.common
   configuration:
     map-underscore-to-camel-case: true # 下划线转驼峰
-    # SQL 走 SLF4J：默认不打印（logback 里 SQL_LOG_LEVEL=OFF）；排查时设 SQL_LOG_LEVEL=DEBUG 输出到 sql.log
+    # SQL 走 SLF4J：默认打印到控制台 + sql.log（定时任务轮询 SQL 已被 SchedulerLogFilter 过滤）；SQL_LOG_LEVEL=OFF 可关闭
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:

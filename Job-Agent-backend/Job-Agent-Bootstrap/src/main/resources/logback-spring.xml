@@ -12,7 +12,7 @@
   可覆盖的环境变量:
   - LOG_PATH        日志目录（默认 ~/logs/job-agent）
   - APP_LOG_LEVEL   项目日志级别（默认 DEBUG，控制台仍只显示 INFO+）
-  - SQL_LOG_LEVEL   Mapper/SQL 日志级别（默认 OFF；设 DEBUG 开启）
+  - SQL_LOG_LEVEL   Mapper/SQL 日志级别（默认 DEBUG=控制台可见；设 OFF 关闭）
 -->
 <configuration scan="true" scanPeriod="60 seconds" debug="false">
 
@@ -79,6 +79,18 @@
         </encoder>
     </appender>
 
+    <!--
+      SQL 控制台：业务请求的 SQL 直接打印；
+      定时任务线程的轮询 SQL 由 SchedulerLogFilter 丢弃，避免刷屏。
+    -->
+    <appender name="SQL_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="com.job.bootstrap.config.log.SchedulerLogFilter" />
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
     <!-- 非生产环境 -->
     <springProfile name="!prod">
         <root level="INFO">
@@ -100,7 +112,8 @@
           2) SQL_LOG_LEVEL=DEBUG（默认 OFF 不打印）。
           只写文件，不刷控制台。
         -->
-        <logger name="com.job.bootstrap.mapper" level="${SQL_LOG_LEVEL:-OFF}" additivity="false">
+        <logger name="com.job.bootstrap.mapper" level="${SQL_LOG_LEVEL:-DEBUG}" additivity="false">
+            <appender-ref ref="SQL_CONSOLE" />
             <appender-ref ref="SQL_FILE" />
         </logger>
     </springProfile>
