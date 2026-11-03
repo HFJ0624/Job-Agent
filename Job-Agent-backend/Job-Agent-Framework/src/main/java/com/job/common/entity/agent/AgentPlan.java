@@ -104,4 +104,10 @@ public class AgentPlan extends BaseEntity {
 
     /** 父任务已用业务工具次数（第三阶段）。 */
     private Integer toolCallsUsed;
+
+    /** 任务完成时的最终答复（第三阶段收口：重复提交直接复用）。 */
+    private String finalAnswer;
+
+    /** 已消耗执行耗时（毫秒；补参等待不计时，恢复时延续）。 */
+    private Integer executionMillisUsed;
 }

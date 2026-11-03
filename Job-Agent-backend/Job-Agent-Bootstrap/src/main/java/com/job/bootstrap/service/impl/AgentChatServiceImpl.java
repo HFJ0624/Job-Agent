@@ -281,7 +281,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         // 独立简历分析：ResumeAgent
         if (resumeReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
-            return chatViaResume(userId, conversationId, planId, message);
+            return chatViaResume(userId, conversationId, planId, message, TaskProgressPublisher.NOOP);
         }
         // 独立岗位搜索：单 Agent ReAct
         if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
@@ -308,12 +308,13 @@ public class AgentChatServiceImpl implements AgentChatService {
     /**
      * 独立简历分析分支（事务外执行，第三阶段）：会话短事务 → ResumeAgent → 助手消息短事务。
      */
-    private AgentChatVO chatViaResume(Long userId, Long conversationId, Long planId, String message) {
+    private AgentChatVO chatViaResume(Long userId, Long conversationId, Long planId, String message,
+                                      TaskProgressPublisher publisher) {
         String traceId = UUID.randomUUID().toString().replace("-", "");
         Long preparedConversationId = reactChatPreparationService.prepareConversation(
                 userId, conversationId, message);
         ResumeReactEntry.Result result = resumeReactEntry.execute(
-                userId, preparedConversationId, planId, traceId, message, TaskProgressPublisher.NOOP);
+                userId, preparedConversationId, planId, traceId, message, publisher);
         reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
 
         AgentChatVO vo = new AgentChatVO();
@@ -435,7 +436,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             return emitAsStream(chatViaJobSeek(userId, conversationId, planId, message, retry, progressPublisher), streamSink);
         }
         if (resumeReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
-            return emitAsStream(chatViaResume(userId, conversationId, planId, message), streamSink);
+            return emitAsStream(chatViaResume(userId, conversationId, planId, message, progressPublisher), streamSink);
         }
         if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
             return emitAsStream(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);

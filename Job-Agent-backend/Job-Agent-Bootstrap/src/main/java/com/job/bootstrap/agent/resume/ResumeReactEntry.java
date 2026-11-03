@@ -117,6 +117,12 @@ public class ResumeReactEntry {
                 resume, resumeVersion(resume), text(explicit.get("keyword")), budget);
         agentTaskService.updateBudgetUsage(plan.getId(), budget.modelCallsUsed(), budget.toolCallsUsed());
 
+        // 审查 F5：取消后不写 FAILED，也不继续发布完成事件
+        if (budget.isCancelled()) {
+            agentTaskService.markCancelled(plan.getId(), budget.cancelReason());
+            return new Result(true, "任务已取消，已完成的结果已保留。", "CANCELLED",
+                    plan.getId(), AgentPlanStatus.CANCELLED.name());
+        }
         if (result.profile() == null) {
             publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
                     com.job.bootstrap.agent.progress.AgentProgressEvent.TASK_FAILED,
@@ -130,6 +136,18 @@ public class ResumeReactEntry {
         agentArtifactService.save(userId, plan.getId(), result.runId(),
                 AgentArtifactService.TYPE_RESUME_PROFILE, result.profile().resumeVersion(),
                 toJson(result.profile()), "resumeId=" + resume.getId());
+
+        // 审查 F3：ResumeAgent 要求补充信息时不能当成功
+        if ("NEED_INPUT".equals(result.profile().outcome())) {
+            String question = result.profile().question() == null
+                    ? "请确认要分析的简历或补充目标方向。" : result.profile().question();
+            agentTaskService.updateStatus(plan.getId(), AgentPlanStatus.NEED_CLARIFICATION, null, question);
+            publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
+                    com.job.bootstrap.agent.progress.AgentProgressEvent.WAITING_INPUT,
+                    plan.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "WAITING_INPUT",
+                    question, System.currentTimeMillis()));
+            return new Result(true, question, "NEED_INPUT", plan.getId(), AgentPlanStatus.NEED_CLARIFICATION.name());
+        }
 
         String answer = buildAnswer(result.profile(), resume);
         publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(

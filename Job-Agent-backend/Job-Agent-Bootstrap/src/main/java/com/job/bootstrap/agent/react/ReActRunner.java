@@ -142,20 +142,22 @@ public class ReActRunner {
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             }
 
-            // 第三阶段：父预算原子占用（额度用尽/取消/超时即终止，不能先调再统计）
+            /*
+             * 审查 F1：Runner 不再扣模型额度——额度由网关在**每次真实 HTTP 尝试**前扣，
+             * 否则一次正常请求会被扣两次（Runner + 网关）。这里只做预算闸门与并发闸门。
+             */
             TaskExecutionBudget budget = AgentRunExecutionHooks.budget();
-            if (budget != null) {
-                if (!budget.canContinue()) {
-                    String reason = budget.isCancelled()
-                            ? AgentResult.ReasonCode.TASK_CANCELLED : AgentResult.ReasonCode.BUDGET_TIMEOUT;
-                    return ReActRunResult.failure(reason, "父任务预算已结束",
-                            context.toolCalls(), context.turn(), context.elapsedMillis());
-                }
-                if (!budget.tryReserveModelCall()) {
-                    return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_MODEL_CALLS_EXHAUSTED,
-                            "父任务模型请求额度已用尽（" + budget.maxModelCalls() + " 次）",
-                            context.toolCalls(), context.turn(), context.elapsedMillis());
-                }
+            if (budget != null && !budget.canContinue()) {
+                String reason = budget.isCancelled()
+                        ? AgentResult.ReasonCode.TASK_CANCELLED : AgentResult.ReasonCode.BUDGET_TIMEOUT;
+                return ReActRunResult.failure(reason, "父任务预算已结束",
+                        context.toolCalls(), context.turn(), context.elapsedMillis());
+            }
+            boolean concurrencyEntered = budget != null && budget.tryEnterModelCall();
+            if (budget != null && !concurrencyEntered) {
+                return ReActRunResult.failure(AgentResult.ReasonCode.BUDGET_MODEL_CALLS_EXHAUSTED,
+                        "父任务模型并发已达上限（" + budget.modelCallsUsed() + " 次已用）",
+                        context.toolCalls(), context.turn(), context.elapsedMillis());
             }
 
             context.nextTurn();
@@ -181,6 +183,9 @@ public class ReActRunner {
                         context.toolCalls(), context.turn(), context.elapsedMillis());
             } finally {
                 TaskBudgetContext.clear();
+                if (budget != null) {
+                    budget.exitModelCall();
+                }
             }
 
             // R5：模型返回后立即检查截止时间——迟到的成功结果同样不能接受

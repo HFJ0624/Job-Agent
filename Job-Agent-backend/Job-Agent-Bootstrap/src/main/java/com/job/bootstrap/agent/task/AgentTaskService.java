@@ -106,6 +106,66 @@ public class AgentTaskService {
         agentPlanMapper.updateById(plan);
     }
 
+    /**
+     * 条件领取（审查 F2）：只有当前状态符合预期时才抢占执行权。
+     *
+     * <p>用状态条件更新实现，不需要分布式调度：并发重复请求只有一个能把
+     * NEED_CLARIFICATION/FAILED 推进到 RUNNING。</p>
+     *
+     * @return true=领取成功
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public boolean claimForExecution(Long planId, String expectedStatus) {
+        if (planId == null || expectedStatus == null) {
+            return false;
+        }
+        AgentPlan patch = new AgentPlan();
+        patch.setStatus(AgentPlanStatus.PLANNED.name()); // 借字段触发更新；实际状态在 wrapper 中设置
+        int rows = agentPlanMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentPlan>()
+                        .eq("id", planId)
+                        .eq("status", expectedStatus)
+                        .set("status", AgentPlanStatus.PLANNED.name())
+                        .set("update_time", new Date()));
+        return rows > 0;
+    }
+
+    /**
+     * 条件完成（审查 F2/F5）：只有仍是 RUNNING 才写终态，取消/新执行不会被迟到结果覆盖。
+     *
+     * @return true=写回成功；false=状态已被改变（取消或新执行接管）
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public boolean completeExecution(Long planId, AgentPlanStatus status, String failReason,
+                                     String pendingQuestion, String finalAnswer) {
+        if (planId == null) {
+            return false;
+        }
+        int rows = agentPlanMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentPlan>()
+                        .eq("id", planId)
+                        .eq("status", AgentPlanStatus.PLANNED.name())
+                        .set("status", status.name())
+                        .set("fail_reason", failReason)
+                        .set("pending_question", pendingQuestion)
+                        .set("final_answer", finalAnswer)
+                        .set("update_time", new Date()));
+        return rows > 0;
+    }
+
+    /** 保存已消耗执行耗时（审查 F1：恢复时延续）。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void updateExecutionMillis(Long planId, long millis) {
+        if (planId == null) {
+            return;
+        }
+        AgentPlan plan = new AgentPlan();
+        plan.setId(planId);
+        plan.setExecutionMillisUsed((int) Math.max(0, millis));
+        plan.setUpdateTime(new Date());
+        agentPlanMapper.updateById(plan);
+    }
+
     /** 保存父任务已用额度（第三阶段：补参恢复延续，不清零）。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void updateBudgetUsage(Long planId, int modelCallsUsed, int toolCallsUsed) {

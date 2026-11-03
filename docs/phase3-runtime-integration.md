@@ -115,3 +115,19 @@ curl -N -X POST http://localhost:8080/front/agent/chat/stream \
 **构建验证**：后端 `mvn -pl Job-Agent-Bootstrap -am test` → **359 全绿**；前端 `npx vue-tsc --noEmit` 无错误、`npm run build` 成功（chunk 体积警告为既有问题）。
 
 **未执行**：真实模型 + MySQL + SSE 端到端；多份简历选择后续跑的真实演示；真实并行事件顺序下的视觉验收。
+
+
+## 10. 最终审查修复记录（F1–F6，2026-11-03）
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| F1 | 预算重复扣：Runner 扣一次、网关每次真实尝试又扣一次；搜索节点未继承父预算；并发闸门未使用；超时不收紧 | Runner 只做闸门与**并发闸门**（tryEnterModelCall/exit 配对），额度**唯一扣减点移到网关真实 HTTP 尝试**；搜索节点显式设置执行钩子（含 budget）；`future.get` 取父剩余时间；模型 HTTP 超时取 `min(配置, 剩余)`；执行耗时落库（`execution_millis_used`），补参延续 |
+| F2 | 父任务无状态分发/领取保护；断流后前端盲目重提 | 入口按 COMPLETED/RUNNING/FAILED/NEED_CLARIFICATION/CANCELLED 分发；`claimForExecution` 状态条件领取；`completeExecution` 条件写回（非 RUNNING 不覆盖）；断流时前端优先查询原任务 |
+| F3 | 补参丢条件/丢已选简历；节点 NEED_INPUT 被当成功 | 任务上下文 `{constraints, resumeId}` 每轮写回父任务并按两种历史格式读回；补参沿用已选简历；简历节点 NEED_INPUT 传播为父任务 WAITING_INPUT（复合 + 独立入口一致） |
+| F4 | 候选产物按 `{jobId, raw}` 保存却按平铺读取；产物要等两个节点都成功才保存 | `JobCandidateArtifactCodec` 兼容 wrapper/平铺两种结构（含定点单测）；画像/候选节点成功即保存；画像版本含显式目标方向、报告版本含上下游产物 ID |
+| F5 | 取消只改内存不落库；等待补参时无法取消；迟到事件覆盖取消 | 取消接口立即持久化 CANCELLED（无活动执行链也可取消）；入口/独立简历入口取消优先，条件写回不会覆盖 CANCELLED；页面忽略取消后的迟到事件，快照不推翻本地取消 |
+| F6 | 并行只发 node_started；独立简历进度丢失；页面固定三节点；旧查询污染当前会话 | 并行分支补齐两个 node_completed；独立简历入口透传 publisher；页面节点按真实事件/快照动态生成；查询/轮询带批次号，旧响应丢弃 |
+
+**定点验证**：`JobCandidateArtifactCodecTest`（F4）、`JobSeekWorkflowTest`（复用/版本）；后端 **361** 单测全绿；前端 `vue-tsc` + `vite build` 通过。
+
+**仍未执行**：真实模型 + MySQL + SSE 端到端（三组人工场景：正常复合 / 补参与失败恢复 / 取消与刷新恢复）；`sql/10` 需在真库执行。**状态如实**：以上为代码修复 + 编译/单测/构建验证，不是真实环境联调结论。

@@ -9,6 +9,7 @@ import com.job.bootstrap.agent.match.MatchAgentNode;
 import com.job.bootstrap.agent.match.MatchReport;
 import com.job.bootstrap.agent.plan.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.react.AgentResult;
+import com.job.bootstrap.agent.react.AgentRunExecutionHooks;
 import com.job.bootstrap.agent.resume.ResumeAgentNode;
 import com.job.bootstrap.agent.resume.ResumeProfile;
 import com.job.bootstrap.agent.search.JobCandidates;
@@ -59,6 +60,8 @@ public class JobSeekWorkflow {
     public static final int TOP_K = 5;
     /** 送入匹配的候选上限（有界，避免上下文爆炸）。 */
     private static final int MATCH_CANDIDATE_LIMIT = 8;
+    /** 简历节点要求补充信息（不是失败，父任务进入 WAITING_INPUT）。 */
+    private static final String RESUME_NEED_INPUT = "RESUME_NEED_INPUT";
 
     private final ResumeAgentNode resumeAgentNode;
     private final MatchAgentNode matchAgentNode;
@@ -76,7 +79,13 @@ public class JobSeekWorkflow {
      * 输入。
      */
     public record JobSeekInput(Long userId, Long conversationId, Long planId, String traceId,
-                               String message, String constraintsJson) {
+                               String message, String constraintsJson, Long previousResumeId) {
+
+        /** 兼容旧调用（无历史简历）。 */
+        public JobSeekInput(Long userId, Long conversationId, Long planId, String traceId,
+                            String message, String constraintsJson) {
+            this(userId, conversationId, planId, traceId, message, constraintsJson, null);
+        }
     }
 
     /**
@@ -93,7 +102,8 @@ public class JobSeekWorkflow {
     public record JobSeekOutcome(String status, String answer, String planStatus,
                                  Long profileArtifactId, Long candidatesArtifactId,
                                  Long reportArtifactId, Long resumeId,
-                                 List<String> missingFields, String question) {
+                                 List<String> missingFields, String question,
+                                 SearchConstraints constraints) {
     }
 
     public JobSeekOutcome execute(JobSeekInput input) {
@@ -115,7 +125,7 @@ public class JobSeekWorkflow {
             publish(progress, AgentProgressEvent.WAITING_INPUT, input.planId(), null, "PREPARE_CONTEXT", null,
                     "WAITING_INPUT", resumeResolution.question);
             return new JobSeekOutcome("NEED_INPUT", resumeResolution.question, "NEED_CLARIFICATION",
-                    null, null, null, null, resumeResolution.missingFields, resumeResolution.question);
+                    null, null, null, null, resumeResolution.missingFields, resumeResolution.question, null);
         }
         JobResume resume = resumeResolution.resume;
         ensureParsed(resume);
@@ -130,7 +140,7 @@ public class JobSeekWorkflow {
         List<JobCandidates.JobCandidateItem> candidates;
         try {
             // 产物复用（第二阶段）：同版本已完成的节点不重跑——画像看简历版本，候选看条件版本
-            ResumeProfile reusableProfile = loadProfileArtifact(input, resumeVersion);
+            ResumeProfile reusableProfile = loadProfileArtifact(input, profileVersion(resume, resumeResolution.targetRoleHint));
             List<JobCandidates.JobCandidateItem> reusableCandidates =
                     loadCandidatesArtifact(input, constraintVersion);
 
@@ -146,23 +156,34 @@ public class JobSeekWorkflow {
                 Future<NodeOutput> searchFuture = nodeExecutor.submit(
                         () -> reusableCandidates != null
                                 ? new NodeOutput(null, null, reusableCandidates)
-                                : searchNode(input, constraints));
-                NodeOutput resumeOut = await(resumeFuture);
-                NodeOutput searchOut = await(searchFuture);
+                                : searchNode(input, constraints, budget));
+                NodeOutput resumeOut = await(resumeFuture, budget);
+                NodeOutput searchOut = await(searchFuture, budget);
                 if (!resumeOut.ok()) {
-                    return failed(input, resumeOut, "RESUME_NODE_FAILED");
+                    if (RESUME_NEED_INPUT.equals(resumeOut.reasonCode())) {
+                        return new JobSeekOutcome("NEED_INPUT",
+                                "我需要你补充一点信息才能继续：请确认要使用的简历或更明确的目标方向。",
+                                "NEED_CLARIFICATION", null, null, null, resume.getId(),
+                                List.of("resume"), "请确认要使用的简历或更明确的目标方向。", constraints);
+                    }
+                    return failed(input, resumeOut, "RESUME_NODE_FAILED", constraints);
                 }
                 if (!searchOut.ok()) {
-                    return failed(input, searchOut, "SEARCH_NODE_FAILED");
+                    return failed(input, searchOut, "SEARCH_NODE_FAILED", constraints);
                 }
                 profile = (ResumeProfile) resumeOut.payload();
                 candidates = candidatesOf(searchOut);
+                // 审查 F6：并行分支必须补齐两个节点的完成事件，否则页面永远显示“进行中”
+                publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "RESUME_AGENT", "RESUME",
+                        "SUCCEEDED", "简历分析完成（" + profile.skills().size() + " 项技能）");
+                publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
+                        "SUCCEEDED", "岗位搜索完成（" + candidates.size() + " 个候选）");
             } else {
                 // 取消检查：已取消不再启动后续节点（第三阶段）
                 if (budget != null && !budget.canContinue()) {
                     String reason = budget.isCancelled() ? "TASK_CANCELLED" : "BUDGET_TIMEOUT";
                     return new JobSeekOutcome("FAILED", "任务已取消或超时，已完成结果已保留。", "FAILED",
-                            null, null, null, resume.getId(), List.of(), null);
+                            null, null, null, resume.getId(), List.of(), null, constraints);
                 }
                 publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "RESUME_AGENT", "RESUME",
                         "RUNNING", reusableProfile != null ? "复用已完成的简历分析" : "正在分析简历");
@@ -170,7 +191,13 @@ public class JobSeekWorkflow {
                         ? new NodeOutput(null, reusableProfile, List.of())
                         : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint, budget);
                 if (!resumeOut.ok()) {
-                    return failed(input, resumeOut, "RESUME_NODE_FAILED");
+                    if (RESUME_NEED_INPUT.equals(resumeOut.reasonCode())) {
+                        return new JobSeekOutcome("NEED_INPUT",
+                                "我需要你补充一点信息才能继续：请确认要使用的简历或更明确的目标方向。",
+                                "NEED_CLARIFICATION", null, null, null, resume.getId(),
+                                List.of("resume"), "请确认要使用的简历或更明确的目标方向。", constraints);
+                    }
+                    return failed(input, resumeOut, "RESUME_NODE_FAILED", constraints);
                 }
                 profile = (ResumeProfile) resumeOut.payload();
                 publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "RESUME_AGENT", "RESUME",
@@ -186,9 +213,9 @@ public class JobSeekWorkflow {
                         "RUNNING", reusableCandidates != null ? "复用已完成的岗位搜索结果" : "正在搜索岗位");
                 NodeOutput searchOut = reusableCandidates != null
                         ? new NodeOutput(null, null, reusableCandidates)
-                        : searchNode(input, searchConstraints);
+                        : searchNode(input, searchConstraints, budget);
                 if (!searchOut.ok()) {
-                    return failed(input, searchOut, "SEARCH_NODE_FAILED");
+                    return failed(input, searchOut, "SEARCH_NODE_FAILED", constraints);
                 }
                 candidates = candidatesOf(searchOut);
                 publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
@@ -199,11 +226,16 @@ public class JobSeekWorkflow {
             publish(progress, AgentProgressEvent.TASK_FAILED, input.planId(), null, null, null,
                     "FAILED", "任务执行失败");
             return new JobSeekOutcome("FAILED", "任务执行失败：" + exception.getMessage(), "FAILED",
-                    null, null, null, resume.getId(), List.of(), null);
+                    null, null, null, resume.getId(), List.of(), null, constraints);
         }
 
+        /*
+         * 审查 F4：节点成功就立即保存各自产物——画像已成功但搜索失败时，
+         * 画像仍能被后续重试的 loadProfileArtifact 命中，不需要重跑。
+         * 画像版本包含目标方向（方向变化意味着画像的一部分分析失效）。
+         */
         Long profileArtifactId = saveArtifact(input, AgentArtifactService.TYPE_RESUME_PROFILE,
-                resumeVersion, profile, "resumeId=" + resume.getId());
+                profileVersion(resume, resumeResolution.targetRoleHint), profile, "resumeId=" + resume.getId());
         Long candidatesArtifactId = saveArtifact(input, AgentArtifactService.TYPE_JOB_CANDIDATES,
                 constraintVersion, candidates, "resumeId=" + resume.getId());
 
@@ -214,7 +246,7 @@ public class JobSeekWorkflow {
             return new JobSeekOutcome("EMPTY",
                     "我按条件查询了岗位，但当前没有符合条件的结果。可以放宽城市或关键词，要我调整后再查一次吗？",
                     "COMPLETED", profileArtifactId, candidatesArtifactId, null, resume.getId(),
-                    List.of(), null);
+                    List.of(), null, constraints);
         }
 
         // ---------- MatchAgent（有界候选） ----------
@@ -232,7 +264,7 @@ public class JobSeekWorkflow {
             return new JobSeekOutcome("FAILED",
                     "匹配分析失败（" + matchResult.reasonCode() + "），岗位结果已保留，可稍后重试匹配。",
                     "FAILED", profileArtifactId, candidatesArtifactId, null, resume.getId(),
-                    List.of(), null);
+                    List.of(), null, constraints);
         }
         Long reportArtifactId = saveArtifact(input, AgentArtifactService.TYPE_MATCH_REPORT,
                 constraintVersion, matchResult.report(), "profile=" + profileArtifactId
@@ -246,7 +278,7 @@ public class JobSeekWorkflow {
                 "SUCCEEDED", "任务完成");
         return new JobSeekOutcome("SUCCEEDED", answer, "COMPLETED",
                 profileArtifactId, candidatesArtifactId, reportArtifactId, resume.getId(),
-                List.of(), null);
+                List.of(), null, constraints);
     }
 
     // ---------- 节点执行 ----------
@@ -265,33 +297,52 @@ public class JobSeekWorkflow {
         if (result.profile() == null) {
             return new NodeOutput(result.reasonCode(), null, List.of());
         }
+        // 审查 F3：Agent 提出补充问题时不能当作成功继续搜索
+        if ("NEED_INPUT".equals(result.profile().outcome())) {
+            return new NodeOutput(RESUME_NEED_INPUT, null, List.of());
+        }
         return new NodeOutput(null, result.profile(), List.of());
     }
 
-    private NodeOutput searchNode(JobSeekInput input, SearchConstraints constraints) {
-        JobSearchWorkflow.WorkflowOutcome outcome = jobSearchWorkflow.execute(
-                new JobSearchWorkflow.WorkflowInput(
-                        input.userId(), input.traceId(), input.message(), constraints,
-                        null, 0, 0, System.currentTimeMillis(),
-                        input.conversationId(), "JOB_SEEK_FLOW", List.of()));
-        if (outcome.outcome() == AgentResult.Outcome.FAILED) {
-            return new NodeOutput(outcome.reasonCode(), null, List.of());
+    private NodeOutput searchNode(JobSeekInput input, SearchConstraints constraints,
+                                  TaskExecutionBudget budget) {
+        /*
+         * 审查 F1：搜索节点同样要受父任务预算/取消约束。
+         * 并行线程不会继承主线程 ThreadLocal，所以在这里显式设置执行钩子（含 budget）。
+         */
+        AgentRunExecutionHooks.set(null, null, budget);
+        try {
+            JobSearchWorkflow.WorkflowOutcome outcome = jobSearchWorkflow.execute(
+                    new JobSearchWorkflow.WorkflowInput(
+                            input.userId(), input.traceId(), input.message(), constraints,
+                            null, 0, 0, System.currentTimeMillis(),
+                            input.conversationId(), "JOB_SEEK_FLOW", List.of()));
+            if (outcome.outcome() == AgentResult.Outcome.FAILED) {
+                return new NodeOutput(outcome.reasonCode(), null, List.of());
+            }
+            return new NodeOutput(null, null, outcome.candidates());
+        } finally {
+            AgentRunExecutionHooks.clear();
         }
-        return new NodeOutput(null, null, outcome.candidates());
     }
 
     private List<JobCandidates.JobCandidateItem> candidatesOf(NodeOutput output) {
         return output.candidates() == null ? List.of() : output.candidates();
     }
 
-    private JobSeekOutcome failed(JobSeekInput input, NodeOutput output, String fallbackReason) {
+    private JobSeekOutcome failed(JobSeekInput input, NodeOutput output, String fallbackReason,
+                                  SearchConstraints constraints) {
         String reason = output.reasonCode() == null ? fallbackReason : output.reasonCode();
         return new JobSeekOutcome("FAILED", "任务失败：" + reason + "。已完成的部分已保存，可重试失败节点。",
-                "FAILED", null, null, null, null, List.of(), null);
+                "FAILED", null, null, null, null, List.of(), null, constraints);
     }
 
-    private NodeOutput await(Future<NodeOutput> future) throws Exception {
-        return future.get(180, TimeUnit.SECONDS);
+    private NodeOutput await(Future<NodeOutput> future, TaskExecutionBudget budget) throws Exception {
+        long timeout = 180_000L;
+        if (budget != null) {
+            timeout = Math.min(timeout, Math.max(1_000L, budget.remainingMillis()));
+        }
+        return future.get(timeout, TimeUnit.MILLISECONDS);
     }
 
     // ---------- 简历解析 ----------
@@ -321,7 +372,15 @@ public class JobSeekWorkflow {
         }
 
         JobResume picked = null;
-        if (StringUtils.hasText(resumeName)) {
+        // 审查 F3：补参没指定简历时，沿用任务上下文里已选的简历（校验归属）
+        Long previousResumeId = input.previousResumeId() != null
+                ? input.previousResumeId() : contextResumeId(input.constraintsJson());
+        if (previousResumeId != null) {
+            picked = resumes.stream()
+                    .filter(r -> r.getId().equals(previousResumeId))
+                    .findFirst().orElse(null);
+        }
+        if (picked == null && StringUtils.hasText(resumeName)) {
             picked = resumes.stream()
                     .filter(r -> r.getResumeName() != null && r.getResumeName().contains(resumeName))
                     .findFirst().orElse(null);
@@ -360,11 +419,31 @@ public class JobSeekWorkflow {
 
     private SearchConstraints mergeConstraints(JobSeekInput input, Map<String, Object> explicit) {
         SearchConstraints previous = null;
-        if (StringUtils.hasText(input.constraintsJson())) {
+        Map<String, Object> wrapper = readJsonMap(input.constraintsJson());
+        if (wrapper != null && wrapper.get("constraints") instanceof Map<?, ?> nested) {
+            // 任务上下文包装格式（审查 F3）：{constraints:{...}, resumeId:n}
+            previous = SearchConstraints.merge(castMap(nested), null);
+            wrapper = null;
+        }
+        if (previous == null && StringUtils.hasText(input.constraintsJson())) {
+            /*
+             * 审查 F3：历史快照可能是初始参数 Map，也可能已是 SearchConstraints JSON，
+             * 两种格式都要能读回，否则补参时条件全部丢失。
+             */
             try {
-                previous = objectMapper.readValue(input.constraintsJson(), SearchConstraints.class);
+                SearchConstraints parsed = objectMapper.readValue(input.constraintsJson(), SearchConstraints.class);
+                if (parsed.city() != null || parsed.keyword() != null || parsed.targetRole() != null
+                        || parsed.minSalary() != null) {
+                    previous = parsed;
+                }
             } catch (Exception ignored) {
-                previous = null;
+                try {
+                    Map<String, Object> raw = objectMapper.readValue(input.constraintsJson(),
+                            objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+                    previous = SearchConstraints.merge(raw, null);
+                } catch (Exception second) {
+                    previous = null;
+                }
             }
         }
         UserJobPreferenceVO preference = null;
@@ -374,6 +453,26 @@ public class JobSeekWorkflow {
             log.debug("偏好加载失败，按无偏好处理，error={}", exception.getMessage());
         }
         return SearchConstraints.merge(explicit, previous, preference);
+    }
+
+    private Map<String, Object> readJsonMap(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json,
+                    objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private Long contextResumeId(String json) {
+        Map<String, Object> map = readJsonMap(json);
+        if (map == null || !(map.get("resumeId") instanceof Number number)) {
+            return null;
+        }
+        return number.longValue();
     }
 
     // ---------- 产物 ----------
@@ -420,10 +519,22 @@ public class JobSeekWorkflow {
                     objectMapper.getTypeFactory().constructCollectionType(List.class, Map.class));
             List<JobCandidates.JobCandidateItem> items = new ArrayList<>();
             for (Map<String, Object> item : raw) {
-                Object jobId = item.containsKey("jobId") ? item.get("jobId") : item.get("id");
+                /*
+                 * 保存端结构是 {"jobId":1,"raw":{...岗位字段...}}；
+                 * 旧格式/兼容分支才是平铺字段。这里必须把内层 raw 取出来，
+                 * 否则 city/salary 等字段全部丢失（审查 F4）。
+                 */
+                Object rawField = item.get("raw");
+                Map<String, Object> jobFields = rawField instanceof Map<?, ?> nested
+                        ? castMap(nested)
+                        : item;
+                Object jobId = item.containsKey("jobId") ? item.get("jobId") : jobFields.get("jobId");
+                if (jobId == null) {
+                    jobId = jobFields.get("id");
+                }
                 Long id = jobId instanceof Number number ? number.longValue() : null;
                 if (id != null) {
-                    items.add(new JobCandidates.JobCandidateItem(id, item));
+                    items.add(new JobCandidates.JobCandidateItem(id, jobFields));
                 }
             }
             return items.isEmpty() ? null : items;
@@ -513,6 +624,26 @@ public class JobSeekWorkflow {
     }
 
     // ---------- 工具方法 ----------
+
+    /*
+     * 画像版本 = 简历版本 + 用户显式目标方向（空表示未指定）。
+     * 保存与复用必须用同一入参，否则永远命中不了；用户后来指定方向时版本变化，
+     * 目标相关分析自然刷新（审查 F4）。
+     */
+    private String profileVersion(JobResume resume, String targetRoleHint) {
+        return hash(resumeVersion(resume) + "|" + (targetRoleHint == null ? "" : targetRoleHint));
+    }
+
+    // 报告版本 = 条件版本 + 画像/候选产物 ID（上下游变化则旧报告失效）
+    private String reportVersion(String constraintVersion, Long profileArtifactId, Long candidatesArtifactId) {
+        return hash(constraintVersion + "|" + profileArtifactId + "|" + candidatesArtifactId);
+    }
+
+    private Map<String, Object> castMap(Map<?, ?> source) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, value) -> result.put(String.valueOf(key), value));
+        return result;
+    }
 
     private String resumeVersion(JobResume resume) {
         String seed = resume.getId() + ":" + (resume.getUpdateTime() == null ? ""

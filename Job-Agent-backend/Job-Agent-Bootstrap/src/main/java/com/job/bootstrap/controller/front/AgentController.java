@@ -37,6 +37,7 @@ public class AgentController {
     /** 第三阶段：任务状态快照与取消。 */
     private final AgentTaskStatusService agentTaskStatusService;
     private final TaskBudgetRegistry taskBudgetRegistry;
+    private final com.job.bootstrap.agent.task.AgentTaskService agentTaskService;
 
     /**
      * SSE 流式超时时间（毫秒）。
@@ -170,8 +171,9 @@ public class AgentController {
         if (snapshot == null) {
             throw new com.job.exception.BizException("任务不存在或不属于当前用户");
         }
+        // 审查 F5：内存取消信号 + 立即持久化 CANCELLED（等待补参时没有活动执行链也能取消）
         taskBudgetRegistry.cancel(planId, "USER_CANCELLED");
-        agentTaskStatusService.toString(); // no-op，保持依赖可读
+        agentTaskService.markCancelled(planId, "USER_CANCELLED");
         return Result.build(Boolean.TRUE, ResultCodeEnum.SUCCESS);
     }
 

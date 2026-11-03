@@ -255,6 +255,8 @@ const taskCard = ref<TaskCard | null>(null);
 const cancelling = ref(false);
 let taskPollTimer: ReturnType<typeof setTimeout> | null = null;
 let taskPollCount = 0;
+/* 页面交互批次号：切换会话/新任务/新请求都会递增，用于丢弃旧回调 */
+let taskEpoch = 0;
 
 function taskStorageKey(cid: number | null) {
   return `jobAgentTask:${cid ?? "new"}`;
@@ -288,12 +290,8 @@ function ensureTaskCard(planId: number): TaskCard {
       planId,
       runId: null,
       status: "RUNNING",
-      nodes: Object.keys(NODE_LABELS).map(key => ({
-        key,
-        label: NODE_LABELS[key],
-        status: "PENDING" as TaskNodeStatus,
-        summary: ""
-      })),
+      // 审查 F6：节点按真实事件/快照生成，独立简历分析不会显示三个 Agent
+      nodes: [],
       summaries: [],
       pendingQuestion: "",
       failReason: ""
@@ -306,9 +304,10 @@ function updateNode(key: string | null | undefined, status: TaskNodeStatus, summ
   if (!taskCard.value || !key || !NODE_LABELS[key]) {
     return;
   }
-  const node = taskCard.value.nodes.find(item => item.key === key);
+  let node = taskCard.value.nodes.find(item => item.key === key);
   if (!node) {
-    return;
+    node = { key, label: NODE_LABELS[key], status: "PENDING", summary: "" };
+    taskCard.value.nodes.push(node);
   }
   // 幂等：不回退已完成的节点；重复事件直接覆盖为同一状态无副作用
   if (node.status === "SUCCEEDED" && status !== "SUCCEEDED") {
@@ -341,6 +340,11 @@ function applyProgressEvent(event: AgentProgressEvent) {
     persistTaskPlanId(conversationId.value, planId);
   }
   if (!taskCard.value) {
+    return;
+  }
+  // 审查 F5：同一批次取消后，迟到事件不能把状态改回成功/进行中
+  if (taskCard.value.status === "CANCELLED"
+      && ["task_started", "node_started", "node_completed", "task_completed"].includes(event.event)) {
     return;
   }
   if (event.runId) {
@@ -382,9 +386,17 @@ function applyProgressEvent(event: AgentProgressEvent) {
  * 用后端任务快照校正页面状态（刷新恢复 / 事件之后的可信来源）。
  */
 async function syncTaskFromServer(planId: number, poll = true) {
+  const epoch = taskEpoch;
   try {
     const snapshot = await fetchAgentTaskStatus(planId);
+    // 审查 F6：查询返回后必须确认会话/批次/任务仍是当前目标，旧响应直接丢弃
+    if (epoch !== taskEpoch || taskCard.value?.planId !== planId) {
+      return;
+    }
     const status = PLAN_STATUS_MAP[String(snapshot?.status ?? "")] ?? String(snapshot?.status ?? "RUNNING");
+    if (taskCard.value?.status === "CANCELLED" && status !== "CANCELLED") {
+      return; // 取消是本地已确认的终态，不被迟到快照推翻
+    }
     const card = ensureTaskCard(planId);
     card.status = status;
     card.pendingQuestion = snapshot?.pendingQuestion || "";
@@ -423,8 +435,12 @@ function updateNodeIfNewer(key: string | null | undefined, status: TaskNodeStatu
   if (!taskCard.value || !key || !NODE_LABELS[key]) {
     return false;
   }
-  const node = taskCard.value.nodes.find(item => item.key === key);
-  if (!node || node.status === "SUCCEEDED") {
+  let node = taskCard.value.nodes.find(item => item.key === key);
+  if (!node) {
+    node = { key, label: NODE_LABELS[key], status: "PENDING", summary: "" };
+    taskCard.value.nodes.push(node);
+  }
+  if (node.status === "SUCCEEDED") {
     return false;
   }
   node.status = status;
@@ -465,6 +481,7 @@ function stopTaskPolling() {
 /** 打开会话/刷新后恢复任务卡片（按明确 planId 查询，不重发聊天请求）。 */
 async function restoreTaskForConversation(cid: number | null) {
   stopTaskPolling();
+  taskEpoch += 1;
   taskCard.value = null;
   const planId = readPersistedPlanId(cid);
   if (!planId) {
@@ -514,6 +531,7 @@ async function cancelTask() {
 
 /** 新任务：只清理续跑标识，不删除历史、不自动取消上一个任务。 */
 function startNewTaskFromCard() {
+  taskEpoch += 1;
   persistTaskPlanId(conversationId.value, null);
   taskCard.value = null;
   stopTaskPolling();
@@ -772,7 +790,21 @@ async function runAgentTurn(payload: AgentChatPayload) {
       await syncTaskFromServer(result.planId, true);
     }
   } catch (streamError) {
-    // 流式失败：回退阻塞接口（先移除空气泡，避免残留半截内容）
+    /*
+     * 审查 F2：已收到任务标识时，断流优先查询原任务状态，
+     * 不能盲目再提交一次阻塞请求（服务端可能仍在执行）。
+     */
+    const knownPlanId = payload.planId ?? taskCard.value?.planId ?? null;
+    if (knownPlanId) {
+      console.warn("[Job-Agent] 流式中断，改为查询任务状态", streamError);
+      bubble.content = bubble.content || "连接中断，正在确认任务状态…";
+      await syncTaskFromServer(knownPlanId, true);
+      const statusText = TASK_STATUS_LABELS[taskCard.value?.status ?? ""] ?? taskCard.value?.status ?? "未知";
+      bubble.content = `连接中断，任务当前状态：${statusText}。可稍后刷新查看结果，不会重复提交。`;
+      loading.value = false;
+      return;
+    }
+    // 流式失败且没有任务标识：回退阻塞接口（先移除空气泡，避免残留半截内容）
     console.warn("[Job-Agent] 流式对话失败，回退阻塞接口", streamError);
     messages.value.splice(messages.value.indexOf(bubble), 1);
     try {
