@@ -141,8 +141,8 @@ public class JobSeekWorkflow {
         }
         JobResume resume = resumeResolution.resume;
         ensureParsed(resume);
-        String resumeVersion = resumeVersion(resume);
-        String constraintVersion = version(constraints, resume.getId());
+        String resumeVersion = SeekVersionPolicy.resumeVersion(resume);
+        String constraintVersion = SeekVersionPolicy.constraintVersion(constraints, resume.getId());
 
         // 使用合并后的有效方向，重试时不会因当前消息没有关键词而失效
         String targetRoleHint = StringUtils.hasText(constraints.targetRole()) ? constraints.targetRole() : constraints.keyword();
@@ -159,7 +159,7 @@ public class JobSeekWorkflow {
              * 不依赖兄弟节点是否成功；同版本保存是幂等的，JOIN 阶段不再重复插入。
              */
             ProfileArtifact reusableProfile = loadProfileArtifact(
-                    input, profileVersion(resume, targetRoleHint));
+                    input, SeekVersionPolicy.profileVersion(resume, targetRoleHint));
             CandidatesArtifact reusableCandidates = loadCandidatesArtifact(input, constraintVersion);
             if (reusableProfile != null) {
                 profileArtifactId = reusableProfile.artifactId();
@@ -308,7 +308,7 @@ public class JobSeekWorkflow {
          * 同版本已存在报告时直接复用，避免"匹配失败重试"把匹配节点再跑一遍；
          * 简历或条件变化 → 版本变化 → 不复用旧报告。
          */
-        String reportVersion = reportVersion(constraintVersion, profileArtifactId, candidatesArtifactId);
+        String reportVersion = SeekVersionPolicy.reportVersion(constraintVersion, profileArtifactId, candidatesArtifactId);
         MatchReport reusableReport = loadReportArtifact(input, reportVersion);
         if (reusableReport != null) {
             publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "MATCH_AGENT", "MATCH",
@@ -392,7 +392,7 @@ public class JobSeekWorkflow {
         Long artifactId = saveArtifact(
                 input,
                 AgentArtifactService.TYPE_RESUME_PROFILE,
-                profileVersion(resume, targetRoleHint),
+                SeekVersionPolicy.profileVersion(resume, targetRoleHint),
                 result.profile(),
                 "resumeId=" + resume.getId()
         );
@@ -709,14 +709,8 @@ public class JobSeekWorkflow {
      * 保存与复用必须用同一入参，否则永远命中不了；用户后来指定方向时版本变化，
      * 目标相关分析自然刷新（审查 F4）。
      */
-    private String profileVersion(JobResume resume, String targetRoleHint) {
-        return hash(resumeVersion(resume) + "|" + (targetRoleHint == null ? "" : targetRoleHint));
-    }
 
     // 报告版本 = 条件版本 + 画像/候选产物 ID（上下游变化则旧报告失效）
-    private String reportVersion(String constraintVersion, Long profileArtifactId, Long candidatesArtifactId) {
-        return hash(constraintVersion + "|" + profileArtifactId + "|" + candidatesArtifactId);
-    }
 
     private Map<String, Object> castMap(Map<?, ?> source) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -724,30 +718,8 @@ public class JobSeekWorkflow {
         return result;
     }
 
-    private String resumeVersion(JobResume resume) {
-        String seed = resume.getId() + ":" + (resume.getUpdateTime() == null ? ""
-                : resume.getUpdateTime().getTime()) + ":" + hash(resume.getRawText());
-        return hash(seed);
-    }
 
-    private String version(SearchConstraints constraints, Long resumeId) {
-        return hash(resumeId + "|" + constraints.targetRole() + "|" + constraints.city() + "|"
-                + constraints.minSalary() + "|" + constraints.educationReq() + "|" + constraints.keyword());
-    }
 
-    private String hash(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < 8; i++) {
-                builder.append(String.format("%02x", bytes[i]));
-            }
-            return builder.toString();
-        } catch (Exception exception) {
-            return String.valueOf(text == null ? 0 : text.hashCode());
-        }
-    }
 
     private String text(Object value) {
         return value == null ? null : String.valueOf(value).trim();

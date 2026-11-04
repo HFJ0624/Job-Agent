@@ -230,6 +230,8 @@ Job-Agent
 └── LICENSE
 ```
 
+**维护者文档**：[项目地图](docs/PROJECT_MAP.md) ｜ [Agent 扩展指南](docs/AGENT_DEVELOPMENT_GUIDE.md) ｜ [架构重构报告](docs/ARCHITECTURE_REFACTOR_REPORT.md)
+
 **Agent 分层约定**：依赖方向固定为 `orchestration → domain → runtime`，`support` 不反向依赖业务包；
 命名按 `*Entry → *Workflow → *Node → *Contract → *Service`。详见
 `Job-Agent-backend/Job-Agent-Bootstrap/src/main/java/com/job/bootstrap/agent/README.md`。
