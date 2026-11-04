@@ -168,6 +168,12 @@
 </template>
 
 <script setup lang="ts">
+import {
+  NODE_LABELS,
+  NODE_STATUS_LABELS,
+  PLAN_STATUS_MAP,
+  TASK_STATUS_LABELS
+} from "../composables/agent/taskLabels";
 import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -220,36 +226,10 @@ interface TaskCard {
   failReason: string;
 }
 
-const NODE_LABELS: Record<string, string> = {
-  RESUME_AGENT: "简历分析",
-  JOB_SEARCH_AGENT: "岗位搜索",
-  MATCH_AGENT: "匹配分析"
-};
 
 /* 后端计划状态 → 页面状态，集中一处映射，避免各组件各写一套 */
-const PLAN_STATUS_MAP: Record<string, string> = {
-  NEED_CLARIFICATION: "WAITING_INPUT",
-  PLANNED: "RUNNING",
-  COMPLETED: "SUCCEEDED",
-  CANCELLED: "CANCELLED",
-  FAILED: "FAILED"
-};
 
-const TASK_STATUS_LABELS: Record<string, string> = {
-  RUNNING: "执行中",
-  WAITING_INPUT: "等待补充",
-  SUCCEEDED: "已完成",
-  FAILED: "失败",
-  CANCELLED: "已取消"
-};
 
-const NODE_STATUS_LABELS: Record<string, string> = {
-  PENDING: "等待",
-  RUNNING: "进行中",
-  SUCCEEDED: "完成",
-  FAILED: "失败",
-  SKIPPED: "跳过"
-};
 
 const taskCard = ref<TaskCard | null>(null);
 const cancelling = ref(false);

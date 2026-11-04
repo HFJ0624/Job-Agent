@@ -84,8 +84,11 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 - ⏳ 仍未拆出：旧模板链路处理（chatInternal 主流程）、结果写回；后续按
   "LegacyChatHandler / ChatResultWriter" 两块继续。
 
-### 任务三：拆分 AgentPage.vue —— 未完成
-页面仍为单文件（1200+ 行）。`useAgentChat`/`useAgentTask`/`AgentTaskCard` 尚未提取。
+### 任务三：拆分 AgentPage.vue —— 部分完成
+- ✅ 静态显示映射抽为 `src/composables/agent/taskLabels.ts`
+  （NODE_LABELS / PLAN_STATUS_MAP / TASK_STATUS_LABELS / NODE_STATUS_LABELS），页面 1227 → 1201 行；
+- ⏳ `useAgentChat`、`useAgentTask`、`AgentTaskCard` 尚未提取：任务状态块（约 254–553 行）
+  与 `sendMessage`/`stopTaskPolling` 等互相依赖，需先定义回调契约再迁移，避免形成环。
 
 ### 任务五：验证结果（实际执行）
 | 项 | 结果 |
