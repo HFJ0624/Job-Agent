@@ -146,7 +146,7 @@ public class JobSeekReactEntry {
 
             // 审查 F3：合并后的条件与所选简历写回父任务，供下一轮补参使用
             Map<String, Object> contextPayload = context(outcome.resumeId(), outcome.constraints());
-            agentTaskService.updateConstraints(finalPlan.getId(), toJson(contextPayload), contextPayload);
+            agentTaskService.updateConstraints(finalPlan.getId(), toJson(contextPayload));
 
             // 审查 F5：取消优先——取消后不写成功终态
             if (budget.isCancelled()) {

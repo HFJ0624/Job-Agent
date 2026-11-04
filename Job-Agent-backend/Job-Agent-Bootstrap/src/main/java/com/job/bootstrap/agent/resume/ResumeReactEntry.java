@@ -3,6 +3,7 @@ package com.job.bootstrap.agent.resume;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.artifact.AgentArtifactService;
 import com.job.bootstrap.agent.plan.AgentPlanParameterExtractor;
+import com.job.bootstrap.agent.progress.AgentProgressEvent;
 import com.job.bootstrap.agent.progress.TaskProgressPublisher;
 import com.job.bootstrap.agent.search.ReactSearchProperties;
 import com.job.bootstrap.agent.task.AgentTaskService;
@@ -21,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -29,12 +29,15 @@ import java.util.Map;
  * 功能: 独立简历分析入口（第三阶段）。
  *
  * 设计说明:
- * 1. 只做“薄入口 + 薄流程”：复用第二阶段 ResumeAgentNode（同一套 ReAct 内核、
+ * 1. 只做"薄入口 + 薄流程"：复用 ResumeAgentNode（同一套 ReAct 内核、
  *    同一份 ResumeProfile 契约与证据回溯校验），不复制 Prompt/产物契约；
  * 2. 任务身份：父计划 runtimeMode=WORKFLOW_RESUME，planId 作为稳定标识返回；
- *    多份简历无法确定时置 NEED_CLARIFICATION 并列出名称，选择后按 planId 继续；
- * 3. 输出：简历事实（带原文依据）+ 已有优势 + 信息缺口 + 建议，事实与建议分开；
- * 4. 事务：会话/消息由 chatter 短事务处理，本入口 NOT_SUPPORTED，模型执行在事务外。
+ * 3. **状态机与复合入口一致**（P0 修复）：
+ *    COMPLETED 直接返回已保存答复；RUNNING 拒绝重复执行；FAILED 仅显式重试；
+ *    NEED_CLARIFICATION 合并补参继续；CANCELLED 为终态；
+ *    领取用 claimForExecution（条件更新），写回用 completeExecution（仅 RUNNING 可写），
+ *    避免重复执行与"取消后被成功覆盖"。
+ * 4. 输出：简历事实（带原文依据）+ 已有优势 + 信息缺口 + 建议，事实与建议分开。
  */
 @Slf4j
 @Component
@@ -67,10 +70,26 @@ public class ResumeReactEntry {
         return properties.isEnabled() && "RESUME_ANALYZE".equals(intentCode);
     }
 
+    /** 兼容旧调用（非显式重试、无进度发布）。 */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Result execute(Long userId, Long conversationId, Long planId, String traceId,
                           String message, TaskProgressPublisher publisher) {
+        return execute(userId, conversationId, planId, traceId, message, false, publisher);
+    }
+
+    /**
+     * 执行简历分析（状态机 + 条件领取 + 条件写回）。
+     *
+     * @param recover 显式重试（仅对 FAILED 生效）
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public Result execute(Long userId, Long conversationId, Long planId, String traceId,
+                          String message, boolean recover, TaskProgressPublisher publisher) {
+        TaskProgressPublisher progress = publisher == null ? TaskProgressPublisher.NOOP : publisher;
+
+        // 1. 任务身份与状态分发
         AgentPlan plan;
+        String expectedStatus;
         if (planId != null) {
             plan = agentTaskService.loadOwned(userId, planId);
             if (plan == null) {
@@ -79,87 +98,135 @@ public class ResumeReactEntry {
             if (!RUNTIME_RESUME.equals(plan.getRuntimeMode())) {
                 return new Result(false, null, "NOT_HANDLED", planId, null);
             }
+            String status = plan.getStatus();
+            if (AgentPlanStatus.COMPLETED.name().equals(status)) {
+                return new Result(true, answerOf(plan), AgentPlanStatus.COMPLETED.name(), plan.getId(), status);
+            }
+            if (AgentPlanStatus.CANCELLED.name().equals(status)) {
+                return new Result(true, "该任务已取消，如需继续请发起新任务。",
+                        AgentPlanStatus.CANCELLED.name(), plan.getId(), status);
+            }
+            if (AgentPlanStatus.RUNNING.name().equals(status)) {
+                return new Result(true, "简历分析正在执行中，请稍候再试。", "RUNNING", plan.getId(), status);
+            }
+            if (AgentPlanStatus.FAILED.name().equals(status) && !recover) {
+                return new Result(true, "上次分析失败：" + safe(plan.getFailReason()) + "。如需重试请显式重试。",
+                        AgentPlanStatus.FAILED.name(), plan.getId(), status);
+            }
+            expectedStatus = status;
         } else {
             String snapshot = toJson(parameterExtractor.extract(message));
             plan = agentTaskService.createParentPlan(userId, conversationId, traceId,
                     "RESUME_ANALYZE", message, RUNTIME_RESUME, snapshot);
+            expectedStatus = AgentPlanStatus.PLANNED.name();
         }
 
-        // 简历定位（显式 > 名称 > 默认 > 唯一；多份无法确定 → 暂停）
-        Map<String, Object> explicit = parameterExtractor.extract(message);
-        List<JobResume> resumes = jobResumeService.listUserResumes(userId);
-        JobResume resume = pickResume(userId, explicit, resumes);
-        if (resume == null) {
-            String question = resumes.isEmpty()
-                    ? "你的账号下还没有可用简历，请先上传一份简历。"
-                    : "你有多份简历，请告诉我要分析哪一份：" + String.join("、",
-                    resumes.stream().map(JobResume::getResumeName).toList()) + "。";
-            agentTaskService.updateStatus(plan.getId(), AgentPlanStatus.NEED_CLARIFICATION, null, question);
-            publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                    com.job.bootstrap.agent.progress.AgentProgressEvent.WAITING_INPUT,
-                    plan.getId(), null, "RESUME_AGENT", "RESUME", 0, "WAITING_INPUT", question,
-                    System.currentTimeMillis()));
-            return new Result(true, question, "NEED_INPUT", plan.getId(), AgentPlanStatus.NEED_CLARIFICATION.name());
+        // 2. 条件领取：并发重复请求只有一个能执行
+        if (!agentTaskService.claimForExecution(plan.getId(), expectedStatus)) {
+            return new Result(true, "简历分析正在执行中，请稍候再试。", "RUNNING", plan.getId(), null);
         }
 
         TaskExecutionBudget budget = taskBudgetRegistry.getOrCreate(plan.getId());
         budget.restore(plan.getModelCallsUsed() == null ? 0 : plan.getModelCallsUsed(),
-                plan.getToolCallsUsed() == null ? 0 : plan.getToolCallsUsed(), 0L);
+                plan.getToolCallsUsed() == null ? 0 : plan.getToolCallsUsed(),
+                plan.getExecutionMillisUsed() == null ? 0L : plan.getExecutionMillisUsed());
+        AgentPlan running = plan;
 
-        publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                com.job.bootstrap.agent.progress.AgentProgressEvent.TASK_STARTED,
-                plan.getId(), null, null, null, 0, "RUNNING", "开始分析简历", System.currentTimeMillis()));
-        publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                com.job.bootstrap.agent.progress.AgentProgressEvent.NODE_STARTED,
-                plan.getId(), null, "RESUME_AGENT", "RESUME", 0, "RUNNING", "正在分析简历", System.currentTimeMillis()));
+        try {
+            // 3. 简历定位（显式 > 名称 > 默认 > 唯一；多份无法确定 → 暂停等待选择）
+            Map<String, Object> explicit = parameterExtractor.extract(message);
+            List<JobResume> resumes = jobResumeService.listUserResumes(userId);
+            JobResume resume = pickResume(userId, explicit, resumes);
+            if (resume == null) {
+                String question = resumes.isEmpty()
+                        ? "你的账号下还没有可用简历，请先上传一份简历。"
+                        : "你有多份简历，请告诉我要分析哪一份：" + String.join("、",
+                        resumes.stream().map(JobResume::getResumeName).toList()) + "。";
+                agentTaskService.completeExecution(running.getId(),
+                        AgentPlanStatus.NEED_CLARIFICATION, null, question, null);
+                progress.publish(new AgentProgressEvent(AgentProgressEvent.WAITING_INPUT,
+                        running.getId(), null, "RESUME_AGENT", "RESUME", 0, "WAITING_INPUT", question,
+                        System.currentTimeMillis()));
+                return new Result(true, question, "NEED_INPUT", running.getId(),
+                        AgentPlanStatus.NEED_CLARIFICATION.name());
+            }
 
-        ResumeAgentNode.Result result = resumeAgentNode.execute(userId, conversationId, plan.getId(), traceId,
-                resume, resumeVersion(resume), text(explicit.get("keyword")), budget);
-        agentTaskService.updateBudgetUsage(plan.getId(), budget.modelCallsUsed(), budget.toolCallsUsed());
+            progress.publish(new AgentProgressEvent(AgentProgressEvent.TASK_STARTED,
+                    running.getId(), null, null, null, 0, "RUNNING", "开始分析简历", System.currentTimeMillis()));
+            progress.publish(new AgentProgressEvent(AgentProgressEvent.NODE_STARTED,
+                    running.getId(), null, "RESUME_AGENT", "RESUME", 0, "RUNNING", "正在分析简历",
+                    System.currentTimeMillis()));
 
-        // 审查 F5：取消后不写 FAILED，也不继续发布完成事件
-        if (budget.isCancelled()) {
-            agentTaskService.markCancelled(plan.getId(), budget.cancelReason());
-            return new Result(true, "任务已取消，已完成的结果已保留。", "CANCELLED",
-                    plan.getId(), AgentPlanStatus.CANCELLED.name());
+            ResumeAgentNode.Result result = resumeAgentNode.execute(userId, conversationId, running.getId(), traceId,
+                    resume, resumeVersion(resume), text(explicit.get("keyword")), budget);
+
+            agentTaskService.updateBudgetUsage(running.getId(), budget.modelCallsUsed(), budget.toolCallsUsed());
+            agentTaskService.updateExecutionMillis(running.getId(), budget.usedMillis());
+
+            // 4. 取消优先：取消后不写 FAILED/COMPLETED
+            if (budget.isCancelled()) {
+                agentTaskService.completeExecution(running.getId(),
+                        AgentPlanStatus.CANCELLED, "用户取消", null, null);
+                return new Result(true, "任务已取消，已完成的结果已保留。", "CANCELLED",
+                        running.getId(), AgentPlanStatus.CANCELLED.name());
+            }
+
+            if (result.profile() == null) {
+                agentTaskService.completeExecution(running.getId(), AgentPlanStatus.FAILED,
+                        result.reasonCode(), null, null);
+                progress.publish(new AgentProgressEvent(AgentProgressEvent.TASK_FAILED,
+                        running.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "FAILED",
+                        "简历分析失败", System.currentTimeMillis()));
+                return new Result(true, "简历分析失败（" + result.reasonCode() + "），可稍后重试。",
+                        "FAILED", running.getId(), AgentPlanStatus.FAILED.name());
+            }
+
+            // Node 要求补充信息：父任务进入等待，不写成功
+            if ("NEED_INPUT".equals(result.profile().outcome())) {
+                String question = StringUtils.hasText(result.profile().question())
+                        ? result.profile().question() : "请确认要分析的简历或补充目标方向。";
+                agentTaskService.completeExecution(running.getId(),
+                        AgentPlanStatus.NEED_CLARIFICATION, null, question, null);
+                progress.publish(new AgentProgressEvent(AgentProgressEvent.WAITING_INPUT,
+                        running.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "WAITING_INPUT",
+                        question, System.currentTimeMillis()));
+                return new Result(true, question, "NEED_INPUT", running.getId(),
+                        AgentPlanStatus.NEED_CLARIFICATION.name());
+            }
+
+            // 5. 画像产物 + 答复
+            agentArtifactService.save(userId, running.getId(), result.runId(),
+                    AgentArtifactService.TYPE_RESUME_PROFILE, result.profile().resumeVersion(),
+                    toJson(result.profile()), "resumeId=" + resume.getId());
+
+            String answer = buildAnswer(result.profile(), resume);
+            boolean written = agentTaskService.completeExecution(running.getId(),
+                    AgentPlanStatus.COMPLETED, null, null, answer);
+            if (!written) {
+                AgentPlan latest = agentTaskService.loadOwned(userId, running.getId());
+                String latestStatus = latest == null ? "UNKNOWN" : latest.getStatus();
+                String latestAnswer = latest != null && AgentPlanStatus.COMPLETED.name().equals(latestStatus)
+                        ? answerOf(latest)
+                        : "任务状态已变更（" + latestStatus + "），本次结果未生效，请以任务状态为准。";
+                return new Result(true, latestAnswer, latestStatus, running.getId(), latestStatus);
+            }
+
+            progress.publish(new AgentProgressEvent(AgentProgressEvent.NODE_COMPLETED,
+                    running.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "SUCCEEDED",
+                    "简历分析完成", System.currentTimeMillis()));
+            progress.publish(new AgentProgressEvent(AgentProgressEvent.TASK_COMPLETED,
+                    running.getId(), null, null, null, 0, "SUCCEEDED", "任务完成", System.currentTimeMillis()));
+
+            return new Result(true, answer, "SUCCEEDED", running.getId(), AgentPlanStatus.COMPLETED.name());
+        } catch (Exception exception) {
+            log.warn("简历分析执行异常，planId={}, error={}", running.getId(), exception.getMessage());
+            agentTaskService.completeExecution(running.getId(), AgentPlanStatus.FAILED,
+                    "执行异常：" + exception.getMessage(), null, null);
+            return new Result(true, "简历分析失败：" + exception.getMessage(), "FAILED",
+                    running.getId(), AgentPlanStatus.FAILED.name());
+        } finally {
+            taskBudgetRegistry.release(running.getId());
         }
-        if (result.profile() == null) {
-            publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                    com.job.bootstrap.agent.progress.AgentProgressEvent.TASK_FAILED,
-                    plan.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "FAILED",
-                    "简历分析失败", System.currentTimeMillis()));
-            agentTaskService.updateStatus(plan.getId(), AgentPlanStatus.FAILED, result.reasonCode());
-            return new Result(true, "简历分析失败（" + result.reasonCode() + "），可稍后重试。",
-                    "FAILED", plan.getId(), AgentPlanStatus.FAILED.name());
-        }
-
-        agentArtifactService.save(userId, plan.getId(), result.runId(),
-                AgentArtifactService.TYPE_RESUME_PROFILE, result.profile().resumeVersion(),
-                toJson(result.profile()), "resumeId=" + resume.getId());
-
-        // 审查 F3：ResumeAgent 要求补充信息时不能当成功
-        if ("NEED_INPUT".equals(result.profile().outcome())) {
-            String question = result.profile().question() == null
-                    ? "请确认要分析的简历或补充目标方向。" : result.profile().question();
-            agentTaskService.updateStatus(plan.getId(), AgentPlanStatus.NEED_CLARIFICATION, null, question);
-            publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                    com.job.bootstrap.agent.progress.AgentProgressEvent.WAITING_INPUT,
-                    plan.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "WAITING_INPUT",
-                    question, System.currentTimeMillis()));
-            return new Result(true, question, "NEED_INPUT", plan.getId(), AgentPlanStatus.NEED_CLARIFICATION.name());
-        }
-
-        String answer = buildAnswer(result.profile(), resume);
-        publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                com.job.bootstrap.agent.progress.AgentProgressEvent.NODE_COMPLETED,
-                plan.getId(), result.runId(), "RESUME_AGENT", "RESUME", 0, "SUCCEEDED",
-                "简历分析完成", System.currentTimeMillis()));
-        publisher.publish(new com.job.bootstrap.agent.progress.AgentProgressEvent(
-                com.job.bootstrap.agent.progress.AgentProgressEvent.TASK_COMPLETED,
-                plan.getId(), null, null, null, 0, "SUCCEEDED", "任务完成", System.currentTimeMillis()));
-
-        agentTaskService.updateStatus(plan.getId(), AgentPlanStatus.COMPLETED, null);
-        return new Result(true, answer, "SUCCEEDED", plan.getId(), AgentPlanStatus.COMPLETED.name());
     }
 
     // 简历事实 + 证据 + 缺口 + 建议（事实与建议分开，不把“未见证据”说成“不会”）
@@ -220,6 +287,16 @@ public class ResumeReactEntry {
             return defaults.get(0);
         }
         return resumes.size() == 1 ? resumes.get(0) : null;
+    }
+
+    private String answerOf(AgentPlan plan) {
+        return StringUtils.hasText(plan.getFinalAnswer())
+                ? plan.getFinalAnswer()
+                : "该任务已完成，结果见上方消息。";
+    }
+
+    private String safe(String text) {
+        return StringUtils.hasText(text) ? text : "未知原因";
     }
 
     private String resumeVersion(JobResume resume) {

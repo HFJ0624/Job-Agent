@@ -252,6 +252,24 @@ public class JobSeekWorkflow {
         // ---------- MatchAgent（有界候选） ----------
         List<JobCandidates.JobCandidateItem> matchCandidates = candidates.stream()
                 .limit(MATCH_CANDIDATE_LIMIT).toList();
+
+        /*
+         * P0 修复：报告版本 = 条件版本 + 画像/候选产物 ID。
+         * 同版本已存在报告时直接复用，避免"匹配失败重试"把匹配节点再跑一遍；
+         * 简历或条件变化 → 版本变化 → 不复用旧报告。
+         */
+        String reportVersion = reportVersion(constraintVersion, profileArtifactId, candidatesArtifactId);
+        MatchReport reusableReport = loadReportArtifact(input, reportVersion);
+        if (reusableReport != null) {
+            publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "MATCH_AGENT", "MATCH",
+                    "SUCCEEDED", "复用已完成的匹配报告");
+            publish(progress, AgentProgressEvent.TASK_COMPLETED, input.planId(), null, null, null,
+                    "SUCCEEDED", "任务完成");
+            return new JobSeekOutcome("SUCCEEDED", buildAnswer(matchCandidates, reusableReport), "COMPLETED",
+                    profileArtifactId, candidatesArtifactId, null, resume.getId(),
+                    List.of(), null, constraints);
+        }
+
         publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "MATCH_AGENT", "MATCH",
                 "RUNNING", "正在比较岗位与简历");
         MatchAgentNode.Result matchResult = matchAgentNode.execute(
@@ -267,7 +285,7 @@ public class JobSeekWorkflow {
                     List.of(), null, constraints);
         }
         Long reportArtifactId = saveArtifact(input, AgentArtifactService.TYPE_MATCH_REPORT,
-                constraintVersion, matchResult.report(), "profile=" + profileArtifactId
+                reportVersion, matchResult.report(), "profile=" + profileArtifactId
                         + ",candidates=" + candidatesArtifactId);
 
         // ---------- VALIDATE_REPORT + RESPOND（可信字段重建） ----------
@@ -540,6 +558,21 @@ public class JobSeekWorkflow {
             return items.isEmpty() ? null : items;
         } catch (Exception exception) {
             log.warn("候选产物解析失败，按未命中处理，error={}", exception.getMessage());
+            return null;
+        }
+    }
+
+    // 复用同版本的匹配报告（报告版本已包含画像/候选产物，版本一致内容才可靠）
+    private MatchReport loadReportArtifact(JobSeekInput input, String reportVersion) {
+        try {
+            AgentArtifact artifact = agentArtifactService.findLatest(
+                    input.userId(), input.planId(), AgentArtifactService.TYPE_MATCH_REPORT, reportVersion);
+            if (artifact == null || !StringUtils.hasText(artifact.getContentJson())) {
+                return null;
+            }
+            return objectMapper.readValue(artifact.getContentJson(), MatchReport.class);
+        } catch (Exception exception) {
+            log.warn("匹配报告解析失败，按未命中处理，error={}", exception.getMessage());
             return null;
         }
     }

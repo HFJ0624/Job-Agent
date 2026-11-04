@@ -119,13 +119,15 @@ public class AgentTaskService {
         if (planId == null || expectedStatus == null) {
             return false;
         }
-        AgentPlan patch = new AgentPlan();
-        patch.setStatus(AgentPlanStatus.PLANNED.name()); // 借字段触发更新；实际状态在 wrapper 中设置
+        /*
+         * 领取即进入 RUNNING：后续 completeExecution 以 RUNNING 为条件写回，
+         * 语义一致（"执行中"才允许落终态），也避免 PLANNED 同时表示"未开始/已领取"。
+         */
         int rows = agentPlanMapper.update(null,
                 new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentPlan>()
                         .eq("id", planId)
                         .eq("status", expectedStatus)
-                        .set("status", AgentPlanStatus.PLANNED.name())
+                        .set("status", AgentPlanStatus.RUNNING.name())
                         .set("update_time", new Date()));
         return rows > 0;
     }
@@ -144,7 +146,7 @@ public class AgentTaskService {
         int rows = agentPlanMapper.update(null,
                 new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentPlan>()
                         .eq("id", planId)
-                        .eq("status", AgentPlanStatus.PLANNED.name())
+                        .eq("status", AgentPlanStatus.RUNNING.name())
                         .set("status", status.name())
                         .set("fail_reason", failReason)
                         .set("pending_question", pendingQuestion)
@@ -199,7 +201,7 @@ public class AgentTaskService {
      * 保存条件快照（补参/条件变化时更新，版本随之变化）。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void updateConstraints(Long planId, String constraintsJson, Map<String, Object> extractedParams) {
+    public void updateConstraints(Long planId, String constraintsJson) {
         if (planId == null) {
             return;
         }
