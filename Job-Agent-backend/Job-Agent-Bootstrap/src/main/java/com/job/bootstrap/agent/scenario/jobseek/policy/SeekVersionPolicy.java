@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.orchestration.seek;
+package com.job.bootstrap.agent.scenario.jobseek.policy;
 
 import com.job.bootstrap.agent.domain.job.SearchConstraints;
 import com.job.common.entity.resume.JobResume;

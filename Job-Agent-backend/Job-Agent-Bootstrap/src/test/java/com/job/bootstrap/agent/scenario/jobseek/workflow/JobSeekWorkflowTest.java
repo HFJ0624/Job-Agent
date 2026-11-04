@@ -1,5 +1,7 @@
-package com.job.bootstrap.agent.orchestration.seek;
+package com.job.bootstrap.agent.scenario.jobseek.workflow;
 
+import com.job.bootstrap.agent.scenario.jobseek.service.SeekArtifactService;
+import com.job.bootstrap.agent.scenario.jobseek.service.SeekContextResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
 import com.job.bootstrap.agent.runtime.executor.AgentToolExecutionResult;

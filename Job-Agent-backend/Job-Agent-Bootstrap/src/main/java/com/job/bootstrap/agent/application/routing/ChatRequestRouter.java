@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.application.routing;
 
 import com.job.bootstrap.agent.domain.job.JobSearchReactEntry;
 import com.job.bootstrap.agent.domain.resume.ResumeReactEntry;
-import com.job.bootstrap.agent.orchestration.seek.JobSeekReactEntry;
+import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

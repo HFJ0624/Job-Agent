@@ -69,7 +69,7 @@ agent/
 | 目录 | 状态 |
 |---|---|
 | `agent/application/routing/` | ✅ 已落地 `ChatRequestRouter` |
-| `agent/orchestration/seek/`（8 类） | ⏳ 待迁入 `agent/scenario/jobseek/{entry,workflow,policy,assembler,service,config}` |
+| `agent/scenario/jobseek/`（8 类） | ✅ 已迁移：entry（JobSeekReactEntry）、workflow（JobSeekWorkflow）、policy（SeekVersionPolicy）、assembler（SeekAnswerAssembler）、service（SeekArtifactService/SeekContextResolver）、model（JobCandidateArtifactCodec）、config（JobSeekExecutorConfig） |
 | `agent/domain/{resume,job,match,tools}` | ⏳ 待迁入 `scenario/*` 与 `tool/impl` |
 | `agent/runtime/{react,budget,progress,run,artifact,executor,schema}` | ⏳ 待迁入 `core/*` 与 `infrastructure/*` |
 | `agent/orchestration/task/` | ⏳ 待迁入 `agent/application/task/` |

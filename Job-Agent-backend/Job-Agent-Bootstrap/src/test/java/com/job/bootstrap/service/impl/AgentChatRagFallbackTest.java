@@ -11,7 +11,7 @@ import com.job.bootstrap.agent.support.intent.AgentIntentRouter;
 import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.domain.job.JobSearchReactEntry;
 import com.job.bootstrap.agent.domain.job.ReactChatPreparationService;
-import com.job.bootstrap.agent.orchestration.seek.JobSeekReactEntry;
+import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.bootstrap.support.SimpleTransactionManager;
 import com.job.bootstrap.agent.domain.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.support.rewrite.AgentQueryRewriter;

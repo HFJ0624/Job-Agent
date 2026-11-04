@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.orchestration.seek;
+package com.job.bootstrap.agent.scenario.jobseek.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.domain.job.JobCandidates;

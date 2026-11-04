@@ -1,6 +1,7 @@
-package com.job.bootstrap.agent.orchestration.seek;
+package com.job.bootstrap.agent.scenario.jobseek.entry;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.job.bootstrap.agent.scenario.jobseek.workflow.JobSeekWorkflow;
 import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.runtime.progress.TaskProgressPublisher;
 import com.job.bootstrap.agent.domain.job.ReactSearchProperties;

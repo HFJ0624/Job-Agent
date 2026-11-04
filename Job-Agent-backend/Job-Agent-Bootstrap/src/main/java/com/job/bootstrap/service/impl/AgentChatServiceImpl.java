@@ -10,7 +10,7 @@ import com.job.bootstrap.agent.support.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.domain.job.JobSearchReactEntry;
 import com.job.bootstrap.agent.domain.job.ReactChatPreparationService;
 import com.job.bootstrap.agent.domain.resume.ResumeReactEntry;
-import com.job.bootstrap.agent.orchestration.seek.JobSeekReactEntry;
+import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.bootstrap.agent.runtime.progress.TaskProgressPublisher;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
