@@ -71,6 +71,7 @@ public class JobSeekWorkflow {
     private final UserJobPreferenceService userJobPreferenceService;
     private final AgentArtifactService agentArtifactService;
     private final SeekArtifactService seekArtifactService;
+    private final SeekContextResolver seekContextResolver;
     private final AgentPlanParameterExtractor parameterExtractor;
     private final ObjectMapper objectMapper;
 
@@ -127,21 +128,23 @@ public class JobSeekWorkflow {
          * 这样 NEED_INPUT / 取消等提前返回也能带上已确定的条件，
          * 不会让 Entry 把父任务里原来的城市/方向覆盖成空。
          */
-        SearchConstraints constraints = mergeConstraints(input, parameterExtractor.extract(input.message()));
+        SearchConstraints constraints = seekContextResolver.mergeConstraints(
+                input.userId(), input.message(), input.constraintsJson());
 
-        ResumeResolution resumeResolution = resolveResume(input);
-        if (resumeResolution.question != null) {
+        SeekContextResolver.ResumeContext resumeResolution = seekContextResolver.resolveResume(
+                input.userId(), input.message(), input.constraintsJson(), input.previousResumeId());
+        if (resumeResolution.question() != null) {
             publish(progress, AgentProgressEvent.WAITING_INPUT, input.planId(), null, "PREPARE_CONTEXT", null,
-                    "WAITING_INPUT", resumeResolution.question);
+                    "WAITING_INPUT", resumeResolution.question());
             // 尚未选定简历：resumeId 允许为空，但条件必须带回；Entry 会与已有上下文合并
-            Long previousResumeId = input.previousResumeId() != null
-                    ? input.previousResumeId() : contextResumeId(input.constraintsJson());
-            return new JobSeekOutcome("NEED_INPUT", resumeResolution.question, "NEED_CLARIFICATION",
+            // 未选定简历时只带回显式传入的 resumeId；历史选择由 Entry 的 mergeContext 保留
+            Long previousResumeId = input.previousResumeId();
+            return new JobSeekOutcome("NEED_INPUT", resumeResolution.question(), "NEED_CLARIFICATION",
                     null, null, null, previousResumeId,
-                    resumeResolution.missingFields, resumeResolution.question, constraints);
+                    resumeResolution.missingFields(), resumeResolution.question(), constraints);
         }
-        JobResume resume = resumeResolution.resume;
-        ensureParsed(resume);
+        JobResume resume = resumeResolution.resume();
+        seekContextResolver.ensureParsed(resume);
         String resumeVersion = SeekVersionPolicy.resumeVersion(resume);
         String constraintVersion = SeekVersionPolicy.constraintVersion(constraints, resume.getId());
 
@@ -149,7 +152,7 @@ public class JobSeekWorkflow {
         String targetRoleHint = StringUtils.hasText(constraints.targetRole()) ? constraints.targetRole() : constraints.keyword();
 
         // ---------- 画像 ∥ 搜索（条件独立才并行） ----------
-        boolean parallel = resumeResolution.explicitKeyword && resumeResolution.explicitCity;
+        boolean parallel = resumeResolution.explicitKeyword() && resumeResolution.explicitCity();
         ResumeProfile profile = null;
         List<JobCandidates.JobCandidateItem> candidates = List.of();
         Long profileArtifactId = null;
@@ -454,97 +457,12 @@ public class JobSeekWorkflow {
 
     // ---------- 简历解析 ----------
 
-    private record ResumeResolution(JobResume resume, String question, List<String> missingFields,
-                                    Map<String, Object> explicitParams, String targetRoleHint,
-                                    boolean explicitKeyword, boolean explicitCity) {
-    }
 
-    private ResumeResolution resolveResume(JobSeekInput input) {
-        Map<String, Object> explicit = parameterExtractor.extract(input.message());
-        String targetRoleHint = text(explicit.get("keyword"));
-
-        // 简历定位统一走 ResumeSelectionService（P1：复合/独立分析共用一套规则）
-        Long previousResumeId = input.previousResumeId() != null
-                ? input.previousResumeId() : contextResumeId(input.constraintsJson());
-        com.job.bootstrap.agent.domain.resume.ResumeSelectionService.Selection selection =
-                resumeSelectionService.select(input.userId(), explicit, previousResumeId, "做匹配分析");
-        if (selection.needsInput()) {
-            return new ResumeResolution(null, selection.question(), selection.missingFields(),
-                    explicit, targetRoleHint, false, false);
-        }
-        return new ResumeResolution(selection.resume(), null, List.of(), explicit, targetRoleHint,
-                StringUtils.hasText(targetRoleHint), StringUtils.hasText(text(explicit.get("city"))));
-    }
 
     // 准备阶段允许写：未解析的简历在这里触发解析（不把带写入的动作伪装成只读）
-    private void ensureParsed(JobResume resume) {
-        if (!StringUtils.hasText(resume.getRawText())) {
-            JobResume parsed = jobResumeService.parseResumeText(resume.getUserId(), resume.getId());
-            if (parsed != null && StringUtils.hasText(parsed.getRawText())) {
-                resume.setRawText(parsed.getRawText());
-            } else {
-                throw new BizException("简历没有解析文本，无法生成画像");
-            }
-        }
-    }
 
-    private SearchConstraints mergeConstraints(JobSeekInput input, Map<String, Object> explicit) {
-        SearchConstraints previous = null;
-        Map<String, Object> wrapper = readJsonMap(input.constraintsJson());
-        if (wrapper != null && wrapper.get("constraints") instanceof Map<?, ?> nested) {
-            // 任务上下文包装格式（审查 F3）：{constraints:{...}, resumeId:n}
-            previous = SearchConstraints.merge(castMap(nested), null);
-            wrapper = null;
-        }
-        if (previous == null && StringUtils.hasText(input.constraintsJson())) {
-            /*
-             * 审查 F3：历史快照可能是初始参数 Map，也可能已是 SearchConstraints JSON，
-             * 两种格式都要能读回，否则补参时条件全部丢失。
-             */
-            try {
-                SearchConstraints parsed = objectMapper.readValue(input.constraintsJson(), SearchConstraints.class);
-                if (parsed.city() != null || parsed.keyword() != null || parsed.targetRole() != null
-                        || parsed.minSalary() != null) {
-                    previous = parsed;
-                }
-            } catch (Exception ignored) {
-                try {
-                    Map<String, Object> raw = objectMapper.readValue(input.constraintsJson(),
-                            objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
-                    previous = SearchConstraints.merge(raw, null);
-                } catch (Exception second) {
-                    previous = null;
-                }
-            }
-        }
-        UserJobPreferenceVO preference = null;
-        try {
-            preference = userJobPreferenceService.getPreference(input.userId());
-        } catch (Exception exception) {
-            log.debug("偏好加载失败，按无偏好处理，error={}", exception.getMessage());
-        }
-        return SearchConstraints.merge(explicit, previous, preference);
-    }
 
-    private Map<String, Object> readJsonMap(String json) {
-        if (!StringUtils.hasText(json)) {
-            return null;
-        }
-        try {
-            return objectMapper.readValue(json,
-                    objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
-        } catch (Exception exception) {
-            return null;
-        }
-    }
 
-    private Long contextResumeId(String json) {
-        Map<String, Object> map = readJsonMap(json);
-        if (map == null || !(map.get("resumeId") instanceof Number number)) {
-            return null;
-        }
-        return number.longValue();
-    }
 
     // ---------- 产物 ----------
 
@@ -603,11 +521,6 @@ public class JobSeekWorkflow {
 
     // 报告版本 = 条件版本 + 画像/候选产物 ID（上下游变化则旧报告失效）
 
-    private Map<String, Object> castMap(Map<?, ?> source) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        source.forEach((key, value) -> result.put(String.valueOf(key), value));
-        return result;
-    }
 
 
 
