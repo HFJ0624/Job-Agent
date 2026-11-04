@@ -29,7 +29,11 @@ Job-Agent 是一个面向求职场景的 AI Agent 系统。项目围绕求职者
 - HR 沟通记录管理，支持 HR 回复识别、回复建议和跟进动作确认。
 - Agent Inbox，汇总来自跟进、面试、日报、提醒等模块的待处理事项。
 - Agent 行动确认中心，用于承接 AI 生成的可执行建议，避免模型直接越权执行。
-- AI 求职助手，支持多轮对话、工具调用、RAG 检索、长期记忆召回、SSE 流式输出、MCP 协议连接器和语义缓存（重复提问瞬间返回），以及“简历分析 → 岗位筛选 → Top1 匹配 → 投递话术”的求职主流程（步骤间结构化传参、参数澄清续跑）；简历导出为真实文件（确认后生成 Markdown 并上传对象存储，可回查）。
+- AI 求职助手，支持多轮对话、工具调用、RAG 检索、长期记忆召回、SSE 流式输出、MCP 协议连接器和语义缓存（重复提问瞬间返回）。
+- **三种 Agent 入口**：复合请求（简历 + 找岗位 + 比较/差距）走三 Agent 协作；只找岗位走搜索 Agent；只分析简历走简历 Agent，简单问题不会被塞进三 Agent 流程。
+- **复合任务**：ResumeAgent（画像）∥ JobSearchAgent（岗位）→ MatchAgent（匹配），节点间用结构化产物传递（画像/候选/报告），最终答复由服务端可信字段重建，岗位公司/城市/薪资与匹配点、缺口、建议都来自真实产物。
+- **前端任务卡片**：展示三个节点进度（SSE 实时事件）、等待补充的问题、失败原因；支持继续（补参续跑原任务）、重试、显式取消、新任务，刷新后按 planId 恢复状态。
+- 简历导出为真实文件（确认后生成 Markdown 并上传对象存储，可回查）。
 
 ### 2. AI 模拟面试
 
@@ -48,18 +52,46 @@ AI 模拟面试是项目中相对完整的一条 AI 业务链路：
 
 ### 3. Agent 核心架构
 
-项目中的 Agent 不是自由散漫地让模型调用工具，而是拆成了几层可管理的工程能力：
+Agent 采用「Workflow 控关键节点 + ReAct 做局部决策」的分工：身份、条件、依赖、状态和结果验真由代码控制，模型只在白名单工具与预算内选择下一步。代码分四层（依赖方向 `orchestration → domain → runtime`，`support` 为横切能力）。
 
-- Agent Planner：规则 + LLM 兜底的意图识别与参数抽取，把用户目标拆成计划、步骤、工具选择和完成条件；复杂目标下 LLM 还可在工具 Schema 白名单内补充步骤（模板主干 + LLM 补步）。
-- Agent Executor：按照计划执行工具调用，记录步骤状态、输入输出和执行结果；只读步骤按依赖并行执行（写副作用步骤串行保序），支持步骤级幂等与失败恢复。
-- Tool Schema：统一工具名称、入参、出参、错误码、权限、副作用和是否需要用户确认。
-- Guardrails：处理 Prompt 注入、工具越权、敏感操作拦截、PII 脱敏、JSON 输出校验等问题。
-- Long-term Memory：沉淀用户偏好、简历摘要、面试反馈和历史决策，对话时按需召回；带 TTL 过期归档与来源置信度冲突裁决（低置信度提取不会覆盖用户明述事实）。
-- 记忆版本历史：记录记忆变更轨迹；同键冲突时保留旧值并标记待确认，支持后台审计与回滚。
-- Model Gateway：统一管理模型配置、API Key、模型路由、灰度分流、超时、指数退避重试（仅 429/5xx/超时）、HALF_OPEN 熔断、双维限流（场景 + 用户）和成本统计（数据库 SQL 聚合）。
-- Prompt 管理：支持 Prompt 模板、版本、场景编码、灰度和可视化维护。
-- Agent Trace：记录主链路、工具链路、模型调用、耗时、token、费用和失败原因。
-- Agent Eval：通过评测用例验证工具选择（严格匹配，杜绝子串误过）、参数准确率、RAG 命中率、JSON 输出和回答质量；批量回归异步执行、前端轮询批次状态、支持基线比对。
+#### 3.1 执行内核（runtime）
+
+- **ReActRunner**：模型—工具反馈循环共用一份；负责消息配对（每个 toolCall 必须有 tool 结果）、重复查询熔断、轮次/工具/超时预算、检查点、取消检查；终结提议必须单独一轮提交。
+- **TerminalContract&lt;T&gt;**：每个 Agent 提供自己的终结工具（`finish_job_search` / `finish_resume_profile` / `finish_match_report`）与第一层校验；业务结论（FOUND/EMPTY/NEED_INPUT/COMPLETED）与运行时原因码（预算/协议/模型错误）严格分开。
+- **AgentRunExecutionHooks**：绝对截止时间 + 父任务预算 + 消息检查点，通过线程上下文传给子节点（并行线程显式传递，`finally` 清理）。
+- **AgentRunService**：子 run 状态机（PENDING / RUNNING / WAITING_INPUT / SUCCEEDED / FAILED）、原子领取（attempt 条件更新）、持有权写回、检查点持久化（含工具结果完整保存，不截断）。
+- **AgentArtifactService**：结构化产物（ResumeProfile / JobCandidates / MatchReport）落库，按 `inputVersion` 复用，版本不一致即失效。
+- **AgentToolInvoker**：统一工具执行边界——服务端可信身份注入（AgentRuntimeContext）、Guard 校验、Trace 落库；模型无法伪造 userId。
+
+#### 3.2 业务 Agent（domain）
+
+| Agent | 工具 | 输出与硬约束 |
+| --- | --- | --- |
+| ResumeAgent | `read_resume` / `read_resume_section` | ResumeProfile（技能、经历、目标方向 + `evidence` 原文引用）；每条 quote 必须能在简历原文中找到，否则整单失败 |
+| JobSearchAgent | `job_search` / `job_recommend` | JobCandidates（按 jobId 去重、来源与检索时间齐全、分页未知置空）；城市/薪资/学历硬条件不可改，候选必须来自真实工具结果 |
+| MatchAgent | `read_job_detail` / `preview_job_match` / `read_resume_evidence` | MatchReport（排名、匹配点、缺口、证据引用）；jobId ⊆ 当前候选、rank 连续、≤Top-K、硬条件不合格不得入选；规则分以服务端预览为准 |
+
+#### 3.3 编排（orchestration）
+
+`JobSeekWorkflow` 固定骨架：`PREPARE_CONTEXT → 画像 ∥ 搜索（条件独立才并行，有界线程池）→ JOIN_RESULTS → MatchAgent → VALIDATE_REPORT → RESPOND`。
+
+- 搜索为空直接返回真实结果，不调用 MatchAgent 编造匹配报告；
+- 父计划（AgentPlan）创建时固定 `runtimeMode`，子 run 按 `planId + nodeKey + inputVersion` 定位，不再用"最近一个 run"猜测；
+- 产物版本：画像=简历版本+显式方向，候选=条件版本，报告=条件版本+画像/候选产物 ID；同版本直接复用，重试不重跑已完成节点。
+
+#### 3.4 任务闭环
+
+- **状态机**：COMPLETED 复用已存答复 / RUNNING 拒绝重复 / FAILED 仅显式重试 / NEED_CLARIFICATION 补参续跑 / CANCELLED 终态；领取与写回都是条件更新，取消不会被迟到结果覆盖。
+- **共享预算**：父任务 300s、模型请求 24 次、业务工具 30 次、模型并发 2；模型额度唯一扣费点在网关（含重试/备用模型），子节点只继承不重置；补参恢复延续已用额度与执行耗时，等待用户的时间不计入。
+- **进度事件（SSE）**：`task_started` / `node_started` / `node_completed` / `waiting_input` / `task_failed` / `task_completed`，带 `planId/runId/nodeKey/seq`，与 `token/done/error` 协议共存。
+- **状态恢复与取消**：`GET /front/agent/task/{planId}` 返回归属校验后的状态快照（父状态、待补充问题、子节点、产物、预算用量）；`POST /front/agent/task/{planId}/cancel` 显式取消。前端按会话保存 planId，刷新后恢复任务卡片。
+
+#### 3.5 其他工程能力
+
+- Tool Schema 与权限、Guardrails（注入/越权/PII/JSON 校验）、Long-term Memory（TTL 过期、冲突裁决、写放大治理）。
+- Model Gateway：模型路由、灰度、超时、指数退避、HALF_OPEN 熔断、场景+用户双维限流、成本统计。
+- Prompt 版本管理、Agent Trace（主链路/工具/模型/耗时/费用）、Agent Eval（异步批量回归、严格匹配、质量门禁）。
+- 计划模板与补步（Planner）、计划执行器（Executor）、工作流任务队列，继续服务旧的模板链路。
 
 ### 4. RAG 知识库
 
@@ -157,6 +189,10 @@ Eval 平台用于持续验证 Agent 链路质量：
 
 ### AI 与工程能力
 
+- 自研 ReAct 运行时（反馈循环 / 终结契约 / 检查点）
+- 多 Agent Workflow（画像 / 搜索 / 匹配 + 有界并行）
+- 任务共享预算与显式取消
+- SSE 节点进度与任务状态恢复
 - 模型网关统一管理
 - Prompt 版本管理
 - RAG 检索增强
@@ -299,7 +335,11 @@ job:
     bucketName: job-agent
 ```
 
-模型和 Prompt 主要通过数据库中的模型配置、模型路由和 Prompt 模板管理。对于火山引擎、阿里云千问等 OpenAI 兼容模型，可以在 Admin 端或数据库中维护 `base_url`、`api_key`、`model_identifier` 等信息。
+`application-local.yml` 后加载，会覆盖 `application-dev.yml` 里的 `${DB_PASSWORD:}`、`${MINIO_ACCESS_KEY:}` 等环境变量占位——本地开发直接在该文件写口令即可，不必每次配 IDE 环境变量。
+
+数据库结构使用仓库根目录 `sql/` 下的手工增量脚本维护（`07`~`10` 为 Agent 相关：`agent_run`、`agent_artifact`、任务交互字段、`final_answer`/耗时）。项目未启用 Flyway，脚本按顺序执行一次即可。
+
+模型和 Prompt 主要通过数据库中的模型配置、模型路由和 Prompt 模板管理。对于火山引擎、阿里云千问等 OpenAI 兼容模型，可以在 Admin 端或数据库中维护 `base_url`、`api_key`、`model_identifier` 等信息。使用 Agent 新链路时需要为 `AGENT_REACT` 场景配置启用中的模型路由。
 
 ### 启动后端
 
@@ -408,6 +448,9 @@ npm run build
 - 用户端求职主流程。
 - Admin 端业务数据和 Agent 管理入口。
 - AI 模拟面试、语音识别、复盘、错题本、学习计划。
+- 三 Agent 协作（画像/搜索/匹配）、Workflow 编排、结构化产物与版本复用。
+- 任务进度（SSE 节点事件）、补参续跑、失败重试、显式取消、刷新恢复。
+- 父任务共享预算（时限/模型/工具/并发）与网关唯一扣费点。
 - Agent Planner、Executor、Tool Schema、Guardrails、Memory、RAG、Eval。
 - 模型和 Prompt 管理。
 - Trace、成本、耗时、失败分类等可观测能力。
@@ -416,7 +459,7 @@ npm run build
 
 后续更值得投入的方向：
 
-- 完成 Flyway 基线导出（V1__baseline.sql），让全新环境可从零建库；后续所有表结构变更走迁移脚本。
+- 把手工增量 SQL 收敛为可重复执行的脚本（当前 `sql/07`~`10` 为一次性 DDL，重复执行会报列已存在）。
 - 增加核心链路自动化测试和前端端到端测试。
 - 补充稳定的演示数据和演示脚本。
 - 收敛 UI 视觉规范，提高用户端和 Admin 端一致性。
