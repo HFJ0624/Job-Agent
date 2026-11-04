@@ -105,7 +105,9 @@ class AgentChatCacheTest {
                 agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
                 agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,
                 answerCacheService, mock(JobSearchReactEntry.class), mock(ReactChatPreparationService.class),
-                mock(JobSeekReactEntry.class), mock(ResumeReactEntry.class), objectMapper, new SimpleTransactionManager());
+                mock(JobSeekReactEntry.class), mock(ResumeReactEntry.class),
+                mock(com.job.bootstrap.agent.application.ChatRequestRouter.class),
+                objectMapper, new SimpleTransactionManager());
     }
 
     @BeforeEach

@@ -92,7 +92,7 @@ class AgentChatQueryRewriteTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService,
             agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
             agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,
-            answerCacheService, jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, objectMapper, new SimpleTransactionManager());
+            answerCacheService, jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, mock(com.job.bootstrap.agent.application.ChatRequestRouter.class), objectMapper, new SimpleTransactionManager());
 
     @BeforeEach
     void setUp() {

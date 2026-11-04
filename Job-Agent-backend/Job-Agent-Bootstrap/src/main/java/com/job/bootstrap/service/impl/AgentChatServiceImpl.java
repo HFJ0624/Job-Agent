@@ -3,6 +3,7 @@ package com.job.bootstrap.service.impl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
+import com.job.bootstrap.agent.application.ChatRequestRouter;
 import com.job.bootstrap.agent.support.context.AgentContextBuilder;
 import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.support.rewrite.AgentQueryRewriter;
@@ -212,6 +213,9 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     private final ResumeReactEntry resumeReactEntry;
 
+    /** 对话路由：复合/简历/搜索/旧链路的优先级集中在这里（同步与流式共用）。 */
+    private final ChatRequestRouter chatRequestRouter;
+
     /**
      * 统一 JSON 工具。
      */
@@ -286,17 +290,15 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 3. 规则意图判断零成本（本地正则），不会触发 LLM 兜底。
          */
         AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
-
-        // 复合任务优先（简历 + 岗位/匹配）：三 Agent 协作
-        if (jobSeekReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+        ChatRequestRouter.Route route = chatRequestRouter.route(ruleIntent.intentCode().name(), planId, message);
+        if (route == ChatRequestRouter.Route.MULTI_AGENT) {
             return chatViaJobSeek(userId, conversationId, planId, message, retry, TaskProgressPublisher.NOOP);
         }
-        // 独立简历分析：ResumeAgent
-        if (resumeReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
-            return chatViaResume(userId, conversationId, planId, message, TaskProgressPublisher.NOOP, Boolean.TRUE.equals(retry));
+        if (route == ChatRequestRouter.Route.RESUME) {
+            return chatViaResume(userId, conversationId, planId, message, TaskProgressPublisher.NOOP,
+                    Boolean.TRUE.equals(retry));
         }
-        // 独立岗位搜索：单 Agent ReAct
-        if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
+        if (route == ChatRequestRouter.Route.REACT_SEARCH) {
             return chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry);
         }
         return chatTransactional(userId, conversationId, planId, message, confirmedToolNames, retry);
@@ -450,14 +452,15 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 新链路当前把最终答复作为单个 token 推送（token/done/error 协议不变，前端无需改造）。
          */
         AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
-        if (jobSeekReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+        ChatRequestRouter.Route route = chatRequestRouter.route(ruleIntent.intentCode().name(), planId, message);
+        if (route == ChatRequestRouter.Route.MULTI_AGENT) {
             return emitAsStream(chatViaJobSeek(userId, conversationId, planId, message, retry, progressPublisher), streamSink);
         }
-        if (resumeReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId, message)) {
+        if (route == ChatRequestRouter.Route.RESUME) {
             return emitAsStream(chatViaResume(userId, conversationId, planId, message, progressPublisher,
                     Boolean.TRUE.equals(retry)), streamSink);
         }
-        if (jobSearchReactEntry.shouldHandle(ruleIntent.intentCode().name(), planId)) {
+        if (route == ChatRequestRouter.Route.REACT_SEARCH) {
             return emitAsStream(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);
         }
         return streamTransactional(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
