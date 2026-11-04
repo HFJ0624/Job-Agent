@@ -3,7 +3,7 @@ package com.job.bootstrap.service.impl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.bootstrap.agent.application.ChatRequestRouter;
+import com.job.bootstrap.agent.application.routing.ChatRequestRouter;
 import com.job.bootstrap.agent.support.context.AgentContextBuilder;
 import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.support.rewrite.AgentQueryRewriter;

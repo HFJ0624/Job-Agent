@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.application;
+package com.job.bootstrap.agent.application.routing;
 
 import com.job.bootstrap.agent.domain.job.JobSearchReactEntry;
 import com.job.bootstrap.agent.domain.resume.ResumeReactEntry;

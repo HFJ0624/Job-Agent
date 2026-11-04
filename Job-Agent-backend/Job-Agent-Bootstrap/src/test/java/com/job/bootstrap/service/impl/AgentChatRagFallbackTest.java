@@ -86,7 +86,7 @@ class AgentChatRagFallbackTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
             agentGuardrailService, agentContextBuilder, queryRewriter, answerCacheService,
-            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, mock(com.job.bootstrap.agent.application.ChatRequestRouter.class), objectMapper, new SimpleTransactionManager());
+            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, mock(com.job.bootstrap.agent.application.routing.ChatRequestRouter.class), objectMapper, new SimpleTransactionManager());
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {

@@ -11,6 +11,8 @@
 | Job-Agent-Infra-Ai | 模型/嵌入等 AI 基础设施接口与配置 | 不依赖 Bootstrap |
 | Job-Agent-Mcp-Tools | MCP 协议、外部连接器 | 不依赖 Bootstrap |
 
+**目录规范见 [DIRECTORY_CONVENTIONS.md](DIRECTORY_CONVENTIONS.md)（含分批迁移状态）。**
+
 ## 2. Agent 调用链（Controller → 场景 → 内核）
 
 ```
