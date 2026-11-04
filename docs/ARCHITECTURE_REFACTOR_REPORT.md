@@ -89,8 +89,12 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
   （NODE_LABELS / PLAN_STATUS_MAP / TASK_STATUS_LABELS / NODE_STATUS_LABELS），页面 1227 → 1201 行；
 - ✅ 本地续跑标识抽为 `src/composables/agent/taskStorage.ts`
   （`jobAgentTask:<conversationId>` 的读写，页面 1201 → 1182 行）；
-- ⏳ `useAgentChat`、`useAgentTask`、`AgentTaskCard` 尚未提取：任务状态块与
-  `sendMessage`/`stopTaskPolling` 互相依赖，需先定义回调契约再迁移，避免形成环。
+- ✅ `useAgentTask` 已抽出（`src/composables/agent/useAgentTask.ts`）：
+  卡片状态、事件归一化、快照校正、恢复、有界轮询、取消、重试、新任务；
+  通过 `{ getConversationId, canRetry, onRetry }` 回调与聊天解耦，`taskCard` 单一来源；
+- ✅ 共享类型 `src/composables/agent/taskTypes.ts`（页面与 composable 不再各写一份）；
+- ✅ `AgentPage.vue` 1227 → **约 900 行**；
+- ⏳ 仍待提取：`useAgentChat`（消息/SSE/发送）与 `AgentTaskCard` 展示组件。
 
 ### 任务五：验证结果（实际执行）
 | 项 | 结果 |
