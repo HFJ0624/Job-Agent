@@ -59,6 +59,7 @@ class JobSeekContextArtifactTest {
         executor.initialize();
         workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow, resumeService,
                 new ResumeSelectionService(resumeService), preferenceService, artifactService,
+                new SeekArtifactService(artifactService, mapper),
                 new AgentPlanParameterExtractor(), mapper, executor);
     }
 

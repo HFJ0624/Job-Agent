@@ -97,7 +97,8 @@ class JobSeekWorkflowTest {
 
         workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow, resumeService,
                 new com.job.bootstrap.agent.domain.resume.ResumeSelectionService(resumeService),
-                preferenceService, artifactService, new AgentPlanParameterExtractor(), mapper, executor);
+                preferenceService, artifactService,
+                new SeekArtifactService(artifactService, mapper), new AgentPlanParameterExtractor(), mapper, executor);
 
         // run 生命周期
         AgentRun run = new AgentRun();

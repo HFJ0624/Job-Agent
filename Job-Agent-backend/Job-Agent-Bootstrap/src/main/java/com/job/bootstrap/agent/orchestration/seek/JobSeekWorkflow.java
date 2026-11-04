@@ -70,6 +70,7 @@ public class JobSeekWorkflow {
     private final com.job.bootstrap.agent.domain.resume.ResumeSelectionService resumeSelectionService;
     private final UserJobPreferenceService userJobPreferenceService;
     private final AgentArtifactService agentArtifactService;
+    private final SeekArtifactService seekArtifactService;
     private final AgentPlanParameterExtractor parameterExtractor;
     private final ObjectMapper objectMapper;
 
@@ -158,9 +159,9 @@ public class JobSeekWorkflow {
              * 审查修复（问题三）：每个节点只要产出有效结果就**立即保存自己的产物**，
              * 不依赖兄弟节点是否成功；同版本保存是幂等的，JOIN 阶段不再重复插入。
              */
-            ProfileArtifact reusableProfile = loadProfileArtifact(
+            SeekArtifactService.ProfileArtifact reusableProfile = loadProfileArtifact(
                     input, SeekVersionPolicy.profileVersion(resume, targetRoleHint));
-            CandidatesArtifact reusableCandidates = loadCandidatesArtifact(input, constraintVersion);
+            SeekArtifactService.CandidatesArtifact reusableCandidates = seekArtifactService.loadCandidates(input.userId(), input.planId(), constraintVersion);
             if (reusableProfile != null) {
                 profileArtifactId = reusableProfile.artifactId();
             }
@@ -309,7 +310,7 @@ public class JobSeekWorkflow {
          * 简历或条件变化 → 版本变化 → 不复用旧报告。
          */
         String reportVersion = SeekVersionPolicy.reportVersion(constraintVersion, profileArtifactId, candidatesArtifactId);
-        MatchReport reusableReport = loadReportArtifact(input, reportVersion);
+        MatchReport reusableReport = seekArtifactService.loadReport(input.userId(), input.planId(), reportVersion);
         if (reusableReport != null) {
             publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "MATCH_AGENT", "MATCH",
                     "SUCCEEDED", "复用已完成的匹配报告");
@@ -334,7 +335,7 @@ public class JobSeekWorkflow {
                     "FAILED", profileArtifactId, candidatesArtifactId, null, resume.getId(),
                     List.of(), null, constraints);
         }
-        Long reportArtifactId = saveArtifact(input, AgentArtifactService.TYPE_MATCH_REPORT,
+        Long reportArtifactId = seekArtifactService.save(input.userId(), input.planId(), AgentArtifactService.TYPE_MATCH_REPORT,
                 reportVersion, matchResult.report(), "profile=" + profileArtifactId
                         + ",candidates=" + candidatesArtifactId);
 
@@ -350,14 +351,6 @@ public class JobSeekWorkflow {
     }
 
     // ---------- 节点执行 ----------
-
-    /** 复用的画像产物：artifactId 供报告版本使用。 */
-    private record ProfileArtifact(Long artifactId, ResumeProfile profile) {
-    }
-
-    /** 复用的候选产物：artifactId 供报告版本使用。 */
-    private record CandidatesArtifact(Long artifactId, List<JobCandidates.JobCandidateItem> candidates) {
-    }
 
     private record NodeOutput(
             String reasonCode,
@@ -555,73 +548,12 @@ public class JobSeekWorkflow {
 
     // ---------- 产物 ----------
 
-    private Long saveArtifact(JobSeekInput input, String type, String version, Object payload, String refs) {
-        try {
-            AgentArtifact existing = agentArtifactService.findLatest(input.userId(), input.planId(), type, version);
-            if (existing != null) {
-                return existing.getId(); // 幂等：同版本不重复写
-            }
-            AgentArtifact artifact = agentArtifactService.save(input.userId(), input.planId(), null,
-                    type, version, toJson(payload), refs);
-            return artifact.getId();
-        } catch (Exception exception) {
-            /*
-             * 审查问题三-9：产物保存失败必须显式失败，不能继续对用户声称"已完成"。
-             * 由上层 catch 转成 FAILED，并用明确文案告知重试。
-             */
-            throw new IllegalStateException("结果保存失败（" + type + "）：" + exception.getMessage(), exception);
-        }
-    }
 
     // 复用已完成的画像产物（简历未变才复用）
-    private ProfileArtifact loadProfileArtifact(JobSeekInput input, String resumeVersion) {
-        try {
-            AgentArtifact artifact = agentArtifactService.findLatest(
-                    input.userId(), input.planId(), AgentArtifactService.TYPE_RESUME_PROFILE, resumeVersion);
-            if (artifact == null || !StringUtils.hasText(artifact.getContentJson())) {
-                return null;
-            }
-            // 复用时要带上产物 ID，报告版本依赖它
-            return new ProfileArtifact(artifact.getId(),
-                    objectMapper.readValue(artifact.getContentJson(), ResumeProfile.class));
-        } catch (Exception exception) {
-            log.warn("画像产物解析失败，按未命中处理，error={}", exception.getMessage());
-            return null;
-        }
-    }
 
     // 复用已完成的候选产物（条件版本未变才复用）
-    private CandidatesArtifact loadCandidatesArtifact(JobSeekInput input, String constraintVersion) {
-        try {
-            AgentArtifact artifact = agentArtifactService.findLatest(
-                    input.userId(), input.planId(), AgentArtifactService.TYPE_JOB_CANDIDATES, constraintVersion);
-            if (artifact == null || !StringUtils.hasText(artifact.getContentJson())) {
-                return null;
-            }
-            // 统一走 codec（P1：消除内联解析与工具类两份实现）
-            List<JobCandidates.JobCandidateItem> items = JobCandidateArtifactCodec.decode(
-                    artifact.getContentJson(), objectMapper);
-            return items.isEmpty() ? null : new CandidatesArtifact(artifact.getId(), items);
-        } catch (Exception exception) {
-            log.warn("候选产物解析失败，按未命中处理，error={}", exception.getMessage());
-            return null;
-        }
-    }
 
     // 复用同版本的匹配报告（报告版本已包含画像/候选产物，版本一致内容才可靠）
-    private MatchReport loadReportArtifact(JobSeekInput input, String reportVersion) {
-        try {
-            AgentArtifact artifact = agentArtifactService.findLatest(
-                    input.userId(), input.planId(), AgentArtifactService.TYPE_MATCH_REPORT, reportVersion);
-            if (artifact == null || !StringUtils.hasText(artifact.getContentJson())) {
-                return null;
-            }
-            return objectMapper.readValue(artifact.getContentJson(), MatchReport.class);
-        } catch (Exception exception) {
-            log.warn("匹配报告解析失败，按未命中处理，error={}", exception.getMessage());
-            return null;
-        }
-    }
 
     // ---------- 答复重建 ----------
 
@@ -629,6 +561,27 @@ public class JobSeekWorkflow {
 
     // 元/月 → K/月
 
+
+    /*
+     * 兼容用薄委托：Workflow 内部仍保留 saveArtifact/loadXxx 的调用形状，
+     * 实际读写与版本兼容逻辑已在 SeekArtifactService。
+     * 后续可把这些调用点直接改成 seekArtifactService.xxx 并删除本段。
+     */
+    private Long saveArtifact(JobSeekInput input, String type, String version, Object payload, String refs) {
+        return seekArtifactService.save(input.userId(), input.planId(), type, version, payload, refs);
+    }
+
+    private SeekArtifactService.ProfileArtifact loadProfileArtifact(JobSeekInput input, String version) {
+        return seekArtifactService.loadProfile(input.userId(), input.planId(), version);
+    }
+
+    private SeekArtifactService.CandidatesArtifact loadCandidatesArtifact(JobSeekInput input, String version) {
+        return seekArtifactService.loadCandidates(input.userId(), input.planId(), version);
+    }
+
+    private MatchReport loadReportArtifact(JobSeekInput input, String version) {
+        return seekArtifactService.loadReport(input.userId(), input.planId(), version);
+    }
 
     // 进度事件（不暴露内部参数/Prompt/推理）
     private void publish(TaskProgressPublisher publisher, String event, Long planId, Long runId,
