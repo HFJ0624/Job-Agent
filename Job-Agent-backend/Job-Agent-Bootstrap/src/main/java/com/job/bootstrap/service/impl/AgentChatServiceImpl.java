@@ -118,6 +118,9 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AiConversationMapper aiConversationMapper;
     private final AiMessageMapper aiMessageMapper;
 
+    /** 会话/消息存储（任务二抽取）。 */
+    private final com.job.bootstrap.agent.application.chat.service.ConversationService conversationService;
+
     /**
      * 模型与 Prompt 动态网关。
      * 第一版先接入 Executor 总结场景，让管理员可以在后台改总结 Prompt 和模型路由。
@@ -568,12 +571,12 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 6. 获取或创建会话。
          *    conversationId 为空时自动创建新会话。
          */
-        AiConversation conversation = getOrCreateConversation(userId, conversationId, safeMessage);
+        AiConversation conversation = conversationService.getOrCreate(userId, conversationId, safeMessage);
 
         /*
          * 7. 保存用户消息。
          */
-        saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
+        conversationService.save(conversation.getId(), userId, ROLE_USER, message, null);
 
         /*
          * 7.1 捕获用户自然语言里的长期记忆。
@@ -666,8 +669,8 @@ public class AgentChatServiceImpl implements AgentChatService {
 
             if (needClarification(plan)) {
                 String answer = buildClarificationAnswer(plan);
-                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
-                touchConversation(conversation);
+                conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+                conversationService.touch(conversation);
 
                 agentTraceService.saveTrace(
                         traceId,
@@ -694,8 +697,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<AgentToolSchema> unconfirmedTools = findUnconfirmedTools(plan, confirmedToolNames);
             if (!unconfirmedTools.isEmpty()) {
                 String answer = buildConfirmationAnswer(unconfirmedTools);
-                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
-                touchConversation(conversation);
+                conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+                conversationService.touch(conversation);
 
                 agentTraceService.saveTrace(
                         traceId,
@@ -809,13 +812,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             /*
              * 8. 保存助手消息。
              */
-            saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+            conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
 
             /*
              * 9. 更新会话时间。
              *    这样前端会话列表可以按最近聊天排序。
              */
-            touchConversation(conversation);
+            conversationService.touch(conversation);
 
             /*
              * 10. 保存主对话 Trace。
@@ -898,8 +901,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             String cachedAnswer,
             long start
     ) {
-        saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, cachedAnswer, null);
-        touchConversation(conversation);
+        conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, cachedAnswer, null);
+        conversationService.touch(conversation);
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", originalMessage);
@@ -947,16 +950,16 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentGuardrailResult guardrailResult,
             long start
     ) {
-        AiConversation conversation = getOrCreateConversation(
+        AiConversation conversation = conversationService.getOrCreate(
                 userId,
                 conversationId,
                 String.valueOf(agentGuardrailService.maskSensitiveData(message))
         );
-        saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
+        conversationService.save(conversation.getId(), userId, ROLE_USER, message, null);
 
         String answer = guardrailResult.getUserMessage();
-        saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
-        touchConversation(conversation);
+        conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+        conversationService.touch(conversation);
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
@@ -1884,60 +1887,16 @@ public class AgentChatServiceImpl implements AgentChatService {
     /**
      * 获取或创建会话。
      */
-    private AiConversation getOrCreateConversation(Long userId, Long conversationId, String firstMessage) {
-        if (conversationId != null) {
-            AiConversation exist = aiConversationMapper.selectById(conversationId);
-
-            /*
-             * 只允许用户访问自己的会话。
-             * 这一步是用户数据隔离，防止越权访问。
-             */
-            if (exist != null && userId.equals(exist.getUserId())) {
-                return exist;
-            }
-        }
-
-        AiConversation conversation = new AiConversation();
-        conversation.setUserId(userId);
-        conversation.setConversationType("JOB_AGENT");
-        conversation.setTitle(buildConversationTitle(firstMessage));
-        conversation.setIsDeleted(NOT_DELETED);
-        aiConversationMapper.insert(conversation);
-        return conversation;
-    }
 
     /**
      * 生成会话标题。
      */
-    private String buildConversationTitle(String message) {
-        if (message == null || message.isBlank()) {
-            return "新的求职对话";
-        }
-
-        String title = message.trim();
-        return title.length() > 20 ? title.substring(0, 20) + "..." : title;
-    }
 
     /**
      * 保存一条聊天消息。
      */
-    private void saveMessage(Long conversationId, Long userId, String role, String content, String toolName) {
-        AiMessage message = new AiMessage();
-        message.setConversationId(conversationId);
-        message.setUserId(userId);
-        message.setRole(role);
-        message.setContent(content);
-        message.setToolName(toolName);
-        message.setTokenCount(0);
-        message.setIsDeleted(NOT_DELETED);
-        aiMessageMapper.insert(message);
-    }
 
     /**
      * 更新会话更新时间。
      */
-    private void touchConversation(AiConversation conversation) {
-        conversation.setUpdateTime(new java.util.Date());
-        aiConversationMapper.updateById(conversation);
-    }
 }

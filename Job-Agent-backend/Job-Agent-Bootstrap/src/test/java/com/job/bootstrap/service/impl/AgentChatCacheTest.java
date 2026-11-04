@@ -100,7 +100,8 @@ class AgentChatCacheTest {
                 ragEmbeddingService, agentObservationService);
         queryRewriter = new AgentQueryRewriter(aiModelGatewayService, agentObservationService);
         service = new AgentChatServiceImpl(
-                aiConversationMapper, aiMessageMapper, aiModelGatewayService, agentTraceService,
+                aiConversationMapper, aiMessageMapper,
+                new com.job.bootstrap.agent.application.chat.service.ConversationService(aiConversationMapper, aiMessageMapper), aiModelGatewayService, agentTraceService,
                 ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService,
                 agentPlanExecutorService, agentMemoryCaptureService, agentMemoryContextService,
                 agentToolSchemaRegistry, agentGuardrailService, agentContextBuilder, queryRewriter,

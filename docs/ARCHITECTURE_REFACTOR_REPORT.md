@@ -75,10 +75,12 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 - 测试：`ChatRequestRouterTest` 4 例（RESUME 任务带"简历/岗位"仍走 RESUME 且不询问复合入口、
   MULTI_AGENT 保持、新请求按关键词、未知任务回退 LEGACY）。
 
-### 任务二：拆分 AgentChatServiceImpl —— 未完成
-`AgentChatServiceImpl` 仍是 1900+ 行的协调类（会话/护栏/旧链路/结果落库/Trace）。
-本轮只做了路由外移；会话存储与结果写回尚未拆出。原因：3 个会话测试直接 mock Mapper 并断言落库，
-拆分必须同步改写测试断言，属于行为敏感改动，本轮预算不足，未开工以免留下半迁移状态。
+### 任务二：拆分 AgentChatServiceImpl —— 部分完成
+- ✅ 会话与消息存储抽为 `agent/application/chat/service/ConversationService`
+  （getOrCreate / save / touch / 标题生成，含归属校验），`AgentChatServiceImpl` 只调用不实现；
+- ✅ 测试改为注入真实 `ConversationService`（复用原有 Mapper mock），行为与断言不变；
+- ⏳ 仍未拆出：旧模板链路处理（chatInternal 主流程）、结果与 Trace 组装；
+  `AgentChatServiceImpl` 仍是 1700+ 行，后续按"旧链路处理器 / 结果写回器"两块继续。
 
 ### 任务三：拆分 AgentPage.vue —— 未完成
 页面仍为单文件（1200+ 行）。`useAgentChat`/`useAgentTask`/`AgentTaskCard` 尚未提取。
