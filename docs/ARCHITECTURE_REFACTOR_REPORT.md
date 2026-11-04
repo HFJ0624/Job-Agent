@@ -14,6 +14,7 @@
 | `SeekAnswerAssembler` 抽取 | 答复排版/公司缺失/薪资元→K 从 Workflow 移出，只接受已校验产物 |
 | `SeekArtifactService` 抽取 | 三类产物存取、幂等保存、旧格式兼容集中一处；Workflow 保留"何时保存/复用"决策，内部调用改为薄委托 |
 | `SeekContextResolver` 抽取 | 条件三级合并（历史包装/旧 JSON/参数 Map 兼容）、简历定位、未解析简历的准备阶段解析；Workflow 只保留"先合并条件再解析简历"的顺序 |
+| `AgentToolInvoker` 注册表化 | 9 分支 switch → 启动时构建的 `Map<String,ToolCall>`；唯一登记入口、重名启动失败、懒初始化兼容单测；Guard/Trace/输出校验顺序不变 |
 | `ChatRequestRouter` 抽取 | 新增 `agent/application` 层：复合→简历→搜索→旧链路的优先级集中一处，同步 chat 与 streamChat 共用；Each Entry 的 `shouldHandle` 仍先按持久化 `runtimeMode` 判断、再看开关 |
 | 调用点改造 | Workflow 内 5 处版本调用 + 2 处答复调用改为策略/组装类；旧私有方法删除 |
 | 验证 | 后端 373 单测全绿（含 `JobSeekWorkflowTest`、`JobSeekContextArtifactTest`） |
@@ -25,7 +26,7 @@
 | `SeekAnswerAssembler` | ✅ 已完成 | 用"花括号配平"删除法抽取，Workflow 仅保留编排；373 单测全绿 |
 
 | `ConversationService` 拆分 | 未落地 | `AgentChatServiceImpl` 仍承担会话/护栏/旧链路/Trace；`ChatRequestRouter` 已把路由决策移出 |
-| `AgentToolInvoker` 注册表化 | 未落地 | 当前仍硬编码 8 个 Tool；计划改为 `Map<String, AgentToolHandler>`，保留 Guard/Trace 顺序 |
+| `AgentToolInvoker` 接口化 | 部分完成 | 注册表已落地；核心仍持有 8 个 Tool 引用（参数映射需要），下一步让 Tool 实现统一 handler 接口，内核只依赖注册表 |
 | `AgentPage.vue` 拆 composable | 未落地 | 1227 行；计划 `useAgentChat` / `useAgentTask` + `AgentTaskCard`，状态单一来源 |
 
 ## 4. 兼容性
