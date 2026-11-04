@@ -46,3 +46,20 @@
 cd Job-Agent-backend && mvn -pl Job-Agent-Bootstrap -am test
 cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 ```
+
+
+## 7. 第 4 批验证补记与更正（2026-11-04）
+
+**更正**：提交 `5f210dd` 的说明里写"容器启动通过"，实际当时启动**失败**，原因是
+`target/classes` 残留了迁移前旧包（`com.job.bootstrap.agent.intent.AgentIntentRouter`
+与迁移后的 `agent.support.intent.AgentIntentRouter` 同时被扫描），触发
+`ConflictingBeanDefinitionException`。源码本身没有重复类。
+
+**执行 `mvn -pl Job-Agent-Bootstrap -am clean package` 后**：
+
+- 启动成功：`Started JobAgentApplication in 14.129 seconds`；
+- 工具注册日志：`Agent 工具注册完成，共 15 个`（8 个业务 Tool + 7 个连接器）；
+- 无 Bean 重名、无循环依赖、无 Mapper 扫描错误。
+
+**结论（写入验证规范）**：包迁移后必须使用 `clean package`；普通 `package` 会复用
+上一次编译的 `target/classes`，把旧包一起打进 jar，产生"源码干净但运行期 Bean 冲突"的假象。
