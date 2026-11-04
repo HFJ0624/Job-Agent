@@ -144,6 +144,9 @@ public class JobSeekWorkflow {
         String resumeVersion = resumeVersion(resume);
         String constraintVersion = version(constraints, resume.getId());
 
+        // 使用合并后的有效方向，重试时不会因当前消息没有关键词而失效
+        String targetRoleHint = StringUtils.hasText(constraints.targetRole()) ? constraints.targetRole() : constraints.keyword();
+
         // ---------- 画像 ∥ 搜索（条件独立才并行） ----------
         boolean parallel = resumeResolution.explicitKeyword && resumeResolution.explicitCity;
         ResumeProfile profile = null;
@@ -156,7 +159,7 @@ public class JobSeekWorkflow {
              * 不依赖兄弟节点是否成功；同版本保存是幂等的，JOIN 阶段不再重复插入。
              */
             ProfileArtifact reusableProfile = loadProfileArtifact(
-                    input, profileVersion(resume, resumeResolution.targetRoleHint));
+                    input, profileVersion(resume, targetRoleHint));
             CandidatesArtifact reusableCandidates = loadCandidatesArtifact(input, constraintVersion);
             if (reusableProfile != null) {
                 profileArtifactId = reusableProfile.artifactId();
@@ -171,30 +174,30 @@ public class JobSeekWorkflow {
                 Future<NodeOutput> resumeFuture = nodeExecutor.submit(
                         () -> reusableProfile != null
                                 ? new NodeOutput(null, reusableProfile.profile(), List.of())
-                                : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint, budget));
+                                : resumeNode(input, resume, resumeVersion, targetRoleHint, budget));
                 publish(progress, AgentProgressEvent.NODE_STARTED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
                         "RUNNING", reusableCandidates != null ? "复用已完成的岗位搜索结果" : "正在搜索岗位");
                 Future<NodeOutput> searchFuture = nodeExecutor.submit(
                         () -> reusableCandidates != null
                                 ? new NodeOutput(null, null, reusableCandidates.candidates())
-                                : searchNode(input, constraints, budget));
+                                : searchNode(input, constraints, budget, constraintVersion, resume.getId()));
 
                 NodeOutput resumeOut = await(resumeFuture, budget);
                 NodeOutput searchOut = await(searchFuture, budget);
 
                 // 成功节点先各自落库（画像成功/搜索失败时画像产物仍然保留）
+                // 画像已经在 resumeNode() 内保存，这里接收产物 ID
                 if (resumeOut.ok() && reusableProfile == null) {
                     profile = (ResumeProfile) resumeOut.payload();
-                    profileArtifactId = saveArtifact(input, AgentArtifactService.TYPE_RESUME_PROFILE,
-                            profileVersion(resume, resumeResolution.targetRoleHint), profile,
-                            "resumeId=" + resume.getId());
+                    profileArtifactId = resumeOut.artifactId();
                 } else if (resumeOut.ok()) {
                     profile = reusableProfile.profile();
                 }
+
+                // 候选已经在 searchNode() 内保存，这里接收产物 ID
                 if (searchOut.ok() && reusableCandidates == null) {
                     candidates = candidatesOf(searchOut);
-                    candidatesArtifactId = saveArtifact(input, AgentArtifactService.TYPE_JOB_CANDIDATES,
-                            constraintVersion, candidates, "resumeId=" + resume.getId());
+                    candidatesArtifactId = searchOut.artifactId();
                 } else if (searchOut.ok()) {
                     candidates = reusableCandidates.candidates();
                 }
@@ -230,24 +233,23 @@ public class JobSeekWorkflow {
                         "RUNNING", reusableProfile != null ? "复用已完成的简历分析" : "正在分析简历");
                 NodeOutput resumeOut = reusableProfile != null
                         ? new NodeOutput(null, reusableProfile.profile(), List.of())
-                        : resumeNode(input, resume, resumeVersion, resumeResolution.targetRoleHint, budget);
+                        : resumeNode(input, resume, resumeVersion, targetRoleHint, budget);
                 if (!resumeOut.ok()) {
                     if (RESUME_NEED_INPUT.equals(resumeOut.reasonCode())) {
                         return new JobSeekOutcome("NEED_INPUT",
                                 "我需要你补充一点信息才能继续：请确认要使用的简历或更明确的目标方向。",
-                                "NEED_CLARIFICATION", candidatesArtifactId, null, null, resume.getId(),
+                                "NEED_CLARIFICATION", profileArtifactId, candidatesArtifactId, null, resume.getId(),
                                 List.of("resume"), "请确认要使用的简历或更明确的目标方向。", constraints);
                     }
                     return failed(input, resumeOut, "RESUME_NODE_FAILED", constraints,
                             profileArtifactId, candidatesArtifactId, resume.getId());
                 }
                 profile = (ResumeProfile) resumeOut.payload();
+
                 if (reusableProfile == null) {
-                    // 画像成功立即保存，后续搜索失败也能复用
-                    profileArtifactId = saveArtifact(input, AgentArtifactService.TYPE_RESUME_PROFILE,
-                            profileVersion(resume, resumeResolution.targetRoleHint), profile,
-                            "resumeId=" + resume.getId());
+                    profileArtifactId = resumeOut.artifactId();
                 }
+
                 publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "RESUME_AGENT", "RESUME",
                         "SUCCEEDED", reusableProfile != null ? "复用已完成的简历分析"
                                 : "简历分析完成（" + profile.skills().size() + " 项技能）");
@@ -263,17 +265,18 @@ public class JobSeekWorkflow {
                         "RUNNING", reusableCandidates != null ? "复用已完成的岗位搜索结果" : "正在搜索岗位");
                 NodeOutput searchOut = reusableCandidates != null
                         ? new NodeOutput(null, null, reusableCandidates.candidates())
-                        : searchNode(input, searchConstraints, budget);
+                        : searchNode(input, searchConstraints, budget, constraintVersion, resume.getId());
                 if (!searchOut.ok()) {
                     return failed(input, searchOut, "SEARCH_NODE_FAILED", constraints,
                             profileArtifactId, candidatesArtifactId, resume.getId());
                 }
                 candidates = candidatesOf(searchOut);
+
                 if (reusableCandidates == null) {
-                    // 候选成功立即保存，后续匹配失败也能复用
-                    candidatesArtifactId = saveArtifact(input, AgentArtifactService.TYPE_JOB_CANDIDATES,
-                            constraintVersion, candidates, "resumeId=" + resume.getId());
+                    candidatesArtifactId = searchOut.artifactId();
                 }
+
+
                 publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), null, "JOB_SEARCH_AGENT", "JOB_SEARCH",
                         "SUCCEEDED", reusableCandidates != null ? "复用已完成的岗位搜索结果"
                                 : "岗位搜索完成（" + candidates.size() + " 个候选）");
@@ -356,7 +359,18 @@ public class JobSeekWorkflow {
     private record CandidatesArtifact(Long artifactId, List<JobCandidates.JobCandidateItem> candidates) {
     }
 
-    private record NodeOutput(String reasonCode, Object payload, List<JobCandidates.JobCandidateItem> candidates) {
+    private record NodeOutput(
+            String reasonCode,
+            Object payload,
+            List<JobCandidates.JobCandidateItem> candidates,
+            Long artifactId
+    ) {
+        // 兼容现有失败分支、缓存分支的三参数调用
+        private NodeOutput(String reasonCode, Object payload,
+                           List<JobCandidates.JobCandidateItem> candidates) {
+            this(reasonCode, payload, candidates, null);
+        }
+
         boolean ok() {
             return reasonCode == null;
         }
@@ -374,26 +388,51 @@ public class JobSeekWorkflow {
         if ("NEED_INPUT".equals(result.profile().outcome())) {
             return new NodeOutput(RESUME_NEED_INPUT, null, List.of());
         }
-        return new NodeOutput(null, result.profile(), List.of());
+
+        Long artifactId = saveArtifact(
+                input,
+                AgentArtifactService.TYPE_RESUME_PROFILE,
+                profileVersion(resume, targetRoleHint),
+                result.profile(),
+                "resumeId=" + resume.getId()
+        );
+
+        return new NodeOutput(null, result.profile(), List.of(), artifactId);
     }
 
-    private NodeOutput searchNode(JobSeekInput input, SearchConstraints constraints,
-                                  TaskExecutionBudget budget) {
+    private NodeOutput searchNode(
+            JobSeekInput input,
+            SearchConstraints constraints,
+            TaskExecutionBudget budget,
+            String candidatesVersion,
+            Long resumeId
+    ){
         /*
          * 审查 F1：搜索节点同样要受父任务预算/取消约束。
          * 并行线程不会继承主线程 ThreadLocal，所以在这里显式设置执行钩子（含 budget）。
          */
         AgentRunExecutionHooks.set(null, null, budget);
         try {
+
             JobSearchWorkflow.WorkflowOutcome outcome = jobSearchWorkflow.execute(
                     new JobSearchWorkflow.WorkflowInput(
                             input.userId(), input.traceId(), input.message(), constraints,
                             null, 0, 0, System.currentTimeMillis(),
                             input.conversationId(), "JOB_SEEK_FLOW", List.of()));
+
             if (outcome.outcome() == AgentResult.Outcome.FAILED) {
                 return new NodeOutput(outcome.reasonCode(), null, List.of());
             }
-            return new NodeOutput(null, null, outcome.candidates());
+
+            Long artifactId = saveArtifact(
+                    input,
+                    AgentArtifactService.TYPE_JOB_CANDIDATES,
+                    candidatesVersion,
+                    outcome.candidates(),
+                    "resumeId=" + resumeId
+            );
+
+            return new NodeOutput(null, null, outcome.candidates(), artifactId);
         } finally {
             AgentRunExecutionHooks.clear();
         }
