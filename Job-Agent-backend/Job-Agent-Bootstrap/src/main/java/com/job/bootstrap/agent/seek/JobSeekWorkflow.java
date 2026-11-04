@@ -67,6 +67,7 @@ public class JobSeekWorkflow {
     private final MatchAgentNode matchAgentNode;
     private final JobSearchWorkflow jobSearchWorkflow;
     private final JobResumeService jobResumeService;
+    private final com.job.bootstrap.agent.resume.ResumeSelectionService resumeSelectionService;
     private final UserJobPreferenceService userJobPreferenceService;
     private final AgentArtifactService agentArtifactService;
     private final AgentPlanParameterExtractor parameterExtractor;
@@ -374,52 +375,16 @@ public class JobSeekWorkflow {
         Map<String, Object> explicit = parameterExtractor.extract(input.message());
         String targetRoleHint = text(explicit.get("keyword"));
 
-        Long resumeId = longOf(explicit.get("resumeId"));
-        if (resumeId != null) {
-            JobResume resume = jobResumeService.getUserResumeRequired(input.userId(), resumeId);
-            return new ResumeResolution(resume, null, List.of(), explicit, targetRoleHint,
-                    StringUtils.hasText(targetRoleHint), StringUtils.hasText(text(explicit.get("city"))));
-        }
-
-        String resumeName = text(explicit.get("resumeName"));
-        List<JobResume> resumes = jobResumeService.listUserResumes(input.userId());
-        if (resumes.isEmpty()) {
-            return new ResumeResolution(null,
-                    "你的账号下还没有可用的简历，请先上传一份简历，我再帮你做匹配分析。",
-                    List.of("resume"), explicit, targetRoleHint, false, false);
-        }
-
-        JobResume picked = null;
-        // 审查 F3：补参没指定简历时，沿用任务上下文里已选的简历（校验归属）
+        // 简历定位统一走 ResumeSelectionService（P1：复合/独立分析共用一套规则）
         Long previousResumeId = input.previousResumeId() != null
                 ? input.previousResumeId() : contextResumeId(input.constraintsJson());
-        if (previousResumeId != null) {
-            picked = resumes.stream()
-                    .filter(r -> r.getId().equals(previousResumeId))
-                    .findFirst().orElse(null);
+        com.job.bootstrap.agent.resume.ResumeSelectionService.Selection selection =
+                resumeSelectionService.select(input.userId(), explicit, previousResumeId, "做匹配分析");
+        if (selection.needsInput()) {
+            return new ResumeResolution(null, selection.question(), selection.missingFields(),
+                    explicit, targetRoleHint, false, false);
         }
-        if (picked == null && StringUtils.hasText(resumeName)) {
-            picked = resumes.stream()
-                    .filter(r -> r.getResumeName() != null && r.getResumeName().contains(resumeName))
-                    .findFirst().orElse(null);
-        }
-        if (picked == null) {
-            List<JobResume> defaults = resumes.stream()
-                    .filter(r -> r.getIsDefault() != null && r.getIsDefault() == 1).toList();
-            if (defaults.size() == 1) {
-                picked = defaults.get(0);
-            } else if (resumes.size() == 1) {
-                picked = resumes.get(0);
-            }
-        }
-        if (picked == null) {
-            String names = String.join("、", resumes.stream()
-                    .map(JobResume::getResumeName).toList());
-            return new ResumeResolution(null,
-                    "你有多份简历，请告诉我要用哪一份：" + names + "。",
-                    List.of("resume"), explicit, targetRoleHint, false, false);
-        }
-        return new ResumeResolution(picked, null, List.of(), explicit, targetRoleHint,
+        return new ResumeResolution(selection.resume(), null, List.of(), explicit, targetRoleHint,
                 StringUtils.hasText(targetRoleHint), StringUtils.hasText(text(explicit.get("city"))));
     }
 
@@ -533,28 +498,9 @@ public class JobSeekWorkflow {
             if (artifact == null || !StringUtils.hasText(artifact.getContentJson())) {
                 return null;
             }
-            List<Map<String, Object>> raw = objectMapper.readValue(artifact.getContentJson(),
-                    objectMapper.getTypeFactory().constructCollectionType(List.class, Map.class));
-            List<JobCandidates.JobCandidateItem> items = new ArrayList<>();
-            for (Map<String, Object> item : raw) {
-                /*
-                 * 保存端结构是 {"jobId":1,"raw":{...岗位字段...}}；
-                 * 旧格式/兼容分支才是平铺字段。这里必须把内层 raw 取出来，
-                 * 否则 city/salary 等字段全部丢失（审查 F4）。
-                 */
-                Object rawField = item.get("raw");
-                Map<String, Object> jobFields = rawField instanceof Map<?, ?> nested
-                        ? castMap(nested)
-                        : item;
-                Object jobId = item.containsKey("jobId") ? item.get("jobId") : jobFields.get("jobId");
-                if (jobId == null) {
-                    jobId = jobFields.get("id");
-                }
-                Long id = jobId instanceof Number number ? number.longValue() : null;
-                if (id != null) {
-                    items.add(new JobCandidates.JobCandidateItem(id, jobFields));
-                }
-            }
+            // 统一走 codec（P1：消除内联解析与工具类两份实现）
+            List<JobCandidates.JobCandidateItem> items = JobCandidateArtifactCodec.decode(
+                    artifact.getContentJson(), objectMapper);
             return items.isEmpty() ? null : items;
         } catch (Exception exception) {
             log.warn("候选产物解析失败，按未命中处理，error={}", exception.getMessage());
@@ -707,19 +653,6 @@ public class JobSeekWorkflow {
         return value == null ? null : String.valueOf(value).trim();
     }
 
-    private Long longOf(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        if (value instanceof String text && StringUtils.hasText(text)) {
-            try {
-                return Long.parseLong(text.trim());
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
-    }
 
     private Integer integerOf(Object value) {
         if (value instanceof Number number) {

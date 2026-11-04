@@ -92,22 +92,6 @@ public class AgentRunService {
         return run;
     }
 
-    /**
-     * 按 计划 + 节点 + 输入版本 定位逻辑节点（恢复时不能只用 findLatestByPlan）。
-     */
-    public AgentRun findByPlanAndNode(Long planId, String nodeKey, String inputVersion) {
-        if (planId == null || nodeKey == null) {
-            return null;
-        }
-        QueryWrapper<AgentRun> wrapper = new QueryWrapper<AgentRun>()
-                .eq("plan_id", planId)
-                .eq("node_key", nodeKey)
-                .eq("is_deleted", NOT_DELETED);
-        if (inputVersion != null) {
-            wrapper.eq("input_version", inputVersion);
-        }
-        return agentRunMapper.selectOne(wrapper.orderByDesc("id").last("limit 1"));
-    }
 
     /**
      * 原子领取：仅当状态为 PENDING/WAITING_INPUT 且 attempt 未被别人推进时成功。
@@ -228,9 +212,6 @@ public class AgentRunService {
                 .orderByAsc("id"));
     }
 
-    public AgentRun findById(Long runId) {
-        return runId == null ? null : agentRunMapper.selectById(runId);
-    }
 
     /**
      * 查找该计划下最近一次 run（补参/重试路由用）。

@@ -9,7 +9,6 @@ import com.job.bootstrap.agent.search.ReactSearchProperties;
 import com.job.bootstrap.agent.task.AgentTaskService;
 import com.job.bootstrap.agent.task.TaskBudgetRegistry;
 import com.job.bootstrap.agent.task.TaskExecutionBudget;
-import com.job.bootstrap.service.JobResumeService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.resume.JobResume;
 import com.job.enums.AgentPlanStatus;
@@ -50,10 +49,10 @@ public class ResumeReactEntry {
     private final ReactSearchProperties properties;
     private final AgentTaskService agentTaskService;
     private final ResumeAgentNode resumeAgentNode;
-    private final JobResumeService jobResumeService;
     private final AgentArtifactService agentArtifactService;
     private final AgentPlanParameterExtractor parameterExtractor;
     private final TaskBudgetRegistry taskBudgetRegistry;
+    private final ResumeSelectionService resumeSelectionService;
     private final ObjectMapper objectMapper;
 
     /** 入口结果。 */
@@ -135,13 +134,12 @@ public class ResumeReactEntry {
         try {
             // 3. 简历定位（显式 > 名称 > 默认 > 唯一；多份无法确定 → 暂停等待选择）
             Map<String, Object> explicit = parameterExtractor.extract(message);
-            List<JobResume> resumes = jobResumeService.listUserResumes(userId);
-            JobResume resume = pickResume(userId, explicit, resumes);
-            if (resume == null) {
-                String question = resumes.isEmpty()
-                        ? "你的账号下还没有可用简历，请先上传一份简历。"
-                        : "你有多份简历，请告诉我要分析哪一份：" + String.join("、",
-                        resumes.stream().map(JobResume::getResumeName).toList()) + "。";
+            // 简历定位统一走 ResumeSelectionService（P1）
+            ResumeSelectionService.Selection selection =
+                    resumeSelectionService.select(userId, explicit, null, "分析简历");
+            JobResume resume = selection.resume();
+            if (selection.needsInput()) {
+                String question = selection.question();
                 agentTaskService.completeExecution(running.getId(),
                         AgentPlanStatus.NEED_CLARIFICATION, null, question, null);
                 progress.publish(new AgentProgressEvent(AgentProgressEvent.WAITING_INPUT,
@@ -270,24 +268,6 @@ public class ResumeReactEntry {
         return builder.toString();
     }
 
-    private JobResume pickResume(Long userId, Map<String, Object> explicit, List<JobResume> resumes) {
-        Long resumeId = longOf(explicit.get("resumeId"));
-        if (resumeId != null) {
-            return jobResumeService.getUserResumeRequired(userId, resumeId);
-        }
-        String resumeName = text(explicit.get("resumeName"));
-        if (StringUtils.hasText(resumeName)) {
-            return resumes.stream()
-                    .filter(r -> r.getResumeName() != null && r.getResumeName().contains(resumeName))
-                    .findFirst().orElse(null);
-        }
-        List<JobResume> defaults = resumes.stream()
-                .filter(r -> r.getIsDefault() != null && r.getIsDefault() == 1).toList();
-        if (defaults.size() == 1) {
-            return defaults.get(0);
-        }
-        return resumes.size() == 1 ? resumes.get(0) : null;
-    }
 
     private String answerOf(AgentPlan plan) {
         return StringUtils.hasText(plan.getFinalAnswer())

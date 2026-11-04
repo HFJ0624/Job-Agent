@@ -46,8 +46,9 @@ class ResumeReactEntryTest {
     @BeforeEach
     void setUp() {
         properties.setEnabled(true);
-        entry = new ResumeReactEntry(properties, taskService, resumeAgentNode, resumeService,
-                artifactService, new AgentPlanParameterExtractor(), budgetRegistry, new ObjectMapper());
+        entry = new ResumeReactEntry(properties, taskService, resumeAgentNode,
+                artifactService, new AgentPlanParameterExtractor(), budgetRegistry,
+                new ResumeSelectionService(resumeService), new ObjectMapper());
     }
 
     private AgentPlan plan(String status) {
