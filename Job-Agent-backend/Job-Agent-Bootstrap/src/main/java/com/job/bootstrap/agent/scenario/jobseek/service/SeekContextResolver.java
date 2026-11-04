@@ -1,8 +1,8 @@
 package com.job.bootstrap.agent.scenario.jobseek.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.domain.job.SearchConstraints;
-import com.job.bootstrap.agent.domain.resume.ResumeSelectionService;
+import com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints;
+import com.job.bootstrap.agent.scenario.resume.ResumeSelectionService;
 import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.bootstrap.service.UserJobPreferenceService;

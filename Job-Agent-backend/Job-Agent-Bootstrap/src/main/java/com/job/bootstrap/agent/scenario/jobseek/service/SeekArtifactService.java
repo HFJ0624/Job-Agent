@@ -2,9 +2,9 @@ package com.job.bootstrap.agent.scenario.jobseek.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.scenario.jobseek.model.JobCandidateArtifactCodec;
-import com.job.bootstrap.agent.domain.job.JobCandidates;
-import com.job.bootstrap.agent.domain.match.MatchReport;
-import com.job.bootstrap.agent.domain.resume.ResumeProfile;
+import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
+import com.job.bootstrap.agent.scenario.match.MatchReport;
+import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
 import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
 import com.job.common.entity.agent.AgentArtifact;
 import lombok.RequiredArgsConstructor;

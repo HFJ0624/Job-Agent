@@ -70,7 +70,8 @@ agent/
 |---|---|
 | `agent/application/routing/` | ✅ 已落地 `ChatRequestRouter` |
 | `agent/scenario/jobseek/`（8 类） | ✅ 已迁移：entry（JobSeekReactEntry）、workflow（JobSeekWorkflow）、policy（SeekVersionPolicy）、assembler（SeekAnswerAssembler）、service（SeekArtifactService/SeekContextResolver）、model（JobCandidateArtifactCodec）、config（JobSeekExecutorConfig） |
-| `agent/domain/{resume,job,match,tools}` | ⏳ 待迁入 `scenario/*` 与 `tool/impl` |
+| `agent/scenario/{resume,jobsearch,match}` | ✅ 已迁移（整包移动，角色子包按需再分） |
+| `agent/tool/impl/`（8 业务 Tool + resolver） | ✅ 已迁移（实现集中在 impl，后续可再拆 registry/spi） |
 | `agent/runtime/{react,budget,progress,run,artifact,executor,schema}` | ⏳ 待迁入 `core/*` 与 `infrastructure/*` |
 | `agent/orchestration/task/` | ⏳ 待迁入 `agent/application/task/` |
 | `agent/support/*` | ✅ 已符合（保留子包） |

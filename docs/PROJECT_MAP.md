@@ -32,12 +32,12 @@ AgentController (/front/agent/chat、/chat/stream、/task/{planId})
 |---|---|---|
 | 入口 | `controller/front/AgentController` | HTTP/SSE 协议、任务状态/取消接口 |
 | 分发 | `service/impl/AgentChatServiceImpl` | 会话、护栏、路由、旧链路、结果落库（**待拆**，见重构报告） |
-| 复合 | `orchestration/seek/JobSeekWorkflow` | 固定骨架：准备→画像∥搜索→匹配→验真→答复 |
-| 复合 | `orchestration/seek/SeekVersionPolicy` | 三类产物版本规则（复用正确性） |
+| 复合 | `scenario/jobseek/JobSeekWorkflow` | 固定骨架：准备→画像∥搜索→匹配→验真→答复 |
+| 复合 | `scenario/jobseek/SeekVersionPolicy` | 三类产物版本规则（复用正确性） |
 | 任务 | `orchestration/task/AgentTaskService` | 父任务领取/写回/额度/快照 |
-| 搜索 | `domain/job/JobSearchWorkflow` | 搜索验真、EMPTY/FOUND |
-| 简历 | `domain/resume/ResumeAgentNode` + `ResumeSelectionService` | 画像与证据回溯、简历定位 |
-| 匹配 | `domain/match/MatchAgentNode` | 只读预览、报告校验 |
+| 搜索 | `scenario/jobsearch/JobSearchWorkflow` | 搜索验真、EMPTY/FOUND |
+| 简历 | `scenario/resume/ResumeAgentNode` + `ResumeSelectionService` | 画像与证据回溯、简历定位 |
+| 匹配 | `scenario/match/MatchAgentNode` | 只读预览、报告校验 |
 | 内核 | `runtime/react/ReActRunner` + `TerminalContract` | 反馈循环、终结契约 |
 | 内核 | `runtime/budget/TaskExecutionBudget` | 父预算（网关唯一扣费点） |
 | 内核 | `runtime/executor/AgentToolInvoker` | 可信身份、Guard、Trace、工具分发 |

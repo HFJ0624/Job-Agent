@@ -6,17 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
 import com.job.bootstrap.agent.runtime.executor.AgentToolExecutionResult;
 import com.job.bootstrap.agent.runtime.executor.AgentToolInvoker;
-import com.job.bootstrap.agent.domain.match.MatchAgentNode;
-import com.job.bootstrap.agent.domain.match.MatchReportContract;
+import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
+import com.job.bootstrap.agent.scenario.match.MatchReportContract;
 import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.runtime.react.ReActRunner;
 import com.job.bootstrap.agent.runtime.react.TerminalToolContract;
-import com.job.bootstrap.agent.domain.resume.ResumeAgentNode;
-import com.job.bootstrap.agent.domain.resume.ResumeProfile;
-import com.job.bootstrap.agent.domain.resume.ResumeProfileContract;
+import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;
+import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
+import com.job.bootstrap.agent.scenario.resume.ResumeProfileContract;
 import com.job.bootstrap.agent.runtime.run.AgentRunService;
-import com.job.bootstrap.agent.domain.job.JobCandidatesAdapter;
-import com.job.bootstrap.agent.domain.job.JobSearchWorkflow;
+import com.job.bootstrap.agent.scenario.jobsearch.JobCandidatesAdapter;
+import com.job.bootstrap.agent.scenario.jobsearch.JobSearchWorkflow;
 import com.job.bootstrap.ai.turn.AiChatTurnResponse;
 import com.job.bootstrap.ai.turn.AiChatTurnRequest;
 import com.job.bootstrap.ai.turn.AiToolCall;
@@ -98,11 +98,11 @@ class JobSeekWorkflowTest {
                 invoker, new JobCandidatesAdapter(mapper));
 
         workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow, resumeService,
-                new com.job.bootstrap.agent.domain.resume.ResumeSelectionService(resumeService),
+                new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
                 preferenceService, artifactService,
                 new SeekArtifactService(artifactService, mapper),
                 new SeekContextResolver(new com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor(),
-                        new com.job.bootstrap.agent.domain.resume.ResumeSelectionService(resumeService),
+                        new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
                         resumeService, preferenceService, mapper), new AgentPlanParameterExtractor(), mapper, executor);
 
         // run 生命周期

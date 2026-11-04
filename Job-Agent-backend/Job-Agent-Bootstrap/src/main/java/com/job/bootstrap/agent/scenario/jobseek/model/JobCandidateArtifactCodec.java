@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.scenario.jobseek.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.domain.job.JobCandidates;
+import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

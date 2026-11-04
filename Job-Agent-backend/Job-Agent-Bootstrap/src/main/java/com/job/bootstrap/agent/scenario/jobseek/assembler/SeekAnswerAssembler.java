@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.scenario.jobseek.assembler;
 
-import com.job.bootstrap.agent.domain.job.JobCandidates;
-import com.job.bootstrap.agent.domain.match.MatchReport;
+import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
+import com.job.bootstrap.agent.scenario.match.MatchReport;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;

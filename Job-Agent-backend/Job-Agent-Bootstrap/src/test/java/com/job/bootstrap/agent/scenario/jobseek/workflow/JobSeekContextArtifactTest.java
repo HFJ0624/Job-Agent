@@ -3,11 +3,11 @@ package com.job.bootstrap.agent.scenario.jobseek.workflow;
 import com.job.bootstrap.agent.scenario.jobseek.service.SeekArtifactService;
 import com.job.bootstrap.agent.scenario.jobseek.service.SeekContextResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.domain.job.JobSearchWorkflow;
-import com.job.bootstrap.agent.domain.match.MatchAgentNode;
-import com.job.bootstrap.agent.domain.resume.ResumeAgentNode;
-import com.job.bootstrap.agent.domain.resume.ResumeProfile;
-import com.job.bootstrap.agent.domain.resume.ResumeSelectionService;
+import com.job.bootstrap.agent.scenario.jobsearch.JobSearchWorkflow;
+import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
+import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;
+import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
+import com.job.bootstrap.agent.scenario.resume.ResumeSelectionService;
 import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.runtime.react.AgentResult;
 import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
@@ -63,7 +63,7 @@ class JobSeekContextArtifactTest {
                 new ResumeSelectionService(resumeService), preferenceService, artifactService,
                 new SeekArtifactService(artifactService, mapper),
                 new SeekContextResolver(new com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor(),
-                        new com.job.bootstrap.agent.domain.resume.ResumeSelectionService(resumeService),
+                        new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
                         resumeService, preferenceService, mapper),
                 new AgentPlanParameterExtractor(), mapper, executor);
     }

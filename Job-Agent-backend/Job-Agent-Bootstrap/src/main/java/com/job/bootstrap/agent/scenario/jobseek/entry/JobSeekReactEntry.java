@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.scenario.jobseek.workflow.JobSeekWorkflow;
 import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.runtime.progress.TaskProgressPublisher;
-import com.job.bootstrap.agent.domain.job.ReactSearchProperties;
+import com.job.bootstrap.agent.scenario.jobsearch.ReactSearchProperties;
 import com.job.bootstrap.agent.orchestration.task.AgentTaskService;
 import com.job.bootstrap.agent.runtime.budget.TaskBudgetRegistry;
 import com.job.bootstrap.agent.runtime.budget.TaskExecutionBudget;
@@ -115,7 +115,7 @@ public class JobSeekReactEntry {
         } else {
             // 新任务：条件快照先以“上下文包装”格式写入，后续每轮覆盖
             String snapshot = toJson(context(null,
-                    com.job.bootstrap.agent.domain.job.SearchConstraints.merge(
+                    com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints.merge(
                             parameterExtractor.extract(message), null)));
             plan = agentTaskService.createParentPlan(userId, conversationId, traceId,
                     "JOB_SEEK_FLOW", message, AgentTaskService.RUNTIME_MULTI_AGENT, snapshot);
@@ -204,7 +204,7 @@ public class JobSeekReactEntry {
      * 以及早期直接保存 SearchConstraints 的平铺格式。</p>
      */
     private Map<String, Object> mergeContext(String existingJson, Long resumeId,
-                                             com.job.bootstrap.agent.domain.job.SearchConstraints constraints) {
+                                             com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints constraints) {
         Map<String, Object> merged = new LinkedHashMap<>();
         Long previousResumeId = null;
         Object previousConstraints = null;
@@ -232,7 +232,7 @@ public class JobSeekReactEntry {
         return merged;
     }
 
-    private Map<String, Object> context(Long resumeId, com.job.bootstrap.agent.domain.job.SearchConstraints constraints) {
+    private Map<String, Object> context(Long resumeId, com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints constraints) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("resumeId", resumeId);
         context.put("constraints", constraints == null ? Map.of() : constraints);

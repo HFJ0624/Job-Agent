@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.scenario.jobseek.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.domain.job.JobCandidates;
+import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

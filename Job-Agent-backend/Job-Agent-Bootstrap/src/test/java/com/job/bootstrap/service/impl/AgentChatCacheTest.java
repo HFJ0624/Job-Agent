@@ -2,11 +2,11 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
-import com.job.bootstrap.agent.domain.job.JobSearchReactEntry;
-import com.job.bootstrap.agent.domain.job.ReactChatPreparationService;
+import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
+import com.job.bootstrap.agent.scenario.jobsearch.ReactChatPreparationService;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.bootstrap.support.SimpleTransactionManager;
-import com.job.bootstrap.agent.domain.resume.ResumeReactEntry;
+import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.support.cache.AgentCacheProperties;
 import com.job.bootstrap.agent.support.cache.InMemorySemanticCacheStore;
 import com.job.bootstrap.agent.support.context.AgentContextBuilder;
