@@ -87,8 +87,10 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 ### 任务三：拆分 AgentPage.vue —— 部分完成
 - ✅ 静态显示映射抽为 `src/composables/agent/taskLabels.ts`
   （NODE_LABELS / PLAN_STATUS_MAP / TASK_STATUS_LABELS / NODE_STATUS_LABELS），页面 1227 → 1201 行；
-- ⏳ `useAgentChat`、`useAgentTask`、`AgentTaskCard` 尚未提取：任务状态块（约 254–553 行）
-  与 `sendMessage`/`stopTaskPolling` 等互相依赖，需先定义回调契约再迁移，避免形成环。
+- ✅ 本地续跑标识抽为 `src/composables/agent/taskStorage.ts`
+  （`jobAgentTask:<conversationId>` 的读写，页面 1201 → 1182 行）；
+- ⏳ `useAgentChat`、`useAgentTask`、`AgentTaskCard` 尚未提取：任务状态块与
+  `sendMessage`/`stopTaskPolling` 互相依赖，需先定义回调契约再迁移，避免形成环。
 
 ### 任务五：验证结果（实际执行）
 | 项 | 结果 |

@@ -168,6 +168,7 @@
 </template>
 
 <script setup lang="ts">
+import { persistTaskPlanId, readPersistedPlanId } from "../composables/agent/taskStorage";
 import {
   NODE_LABELS,
   NODE_STATUS_LABELS,
@@ -243,32 +244,6 @@ let taskEpoch = 0;
  * 查询返回后应以它为归属校验依据，而不是依赖已存在的卡片。
  */
 let expectedPlanId: number | null = null;
-
-function taskStorageKey(cid: number | null) {
-  return `jobAgentTask:${cid ?? "new"}`;
-}
-
-function persistTaskPlanId(cid: number | null, planId: number | null) {
-  try {
-    if (planId) {
-      window.localStorage.setItem(taskStorageKey(cid), String(planId));
-    } else {
-      window.localStorage.removeItem(taskStorageKey(cid));
-    }
-  } catch {
-    /* 本地存储不可用时忽略，不影响主流程 */
-  }
-}
-
-function readPersistedPlanId(cid: number | null): number | null {
-  try {
-    const raw = window.localStorage.getItem(taskStorageKey(cid));
-    const parsed = raw ? Number(raw) : NaN;
-    return Number.isFinite(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 function ensureTaskCard(planId: number): TaskCard {
   expectedPlanId = planId;
