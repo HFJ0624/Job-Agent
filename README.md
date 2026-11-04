@@ -173,19 +173,30 @@ Eval 平台用于持续验证 Agent 链路质量：
 ```text
 Job-Agent
 ├── Job-Agent-backend
-│   ├── Job-Agent-Bootstrap      # Spring Boot 启动模块，Controller、Service、Mapper、配置和主要业务实现
+│   ├── Job-Agent-Bootstrap      # Spring Boot 启动模块：Controller、Service、Mapper、配置、Agent 实现
+│   │   └── src/main/java/com/job/bootstrap/agent
+│   │       ├── runtime          # 执行内核：ReAct / 预算 / 进度 / 子 run / 产物 / 工具执行边界
+│   │       ├── domain           # 业务 Agent：resume（简历）、job（岗位）、match（匹配）、tools
+│   │       ├── orchestration    # 编排：seek（复合任务）、plan（计划）、task（父任务状态）
+│   │       ├── support          # 横切：guardrail / memory / cache / intent / context / compensation
+│   │       └── README.md        # Agent 代码地图（入口、主链、排查跳转、命名约定）
 │   ├── Job-Agent-Framework      # 通用返回、异常、基础实体、枚举和公共类
 │   ├── Job-Agent-Infra-Ai       # AI 基础设施、LangChain4j、模型相关接口
-│   ├── Job-Agent-Mcp-Tools      # 外部连接器和 MCP 工具模块
-│   └── sql                      # 数据库脚本
+│   └── Job-Agent-Mcp-Tools      # 外部连接器和 MCP 工具模块
 ├── Job-Agent-Frontend
 │   ├── apps
-│   │   ├── user                 # 用户端前台
+│   │   ├── user                 # 用户端前台（AgentPage 任务卡片/进度/续跑）
 │   │   └── admin                # 管理员后台
 │   └── package.json
+├── sql                          # 手工增量脚本（07~10 为 Agent 相关）
+├── docs                         # 各阶段设计与验收记录
 ├── README.md
 └── LICENSE
 ```
+
+**Agent 分层约定**：依赖方向固定为 `orchestration → domain → runtime`，`support` 不反向依赖业务包；
+命名按 `*Entry → *Workflow → *Node → *Contract → *Service`。详见
+`Job-Agent-backend/Job-Agent-Bootstrap/src/main/java/com/job/bootstrap/agent/README.md`。
 
 ## 核心业务流程
 
