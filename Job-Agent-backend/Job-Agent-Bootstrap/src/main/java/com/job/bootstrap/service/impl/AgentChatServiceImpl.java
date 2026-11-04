@@ -38,6 +38,7 @@ import com.job.common.vo.agent.AgentMemoryContextVO;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.common.vo.agent.AgentPlanStepVO;
 import com.job.common.vo.agent.AgentPlanVO;
+import com.job.bootstrap.agent.application.chat.support.ChatTraceAssembler;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.enums.AgentPlanStatus;
@@ -678,8 +679,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                         conversation.getId(),
                         activeIntentCode,
                         null,
-                        buildPlanOnlyTraceInput(message, plan),
-                        buildPlanOnlyTraceOutput(answer, plan),
+                        ChatTraceAssembler.buildPlanOnlyTraceInput(message, plan),
+                        ChatTraceAssembler.buildPlanOnlyTraceOutput(answer, plan),
                         "SUCCESS",
                         null,
                         System.currentTimeMillis() - start
@@ -706,8 +707,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                         conversation.getId(),
                         activeIntentCode,
                         null,
-                        buildPlanOnlyTraceInput(message, plan, confirmedToolNames),
-                        buildPlanOnlyTraceOutput(answer, plan, unconfirmedTools),
+                        ChatTraceAssembler.buildPlanOnlyTraceInput(message, plan, confirmedToolNames),
+                        ChatTraceAssembler.buildPlanOnlyTraceOutput(answer, plan, unconfirmedTools),
                         "SUCCESS",
                         null,
                         System.currentTimeMillis() - start
@@ -865,7 +866,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     conversation.getId(),
                     plan == null ? intentCode.name() : plan.getIntentCode(),
                     null,
-                    buildPlanOnlyTraceInput(message, plan),
+                    ChatTraceAssembler.buildPlanOnlyTraceInput(message, plan),
                     null,
                     "FAILED",
                     e.getMessage(),
@@ -1470,8 +1471,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 多轮历史与滚动摘要（任务6）
         variables.put("historyText", contextBundle == null ? "" : contextBundle.historyText());
         variables.put("rollingSummary", contextBundle == null ? "" : contextBundle.rollingSummary());
-        variables.put("planJson", toJson(buildPlanSnapshot(plan)));
-        variables.put("plan_json", toJson(buildPlanSnapshot(plan)));
+        variables.put("planJson", toJson(ChatTraceAssembler.buildPlanSnapshot(plan)));
+        variables.put("plan_json", toJson(ChatTraceAssembler.buildPlanSnapshot(plan)));
         variables.put("executionResultJson", toJson(executionResult));
         variables.put("execution_result_json", toJson(executionResult));
         variables.put("retrievedMemoriesJson", toJson(buildMemorySnapshots(retrievedMemories)));
@@ -1574,7 +1575,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
         input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
-        input.put("agentPlan", buildPlanSnapshot(plan));
+        input.put("agentPlan", ChatTraceAssembler.buildPlanSnapshot(plan));
         input.put("memoryHitCount", retrievedMemories == null ? 0 : retrievedMemories.size());
         input.put("retrievedMemories", buildMemorySnapshots(retrievedMemories));
         input.put("executionMode", "PLAN_EXECUTOR");
@@ -1684,94 +1685,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         return builder.toString();
     }
 
-    private Map<String, Object> buildPlanOnlyTraceInput(String message, AgentPlanVO plan) {
-        return buildPlanOnlyTraceInput(message, plan, List.of());
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceInput(
-            String message,
-            AgentPlanVO plan,
-            List<String> confirmedToolNames
-    ) {
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("message", message);
-        input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
-        input.put("agentPlan", buildPlanSnapshot(plan));
-        return input;
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceOutput(String answer, AgentPlanVO plan) {
-        return buildPlanOnlyTraceOutput(answer, plan, List.of());
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceOutput(
-            String answer,
-            AgentPlanVO plan,
-            List<AgentToolSchema> unconfirmedTools
-    ) {
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("answer", answer);
-        output.put("agentPlan", buildPlanSnapshot(plan));
-        output.put("unconfirmedTools", buildToolSchemaSnapshots(unconfirmedTools));
-        return output;
-    }
-
-    private List<Map<String, Object>> buildToolSchemaSnapshots(List<AgentToolSchema> schemas) {
-        if (CollectionUtils.isEmpty(schemas)) {
-            return List.of();
-        }
-
-        List<Map<String, Object>> snapshots = new ArrayList<>();
-        for (AgentToolSchema schema : schemas) {
-            Map<String, Object> snapshot = new LinkedHashMap<>();
-            snapshot.put("toolName", schema.getToolName());
-            snapshot.put("displayName", schema.getDisplayName());
-            snapshot.put("permissionType", schema.getPermissionType());
-            snapshot.put("sideEffectType", schema.getSideEffectType());
-            snapshot.put("hasSideEffect", schema.getHasSideEffect());
-            snapshot.put("requiresUserConfirmation", schema.getRequiresUserConfirmation());
-            snapshot.put("confirmationMessage", schema.getConfirmationMessage());
-            snapshots.add(snapshot);
-        }
-        return snapshots;
-    }
-
-    private Map<String, Object> buildPlanSnapshot(AgentPlanVO plan) {
-        if (plan == null) {
-            return Map.of();
-        }
-
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("id", plan.getId());
-        snapshot.put("traceId", plan.getTraceId());
-        snapshot.put("userId", plan.getUserId());
-        snapshot.put("conversationId", plan.getConversationId());
-        snapshot.put("intentCode", plan.getIntentCode());
-        snapshot.put("planTitle", plan.getPlanTitle());
-        snapshot.put("planSummary", plan.getPlanSummary());
-        snapshot.put("requiredParamsJson", plan.getRequiredParamsJson());
-        snapshot.put("extractedParamsJson", plan.getExtractedParamsJson());
-        snapshot.put("missingParamsJson", plan.getMissingParamsJson());
-        snapshot.put("status", plan.getStatus());
-
-        List<Map<String, Object>> steps = new ArrayList<>();
-        if (!CollectionUtils.isEmpty(plan.getSteps())) {
-            for (AgentPlanStepVO step : plan.getSteps()) {
-                Map<String, Object> stepSnapshot = new LinkedHashMap<>();
-                stepSnapshot.put("id", step.getId());
-                stepSnapshot.put("stepNo", step.getStepNo());
-                stepSnapshot.put("stepName", step.getStepName());
-                stepSnapshot.put("stepGoal", step.getStepGoal());
-                stepSnapshot.put("toolName", step.getToolName());
-                stepSnapshot.put("toolInputSchema", step.getToolInputSchema());
-                stepSnapshot.put("completionCriteria", step.getCompletionCriteria());
-                stepSnapshot.put("status", step.getStatus());
-                steps.add(stepSnapshot);
-            }
-        }
-        snapshot.put("steps", steps);
-        return snapshot;
-    }
 
     private Map<String, Object> buildChatTraceInput(String message, RagContext ragContext, AgentPlanVO plan) {
         Map<String, Object> input = new LinkedHashMap<>();
@@ -1779,7 +1692,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         input.put("ragEnabled", ragContext.enabled());
         input.put("ragStatus", ragContext.status());
         input.put("ragHitCount", ragContext.results().size());
-        input.put("agentPlan", buildPlanSnapshot(plan));
+        input.put("agentPlan", ChatTraceAssembler.buildPlanSnapshot(plan));
         return input;
     }
 
@@ -1791,7 +1704,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         output.put("ragError", ragContext.errorMessage());
         output.put("ragHitCount", ragContext.results().size());
         output.put("ragReferences", buildRagReferences(ragContext.results(), false));
-        output.put("agentPlan", buildPlanSnapshot(plan));
+        output.put("agentPlan", ChatTraceAssembler.buildPlanSnapshot(plan));
         return output;
     }
 

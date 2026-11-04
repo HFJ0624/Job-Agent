@@ -79,8 +79,10 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 - ✅ 会话与消息存储抽为 `agent/application/chat/service/ConversationService`
   （getOrCreate / save / touch / 标题生成，含归属校验），`AgentChatServiceImpl` 只调用不实现；
 - ✅ 测试改为注入真实 `ConversationService`（复用原有 Mapper mock），行为与断言不变；
-- ⏳ 仍未拆出：旧模板链路处理（chatInternal 主流程）、结果与 Trace 组装；
-  `AgentChatServiceImpl` 仍是 1700+ 行，后续按"旧链路处理器 / 结果写回器"两块继续。
+- ✅ Trace 载荷组装抽为 `agent/application/chat/support/ChatTraceAssembler`
+  （计划/工具/答复 → Map，字段与结构不变），`AgentChatServiceImpl` 1902 → 1815 行；
+- ⏳ 仍未拆出：旧模板链路处理（chatInternal 主流程）、结果写回；后续按
+  "LegacyChatHandler / ChatResultWriter" 两块继续。
 
 ### 任务三：拆分 AgentPage.vue —— 未完成
 页面仍为单文件（1200+ 行）。`useAgentChat`/`useAgentTask`/`AgentTaskCard` 尚未提取。
