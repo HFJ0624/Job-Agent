@@ -11,14 +11,15 @@
 | 项 | 结果 |
 |---|---|
 | `SeekVersionPolicy` 抽取 | 画像/候选/报告版本规则从 `JobSeekWorkflow` 移出，保存与查找共用同一算法 |
-| 调用点改造 | Workflow 内 5 处版本调用改为策略类；旧私有方法删除 |
+| `SeekAnswerAssembler` 抽取 | 答复排版/公司缺失/薪资元→K 从 Workflow 移出，只接受已校验产物 |
+| 调用点改造 | Workflow 内 5 处版本调用 + 2 处答复调用改为策略/组装类；旧私有方法删除 |
 | 验证 | 后端 373 单测全绿（含 `JobSeekWorkflowTest`、`JobSeekContextArtifactTest`） |
 
 ## 3. 未完成（如实）
 
 | 计划项 | 状态 | 原因/下一步 |
 |---|---|---|
-| `SeekAnswerAssembler` | 未落地 | 机械抽取时正则误删方法导致文件损坏，已回退；改用"按花括号配平"的删除方式重试版本策略成功，答复组装可照此重做 |
+| `SeekAnswerAssembler` | ✅ 已完成 | 用"花括号配平"删除法抽取，Workflow 仅保留编排；373 单测全绿 |
 | `SeekContextResolver` / `SeekArtifactService` | 未落地 | 需连同 `ResumeResolution` 等私有类型一起迁移，改动面大，留待下一批 |
 | `ChatRequestRouter` / `ConversationService` 拆分 | 未落地 | `AgentChatServiceImpl` 仍 1940 行；路由集中点已在 `chat()`/`streamChat()` 注释标明 |
 | `AgentToolInvoker` 注册表化 | 未落地 | 当前仍硬编码 8 个 Tool；计划改为 `Map<String, AgentToolHandler>`，保留 Guard/Trace 顺序 |

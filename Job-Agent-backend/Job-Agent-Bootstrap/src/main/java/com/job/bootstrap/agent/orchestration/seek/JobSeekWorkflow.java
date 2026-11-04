@@ -315,7 +315,7 @@ public class JobSeekWorkflow {
                     "SUCCEEDED", "复用已完成的匹配报告");
             publish(progress, AgentProgressEvent.TASK_COMPLETED, input.planId(), null, null, null,
                     "SUCCEEDED", "任务完成");
-            return new JobSeekOutcome("SUCCEEDED", buildAnswer(matchCandidates, reusableReport), "COMPLETED",
+            return new JobSeekOutcome("SUCCEEDED", SeekAnswerAssembler.assemble(matchCandidates, reusableReport), "COMPLETED",
                     profileArtifactId, candidatesArtifactId, null, resume.getId(),
                     List.of(), null, constraints);
         }
@@ -339,7 +339,7 @@ public class JobSeekWorkflow {
                         + ",candidates=" + candidatesArtifactId);
 
         // ---------- VALIDATE_REPORT + RESPOND（可信字段重建） ----------
-        String answer = buildAnswer(matchCandidates, matchResult.report());
+        String answer = SeekAnswerAssembler.assemble(matchCandidates, matchResult.report());
         publish(progress, AgentProgressEvent.NODE_COMPLETED, input.planId(), matchResult.runId(), "MATCH_AGENT", "MATCH",
                 "SUCCEEDED", "匹配完成（" + matchResult.report().rankedItems().size() + " 个推荐）");
         publish(progress, AgentProgressEvent.TASK_COMPLETED, input.planId(), null, null, null,
@@ -625,72 +625,10 @@ public class JobSeekWorkflow {
 
     // ---------- 答复重建 ----------
 
-    private String buildAnswer(List<JobCandidates.JobCandidateItem> candidates, MatchReport report) {
-        Map<Long, Map<String, Object>> rawById = new LinkedHashMap<>();
-        candidates.forEach(item -> rawById.put(item.jobId(), item.raw()));
 
-        StringBuilder builder = new StringBuilder();
-        builder.append("结合你的简历，我从 ").append(candidates.size()).append(" 个候选里挑出 ")
-                .append(report.rankedItems().size()).append(" 个岗位：\n\n");
-
-        int index = 1;
-        for (MatchReport.RankedItem item : report.rankedItems()) {
-            Map<String, Object> raw = rawById.get(item.jobId());
-            if (raw == null) {
-                continue; // 只输出可信候选
-            }
-            builder.append(index++).append(". ")
-                    .append(text(raw.get("jobTitle"))).append("｜")
-                    .append(companyOf(raw)).append("｜")
-                    .append(text(raw.get("city")));
-            String salary = salaryOf(raw.get("minSalary"), raw.get("maxSalary"));
-            if (StringUtils.hasText(salary)) {
-                builder.append("｜").append(salary);
-            }
-            builder.append("\n");
-            if (!item.matchPoints().isEmpty()) {
-                builder.append("   匹配点：").append(String.join("；", limit(item.matchPoints(), 3))).append("\n");
-            }
-            if (!item.gaps().isEmpty()) {
-                builder.append("   待补能力（简历未见证据）：").append(String.join("；", limit(item.gaps(), 3))).append("\n");
-            }
-            if (!item.suggestions().isEmpty()) {
-                builder.append("   建议：").append(String.join("；", limit(item.suggestions(), 2))).append("\n");
-            }
-        }
-
-        if (report.completedCount() < report.totalCandidates()) {
-            builder.append("\n说明：候选共 ").append(report.totalCandidates())
-                    .append(" 个，本次完整比较 ").append(report.completedCount()).append(" 个");
-            if (!report.uncertainties().isEmpty()) {
-                builder.append("；").append(String.join("；", limit(report.uncertainties(), 2)));
-            }
-            builder.append("。\n");
-        }
-        builder.append("\n如果你愿意，我可以针对排名第一的岗位给出更细的面试准备计划。");
-        return builder.toString();
-    }
-
-    private String companyOf(Map<String, Object> raw) {
-        String company = text(raw.get("companyName"));
-        return StringUtils.hasText(company) ? company : "公司未知";
-    }
 
     // 元/月 → K/月
-    private String salaryOf(Object minValue, Object maxValue) {
-        Integer min = integerOf(minValue);
-        Integer max = integerOf(maxValue);
-        if (min == null && max == null) {
-            return null;
-        }
-        String left = min == null ? "?" : String.valueOf(Math.round(min / 1000.0));
-        String right = max == null ? "?" : String.valueOf(Math.round(max / 1000.0));
-        return left + "-" + right + "K/月";
-    }
 
-    private List<String> limit(List<String> values, int max) {
-        return values.size() > max ? values.subList(0, max) : values;
-    }
 
     // 进度事件（不暴露内部参数/Prompt/推理）
     private void publish(TaskProgressPublisher publisher, String event, Long planId, Long runId,
@@ -726,19 +664,6 @@ public class JobSeekWorkflow {
     }
 
 
-    private Integer integerOf(Object value) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text && StringUtils.hasText(text)) {
-            try {
-                return Integer.parseInt(text.trim());
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
-    }
 
     private String toJson(Object value) {
         try {
