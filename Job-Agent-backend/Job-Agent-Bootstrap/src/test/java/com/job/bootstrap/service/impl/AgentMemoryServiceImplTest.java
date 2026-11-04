@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.impl;
 
-import com.job.bootstrap.agent.memory.AgentMemoryProperties;
+import com.job.bootstrap.agent.support.memory.AgentMemoryProperties;
 import com.job.bootstrap.mapper.AgentLongTermMemoryMapper;
 import com.job.bootstrap.mapper.AgentMemoryHistoryMapper;
 import com.job.common.entity.agent.AgentLongTermMemory;

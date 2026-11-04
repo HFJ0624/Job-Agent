@@ -1,6 +1,6 @@
 package com.job.bootstrap.controller.admin;
 
-import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

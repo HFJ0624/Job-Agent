@@ -1,0 +1,229 @@
+package com.job.bootstrap.agent.orchestration.plan;
+
+import com.job.bootstrap.agent.support.intent.AgentIntentCode;
+import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 作者:hfj
+ * 功能:Agent 计划模板工厂
+ * 日期:2026/6/19
+ */
+@Component
+@RequiredArgsConstructor
+public class AgentPlanTemplateFactory {
+
+    private final AgentToolSchemaRegistry toolSchemaRegistry;
+
+    /**
+     * 根据意图生成计划模板。
+     *
+     * @param intentCode 意图编码
+     * @param userGoal 用户目标
+     * @return 计划模板
+     */
+    public AgentPlanTemplate create(AgentIntentCode intentCode, String userGoal) {
+        return switch (intentCode) {
+            case RESUME_ANALYZE -> resumeAnalyzePlan();
+            case JOB_MATCH -> jobMatchPlan();
+            case GREETING_GENERATE -> greetingPlan();
+            case JOB_SEARCH -> jobSearchPlan();
+            case INTERVIEW_PREPARE -> interviewPreparePlan();
+            case MOCK_INTERVIEW -> mockInterviewReviewPlan();
+            case JOB_FAVORITE -> jobFavoritePlan();
+            case JOB_SEEK_FLOW -> jobSeekFlowPlan();
+            default -> generalChatPlan();
+        };
+    }
+
+    /**
+     * 求职主流程计划（任务 J1）：简历分析 → 岗位筛选 → Top1 匹配分析 → 投递话术。
+     *
+     * <p>设计说明:
+     * 1. 唯一必填参数是 resumeId：缺它时计划进入 NEED_CLARIFICATION，用户补充后按 planId 续跑
+     *    （复用既有澄清机制，不新造轮子）；
+     * 2. 步骤间数据传递用 {{step_N.output.xxx}} 占位符：S3/S4 的 jobId 取 S2 岗位列表的
+     *    第一个（数组下标，Executor 解析），resumeId 等共享参数从计划级 extractedParams 继承；
+     * 3. 收尾步骤是“生成投递话术”而不是“面试准备”：面试准备工具依赖真实投递记录
+     *    （applicationId），首轮流程里尚不存在，硬凑只会得到澄清阻塞；话术生成是匹配后的
+     *    自然动作，且带用户确认 + 可补偿（任务 G9），正好演示完整的写工具链路；
+     * 4. 岗位搜索步骤沿用“搜索/推荐二选一”表达，由 Executor 按用户目标词选择具体工具。
+     */
+    private AgentPlanTemplate jobSeekFlowPlan() {
+        return new AgentPlanTemplate(
+                "求职主流程计划",
+                "串联简历分析、岗位筛选、Top1 岗位匹配分析和投递话术生成：后续步骤通过占位符读取前序步骤的结构化结果，参数不足时先澄清再续跑。",
+                List.of("resumeId"),
+                List.of(
+                        step("解析并分析简历", "解析用户简历，输出评分、优势与待补齐项，为后续匹配提供依据。", "ResumeAnalyzeTool.analyzeResume",
+                                schema("ResumeAnalyzeTool.analyzeResume"),
+                                "返回简历评分、优势、不足和优化建议。"),
+                        step("按条件筛选岗位", "从用户目标中提取关键词和城市，检索候选岗位列表。", "JobSearchTool.searchJobs / JobRecommendTool.recommendJobs",
+                                schema("JobSearchTool.searchJobs / JobRecommendTool.recommendJobs"),
+                                "返回候选岗位列表（含 jobId、公司、薪资、地点）。"),
+                        step("对 Top1 岗位做匹配分析", "取岗位列表第一个做深度匹配，输出匹配分、优势与风险点。", "JobMatchTool.matchJob",
+                                schema("JobMatchTool.matchJob"),
+                                "返回匹配分、匹配等级、优势、风险点和建议。",
+                                Map.of("jobId", "{{step_2.output.jobs[0].jobId}}")),
+                        step("生成投递话术", "为 Top1 匹配岗位生成 HR 开场白（写操作，需用户确认后可补偿）。", "GreetingGenerateTool.generateGreeting",
+                                schema("GreetingGenerateTool.generateGreeting"),
+                                "返回可复制的话术并创建沟通记录；发送前需用户确认。",
+                                Map.of("jobId", "{{step_2.output.jobs[0].jobId}}"))
+                )
+        );
+    }
+
+    private AgentPlanTemplate resumeAnalyzePlan() {
+        return new AgentPlanTemplate(
+                "简历分析计划",
+                "校验用户选择的简历，调用简历分析工具，输出评分、优势、问题和优化建议。",
+                List.of(),
+                List.of(
+                        step("确认简历", "确认用户提供的 resumeId 已被 Planner 抽取，并交给工具做归属校验。", null,
+                                Map.of("resumeId", "必填，用户简历ID"),
+                                "确认简历可解析且能用于评分。"),
+                        step("生成分析结果", "基于简历原文输出质量评分和优化建议。", "ResumeAnalyzeTool.analyzeResume",
+                                schema("ResumeAnalyzeTool.analyzeResume"),
+                                "返回总分、优势、不足和优化建议。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate jobMatchPlan() {
+        return new AgentPlanTemplate(
+                "岗位匹配计划",
+                "校验简历和岗位，调用岗位匹配工具，判断是否值得投递。",
+                List.of("resumeId", "jobId"),
+                List.of(
+                        step("确认匹配对象", "确认 resumeId 和 jobId 都已被 Planner 抽取。", null,
+                                Map.of("resumeId", "必填", "jobId", "必填"),
+                                "简历和岗位均存在且可以进入匹配。"),
+                        step("执行岗位匹配", "计算技能、项目、条件和偏好匹配度。", "JobMatchTool.matchJob",
+                                schema("JobMatchTool.matchJob"),
+                                "返回匹配分、匹配等级、优势、风险点和建议。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate greetingPlan() {
+        return new AgentPlanTemplate(
+                "HR 打招呼语计划",
+                "校验简历和岗位，生成适合发给 HR 的开场白，并形成沟通记录。",
+                List.of("resumeId", "jobId"),
+                List.of(
+                        step("确认话术上下文", "确认简历、岗位和话术风格已准备好，并检查是否需要用户确认。", null,
+                                Map.of("resumeId", "必填", "jobId", "必填", "style", "可选"),
+                                "确认生成话术所需上下文完整。"),
+                        step("生成沟通话术", "生成自然、克制、与岗位匹配的 HR 开场白。", "GreetingGenerateTool.generateGreeting",
+                                schema("GreetingGenerateTool.generateGreeting"),
+                                "返回可复制的话术，并由后端自动创建沟通记录。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate jobSearchPlan() {
+        return new AgentPlanTemplate(
+                "岗位搜索/推荐计划",
+                "解析岗位关键词、城市和薪资条件，调用岗位搜索或岗位推荐工具。",
+                List.of(),
+                List.of(
+                        step("解析搜索条件", "从用户输入中提取岗位关键词、城市和最低薪资。", null,
+                                Map.of("keyword", "可选", "city", "可选", "minSalary", "可选"),
+                                "得到可用于岗位检索的筛选条件。"),
+                        step("检索岗位", "按条件搜索岗位；如果用户强调偏好推荐，则优先调用推荐工具。", "JobSearchTool.searchJobs / JobRecommendTool.recommendJobs",
+                                schema("JobSearchTool.searchJobs / JobRecommendTool.recommendJobs"),
+                                "返回岗位列表、公司、薪资、地点和推荐理由。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate interviewPreparePlan() {
+        return new AgentPlanTemplate(
+                "面试准备计划",
+                "根据投递记录和关联岗位生成面试准备材料。",
+                List.of("applicationId"),
+                List.of(
+                        step("确认投递记录", "确认 applicationId 已被 Planner 抽取，并交给工具做归属校验。", null,
+                                Map.of("applicationId", "必填", "resumeId", "可选"),
+                                "确认投递记录可用于生成面试准备。"),
+                        step("生成面试材料", "生成技术题、项目追问题、HR 问题和复习建议。", "InterviewPrepareTool.prepareInterview",
+                                schema("InterviewPrepareTool.prepareInterview"),
+                                "返回面试准备材料和复习建议。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate mockInterviewReviewPlan() {
+        return new AgentPlanTemplate(
+                "模拟面试复盘计划",
+                "根据模拟面试会话生成复盘总结和提升计划。",
+                List.of("mockSessionId"),
+                List.of(
+                        step("确认模拟面试会话", "确认 mockSessionId 已被 Planner 抽取，并交给工具做归属校验。", null,
+                                Map.of("mockSessionId", "必填"),
+                                "确认模拟面试会话已存在且可复盘。"),
+                        step("生成复盘", "汇总回答表现、薄弱题目和提升建议。", "MockInterviewReviewTool.generateMockInterviewReview",
+                                schema("MockInterviewReviewTool.generateMockInterviewReview"),
+                                "返回总分、优势、短板、薄弱题和提升计划。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate jobFavoritePlan() {
+        return new AgentPlanTemplate(
+                "岗位收藏计划",
+                "确认岗位 ID 后，提示用户当前 Agent 暂不直接执行收藏操作。",
+                List.of("jobId"),
+                List.of(
+                        step("确认岗位", "确认用户要收藏的岗位 ID。", null,
+                                Map.of("jobId", "必填"),
+                                "明确岗位 ID，并提示用户可在岗位详情页收藏。")
+                )
+        );
+    }
+
+    private AgentPlanTemplate generalChatPlan() {
+        // 知识检索已上移到 chat() 的 RAG 预检索（retrieveRagContext）统一完成，
+        // 这里不再挂 RagSearchTool 步骤，避免同一轮对话重复召回、双倍 embedding 成本。
+        return new AgentPlanTemplate(
+                "通用求职问答计划",
+                "基于计划执行前统一检索到的用户知识库或通用求职经验回答；知识检索已由后端预检索完成，不再作为计划步骤重复调用。",
+                List.of(),
+                List.of(
+                        step("生成回答", "基于已检索的知识片段回答用户问题，知识不足时明确说明。", null,
+                                Map.of("answerLanguage", "中文"),
+                                "输出清晰、可信、不过度编造的求职建议。")
+                )
+        );
+    }
+
+    private AgentPlanStepTemplate step(
+            String stepName,
+            String stepGoal,
+            String toolName,
+            Map<String, Object> toolInputSchema,
+            String completionCriteria
+    ) {
+        return new AgentPlanStepTemplate(stepName, stepGoal, toolName, toolInputSchema, completionCriteria);
+    }
+
+    /** 带步骤级可执行参数的重载（任务 J1：主流程步骤间传参）。 */
+    private AgentPlanStepTemplate step(
+            String stepName,
+            String stepGoal,
+            String toolName,
+            Map<String, Object> toolInputSchema,
+            String completionCriteria,
+            Map<String, Object> stepParams
+    ) {
+        return new AgentPlanStepTemplate(stepName, stepGoal, toolName, toolInputSchema, completionCriteria, stepParams);
+    }
+
+    private Map<String, Object> schema(String toolExpression) {
+        return toolSchemaRegistry.buildPlanInputSchema(toolExpression);
+    }
+}

@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.job.bootstrap.agent.memory.AgentMemoryProperties;
+import com.job.bootstrap.agent.support.memory.AgentMemoryProperties;
 import com.job.bootstrap.mapper.AgentLongTermMemoryMapper;
 import com.job.bootstrap.mapper.AgentMemoryHistoryMapper;
 import com.job.bootstrap.service.AgentMemoryService;

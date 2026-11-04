@@ -1,6 +1,6 @@
 package com.job.bootstrap.service;
 
-import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
 
 /**
  * Agent 计划执行服务接口。

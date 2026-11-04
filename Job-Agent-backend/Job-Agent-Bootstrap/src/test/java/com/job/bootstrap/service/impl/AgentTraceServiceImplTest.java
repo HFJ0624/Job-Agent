@@ -1,8 +1,8 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
-import com.job.bootstrap.agent.guardrail.PiiMasker;
+import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.support.guardrail.PiiMasker;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.service.AgentObservationService;
 import com.job.common.entity.agent.AgentTraceLog;

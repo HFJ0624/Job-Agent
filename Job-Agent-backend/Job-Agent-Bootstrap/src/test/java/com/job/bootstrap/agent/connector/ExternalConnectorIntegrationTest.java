@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.connector;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mcp.McpClient;
 import com.job.bootstrap.service.AdminExternalConnectorService;
 import com.job.bootstrap.service.impl.AdminExternalConnectorServiceImpl;

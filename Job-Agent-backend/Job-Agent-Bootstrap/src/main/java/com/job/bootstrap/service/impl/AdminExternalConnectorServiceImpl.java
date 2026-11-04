@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.impl;
 
-import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
 import com.job.bootstrap.mcp.McpClient;
 import com.job.bootstrap.service.AdminExternalConnectorService;
 import com.job.common.agent.tool.AgentToolSchema;

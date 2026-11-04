@@ -2,7 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentObservationService;
