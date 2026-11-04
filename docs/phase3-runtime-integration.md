@@ -149,3 +149,25 @@ curl -N -X POST http://localhost:8080/front/agent/chat/stream \
 - 打包启动实测：`flywayInitializer` 不再出现（0 次），原始 PG 报错消失；
 - 后端 **363** 单测全绿；
 - 沙箱环境无 MySQL 口令 / MinIO 密钥，后续启动会停在环境配置（非代码问题）：本地需设置 `DB_PASSWORD` 与 MinIO 的 access/secret。
+
+
+## 12. 三个功能问题修复（2026-11-04，审查提交 af9201c）
+
+### 12.1 刷新后任务卡片无法恢复
+- **原因**：`restoreTaskForConversation()` 先把 `taskCard` 置空再查询，`syncTaskFromServer()` 用 `taskCard.value?.planId` 做归属校验，卡片为空导致合法快照被丢弃。
+- **修复**：新增 `expectedPlanId`（期望展示的任务）与"卡片是否已创建"解耦；恢复前记录目标 planId，查询返回后按 `conversationId 批次号（taskEpoch）+ expectedPlanId` 双重校验；`ensureTaskCard` 同步维护期望值；「新任务」清空期望。
+- **保留**：旧响应隔离、取消终态不被迟到快照推翻、查询失败保留现有展示。
+
+### 12.2 等待选简历/失败时丢失任务上下文
+- **原因**：Workflow 在简历未确定时提前返回，`constraints` 仍为 null；Entry 直接把空值写回，覆盖历史城市/方向；部分失败分支 `resumeId` 为 null 也被写回。
+- **修复**：
+  - Workflow 在解析简历**之前**先合并本轮有效条件，所有提前返回（NEED_INPUT/取消/失败）都携带 `constraints` 与已确定的 `resumeId`；
+  - Entry 改为**合并写回**：本次 `resumeId` 为空则保留旧值，条件为空则保留历史条件；兼容 `{constraints, resumeId}` 包装与早期平铺格式；
+  - 失败分支把已成功的产物 ID 一并返回，重试只跑失败节点。
+
+### 12.3 一个节点失败丢失另一个成功节点的产物
+- **原因**：画像/候选产物的 `saveArtifact` 位于两个上游节点都通过之后；画像成功、搜索失败时提前退出，画像未落库。注释声称"成功即保存"但控制流没做到。
+- **修复**：串行与并行两条路径都改为**节点产出有效结果后立即保存**；并行时先生效的兄弟节点照常落库；`loadProfileArtifact/loadCandidatesArtifact` 返回 `artifactId`，报告版本仍由 `条件版本 + 画像/候选产物 ID` 决定；同版本保存保持幂等；`NEED_INPUT` 不落画像产物；产物保存失败改为抛错并由上层转 FAILED（不再声称"已完成"）。
+
+**验证**：新增 `JobSeekContextArtifactTest`（简历待选时条件保留 / 画像成功搜索失败时产物保留且重试复用），后端 373 单测全绿；前端 `vue-tsc` + `vite build` 通过。
+**未验证**：真实模型、MySQL、浏览器端到端（刷新恢复与补参续跑仅通过类型检查/单测覆盖，未做真实链路演示）。

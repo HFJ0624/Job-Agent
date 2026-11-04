@@ -257,6 +257,12 @@ let taskPollTimer: ReturnType<typeof setTimeout> | null = null;
 let taskPollCount = 0;
 /* 页面交互批次号：切换会话/新任务/新请求都会递增，用于丢弃旧回调 */
 let taskEpoch = 0;
+/*
+ * 当前期望展示的任务标识（与 taskCard 是否存在解耦）：
+ * 刷新恢复时卡片还是空的，但已知要恢复哪个 planId，
+ * 查询返回后应以它为归属校验依据，而不是依赖已存在的卡片。
+ */
+let expectedPlanId: number | null = null;
 
 function taskStorageKey(cid: number | null) {
   return `jobAgentTask:${cid ?? "new"}`;
@@ -285,6 +291,7 @@ function readPersistedPlanId(cid: number | null): number | null {
 }
 
 function ensureTaskCard(planId: number): TaskCard {
+  expectedPlanId = planId;
   if (!taskCard.value || taskCard.value.planId !== planId) {
     taskCard.value = {
       planId,
@@ -333,8 +340,9 @@ function applyProgressEvent(event: AgentProgressEvent) {
   }
   const planId = event.planId ?? null;
   if (planId) {
-    if (taskCard.value?.planId && taskCard.value.planId !== planId) {
-      return; // 旧任务迟到事件
+    // 旧任务/旧会话的迟到事件：与当前期望任务不一致就丢弃
+    if (expectedPlanId !== null && expectedPlanId !== planId) {
+      return;
     }
     ensureTaskCard(planId);
     persistTaskPlanId(conversationId.value, planId);
@@ -390,7 +398,7 @@ async function syncTaskFromServer(planId: number, poll = true) {
   try {
     const snapshot = await fetchAgentTaskStatus(planId);
     // 审查 F6：查询返回后必须确认会话/批次/任务仍是当前目标，旧响应直接丢弃
-    if (epoch !== taskEpoch || taskCard.value?.planId !== planId) {
+    if (epoch !== taskEpoch || expectedPlanId !== planId) {
       return;
     }
     const status = PLAN_STATUS_MAP[String(snapshot?.status ?? "")] ?? String(snapshot?.status ?? "RUNNING");
@@ -484,6 +492,8 @@ async function restoreTaskForConversation(cid: number | null) {
   taskEpoch += 1;
   taskCard.value = null;
   const planId = readPersistedPlanId(cid);
+  // 先记住"要恢复哪个任务"，卡片由合法快照创建；没有任务则清空期望
+  expectedPlanId = planId;
   if (!planId) {
     return;
   }
@@ -534,6 +544,7 @@ function startNewTaskFromCard() {
   taskEpoch += 1;
   persistTaskPlanId(conversationId.value, null);
   taskCard.value = null;
+  expectedPlanId = null;
   stopTaskPolling();
   ElMessage.info("已切换到新任务，下一条消息不会附加到旧任务");
 }

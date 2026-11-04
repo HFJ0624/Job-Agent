@@ -145,7 +145,13 @@ public class JobSeekReactEntry {
             agentTaskService.updateExecutionMillis(finalPlan.getId(), budget.usedMillis());
 
             // 审查 F3：合并后的条件与所选简历写回父任务，供下一轮补参使用
-            Map<String, Object> contextPayload = context(outcome.resumeId(), outcome.constraints());
+            /*
+             * 审查修复（问题二）：写回上下文必须"合并"而不是覆盖。
+             * 本次没给 resumeId（尚未选定简历）不能清空旧值；本次没算出条件
+             * （理论上不应发生，这里兜底）也不能把历史条件写成 {}。
+             */
+            Map<String, Object> contextPayload = mergeContext(
+                    finalPlan.getExtractedParamsJson(), outcome.resumeId(), outcome.constraints());
             agentTaskService.updateConstraints(finalPlan.getId(), toJson(contextPayload));
 
             // 审查 F5：取消优先——取消后不写成功终态
@@ -190,6 +196,41 @@ public class JobSeekReactEntry {
     }
 
     // 任务上下文包装：{constraints:{...}, resumeId:n}（历史兼容由 Workflow 负责）
+    /**
+     * 合并任务上下文：本次有效值优先，缺失时保留历史值。
+     *
+     * <p>兼容两种历史格式：{@code {constraints:{...}, resumeId:n}} 包装格式，
+     * 以及早期直接保存 SearchConstraints 的平铺格式。</p>
+     */
+    private Map<String, Object> mergeContext(String existingJson, Long resumeId,
+                                             com.job.bootstrap.agent.domain.job.SearchConstraints constraints) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        Long previousResumeId = null;
+        Object previousConstraints = null;
+
+        if (StringUtils.hasText(existingJson)) {
+            try {
+                Map<String, Object> existing = objectMapper.readValue(existingJson,
+                        objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+                if (existing.get("constraints") instanceof Map<?, ?> nested) {
+                    previousConstraints = nested;
+                    previousResumeId = existing.get("resumeId") instanceof Number number
+                            ? number.longValue() : null;
+                } else {
+                    // 旧格式：整个对象就是条件快照
+                    previousConstraints = existing;
+                }
+            } catch (Exception exception) {
+                log.debug("任务上下文解析失败，按无历史处理，error={}", exception.getMessage());
+            }
+        }
+
+        merged.put("resumeId", resumeId != null ? resumeId : previousResumeId);
+        merged.put("constraints", constraints != null ? constraints
+                : (previousConstraints == null ? Map.of() : previousConstraints));
+        return merged;
+    }
+
     private Map<String, Object> context(Long resumeId, com.job.bootstrap.agent.domain.job.SearchConstraints constraints) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("resumeId", resumeId);
