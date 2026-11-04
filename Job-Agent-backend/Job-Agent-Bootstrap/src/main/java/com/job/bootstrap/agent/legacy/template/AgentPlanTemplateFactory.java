@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.orchestration.plan;
+package com.job.bootstrap.agent.legacy.template;
 
 import com.job.bootstrap.agent.support.intent.AgentIntentCode;
 import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;

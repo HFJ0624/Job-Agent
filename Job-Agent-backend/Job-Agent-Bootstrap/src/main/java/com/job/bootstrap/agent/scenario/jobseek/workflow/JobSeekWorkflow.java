@@ -12,7 +12,7 @@ import com.job.bootstrap.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
 import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
 import com.job.bootstrap.agent.scenario.match.MatchReport;
-import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
+import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.core.react.AgentResult;
 import com.job.bootstrap.agent.core.react.AgentRunExecutionHooks;
 import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;

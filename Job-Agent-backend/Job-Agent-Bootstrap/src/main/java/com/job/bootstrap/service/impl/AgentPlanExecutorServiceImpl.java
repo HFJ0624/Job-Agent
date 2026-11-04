@@ -12,7 +12,7 @@ import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
 import com.job.bootstrap.agent.tool.registry.ExecutionSupersededException;
 import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
 import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
-import com.job.bootstrap.agent.orchestration.plan.AgentReplanner;
+import com.job.bootstrap.agent.legacy.template.AgentReplanner;
 import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;

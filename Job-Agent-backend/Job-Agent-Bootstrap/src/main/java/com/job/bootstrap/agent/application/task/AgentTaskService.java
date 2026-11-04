@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.orchestration.task;
+package com.job.bootstrap.agent.application.task;
 
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.common.entity.agent.AgentPlan;

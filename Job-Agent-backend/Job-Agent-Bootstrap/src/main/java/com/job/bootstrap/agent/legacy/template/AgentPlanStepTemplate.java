@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.orchestration.plan;
+package com.job.bootstrap.agent.legacy.template;
 
 import java.util.Map;
 

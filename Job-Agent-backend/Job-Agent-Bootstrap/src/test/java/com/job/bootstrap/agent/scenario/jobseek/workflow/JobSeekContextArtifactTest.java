@@ -8,7 +8,7 @@ import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
 import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;
 import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
 import com.job.bootstrap.agent.scenario.resume.ResumeSelectionService;
-import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
+import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.core.react.AgentResult;
 import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
 import com.job.bootstrap.service.JobResumeService;
@@ -62,7 +62,7 @@ class JobSeekContextArtifactTest {
         workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow, resumeService,
                 new ResumeSelectionService(resumeService), preferenceService, artifactService,
                 new SeekArtifactService(artifactService, mapper),
-                new SeekContextResolver(new com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor(),
+                new SeekContextResolver(new com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor(),
                         new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
                         resumeService, preferenceService, mapper),
                 new AgentPlanParameterExtractor(), mapper, executor);

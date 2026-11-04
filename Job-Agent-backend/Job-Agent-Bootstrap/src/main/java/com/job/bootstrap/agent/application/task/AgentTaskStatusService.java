@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.orchestration.task;
+package com.job.bootstrap.agent.application.task;
 
 import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
 import com.job.bootstrap.agent.core.budget.TaskBudgetRegistry;
