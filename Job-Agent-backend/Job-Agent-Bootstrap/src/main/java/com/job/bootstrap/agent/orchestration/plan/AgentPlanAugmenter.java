@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.orchestration.plan;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.common.agent.tool.AgentToolParamSchema;
 import com.job.common.agent.tool.AgentToolSchema;

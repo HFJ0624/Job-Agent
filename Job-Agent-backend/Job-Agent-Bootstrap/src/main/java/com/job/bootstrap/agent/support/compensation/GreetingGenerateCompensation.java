@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.support.compensation;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.executor.AgentPlanStepExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
 import com.job.bootstrap.service.JobCommunicationRecordService;
 import com.job.common.entity.communication.JobCommunicationRecord;

@@ -72,7 +72,7 @@ agent/
 | `agent/scenario/jobseek/`（8 类） | ✅ 已迁移：entry（JobSeekReactEntry）、workflow（JobSeekWorkflow）、policy（SeekVersionPolicy）、assembler（SeekAnswerAssembler）、service（SeekArtifactService/SeekContextResolver）、model（JobCandidateArtifactCodec）、config（JobSeekExecutorConfig） |
 | `agent/scenario/{resume,jobsearch,match}` | ✅ 已迁移（整包移动，角色子包按需再分） |
 | `agent/tool/impl/`（8 业务 Tool + resolver） | ✅ 已迁移（实现集中在 impl，后续可再拆 registry/spi） |
-| `agent/runtime/{react,budget,progress,run,artifact,executor,schema}` | ⏳ 待迁入 `core/*` 与 `infrastructure/*` |
+| `agent/core/{react,budget,event}`、`agent/infrastructure/persistence`、`agent/tool/registry` | ✅ 已迁移：react/budget→core；progress→core/event；run/artifact→infrastructure/persistence；executor/schema→tool/registry |
 | `agent/orchestration/task/` | ⏳ 待迁入 `agent/application/task/` |
 | `agent/support/*` | ✅ 已符合（保留子包） |
 | `controller/front/AgentController` | ⏳ 待迁入 `agent/api/controller/front/` |

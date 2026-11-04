@@ -38,11 +38,11 @@ AgentController (/front/agent/chat、/chat/stream、/task/{planId})
 | 搜索 | `scenario/jobsearch/JobSearchWorkflow` | 搜索验真、EMPTY/FOUND |
 | 简历 | `scenario/resume/ResumeAgentNode` + `ResumeSelectionService` | 画像与证据回溯、简历定位 |
 | 匹配 | `scenario/match/MatchAgentNode` | 只读预览、报告校验 |
-| 内核 | `runtime/react/ReActRunner` + `TerminalContract` | 反馈循环、终结契约 |
-| 内核 | `runtime/budget/TaskExecutionBudget` | 父预算（网关唯一扣费点） |
-| 内核 | `runtime/executor/AgentToolInvoker` | 可信身份、Guard、Trace、工具分发 |
-| 产物 | `runtime/artifact/AgentArtifactService` | 结构化产物按版本复用 |
-| 进度 | `runtime/progress/*` | SSE 节点事件 |
+| 内核 | `core/react/ReActRunner` + `TerminalContract` | 反馈循环、终结契约 |
+| 内核 | `core/budget/TaskExecutionBudget` | 父预算（网关唯一扣费点） |
+| 内核 | `tool/registry/AgentToolInvoker` | 可信身份、Guard、Trace、工具分发 |
+| 产物 | `infrastructure/persistence/AgentArtifactService` | 结构化产物按版本复用 |
+| 进度 | `core/event/*` | SSE 节点事件 |
 
 ## 3. 业务模块导航（非 Agent）
 

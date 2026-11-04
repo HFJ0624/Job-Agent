@@ -5,7 +5,7 @@ import com.job.bootstrap.agent.scenario.jobseek.model.JobCandidateArtifactCodec;
 import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
 import com.job.bootstrap.agent.scenario.match.MatchReport;
 import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
-import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
+import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
 import com.job.common.entity.agent.AgentArtifact;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.support.compensation;
 
-import com.job.bootstrap.agent.runtime.executor.AgentPlanStepExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
 
 /**
  * 功能: 计划步骤补偿动作（任务 G9）。

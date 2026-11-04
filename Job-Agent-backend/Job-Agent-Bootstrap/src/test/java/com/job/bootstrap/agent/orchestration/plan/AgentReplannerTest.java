@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.orchestration.plan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import org.junit.jupiter.api.Test;

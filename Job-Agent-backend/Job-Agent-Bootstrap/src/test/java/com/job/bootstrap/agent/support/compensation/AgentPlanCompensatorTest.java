@@ -1,9 +1,9 @@
 package com.job.bootstrap.agent.support.compensation;
 
-import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
-import com.job.bootstrap.agent.runtime.executor.AgentPlanStepExecutionResult;
-import com.job.bootstrap.agent.runtime.executor.AgentToolExecutionResult;
-import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentObservationService;
 import com.job.common.agent.tool.AgentToolSchema;

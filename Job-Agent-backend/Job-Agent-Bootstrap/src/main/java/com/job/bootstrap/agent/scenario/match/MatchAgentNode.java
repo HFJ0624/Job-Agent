@@ -1,13 +1,13 @@
 package com.job.bootstrap.agent.scenario.match;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.react.AgentDefinition;
-import com.job.bootstrap.agent.runtime.react.AgentRunContext;
-import com.job.bootstrap.agent.runtime.react.AgentRunExecutionHooks;
-import com.job.bootstrap.agent.runtime.react.ReActRunner;
+import com.job.bootstrap.agent.core.react.AgentDefinition;
+import com.job.bootstrap.agent.core.react.AgentRunContext;
+import com.job.bootstrap.agent.core.react.AgentRunExecutionHooks;
+import com.job.bootstrap.agent.core.react.ReActRunner;
 import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
 import com.job.bootstrap.agent.scenario.resume.ResumeSections;
-import com.job.bootstrap.agent.runtime.run.AgentRunService;
+import com.job.bootstrap.agent.infrastructure.persistence.AgentRunService;
 import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
 import com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints;
 import com.job.bootstrap.ai.turn.AiChatMessage;
@@ -95,7 +95,7 @@ public class MatchAgentNode {
                           JobResume resume, ResumeProfile profile, List<JobCandidates.JobCandidateItem> candidates,
                           SearchConstraints constraints, int topK, String constraintVersion,
                           Long profileArtifactId, Long candidatesArtifactId,
-                          com.job.bootstrap.agent.runtime.budget.TaskExecutionBudget budget) {
+                          com.job.bootstrap.agent.core.budget.TaskExecutionBudget budget) {
         Set<Long> candidateIds = candidates.stream()
                 .map(JobCandidates.JobCandidateItem::jobId).collect(Collectors.toSet());
         Map<Long, BigDecimal> previewedScores = new HashMap<>();

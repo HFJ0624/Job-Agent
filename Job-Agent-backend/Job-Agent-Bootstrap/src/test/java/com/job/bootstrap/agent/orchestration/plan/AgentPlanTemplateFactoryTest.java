@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.orchestration.plan;
 
 import com.job.bootstrap.agent.support.intent.AgentIntentCode;
-import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
 package com.job.bootstrap.service;
 
-import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.common.entity.agent.AgentPlan;
 
 /**

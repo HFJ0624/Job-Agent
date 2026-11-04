@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.support.guardrail.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.guardrail.HallucinationGuard;
 import com.job.bootstrap.agent.support.guardrail.PiiMasker;

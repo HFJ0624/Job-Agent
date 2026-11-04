@@ -1,9 +1,9 @@
 package com.job.bootstrap.agent.orchestration.task;
 
-import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
-import com.job.bootstrap.agent.runtime.budget.TaskBudgetRegistry;
-import com.job.bootstrap.agent.runtime.budget.TaskExecutionBudget;
-import com.job.bootstrap.agent.runtime.run.AgentRunService;
+import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
+import com.job.bootstrap.agent.core.budget.TaskBudgetRegistry;
+import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
+import com.job.bootstrap.agent.infrastructure.persistence.AgentRunService;
 import com.job.common.entity.agent.AgentArtifact;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentRun;

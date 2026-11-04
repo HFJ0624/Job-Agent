@@ -2,7 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.support.context.AgentContextBuilder;
-import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.intent.AgentIntentCode;
 import com.job.bootstrap.agent.support.intent.AgentIntentLlmClassifier;
@@ -14,7 +14,7 @@ import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.bootstrap.support.SimpleTransactionManager;
 import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.support.rewrite.AgentQueryRewriter;
-import com.job.bootstrap.agent.runtime.schema.AgentToolSchemaRegistry;
+import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;

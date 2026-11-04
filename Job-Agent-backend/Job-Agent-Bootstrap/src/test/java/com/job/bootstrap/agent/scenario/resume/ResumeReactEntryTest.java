@@ -1,12 +1,12 @@
 package com.job.bootstrap.agent.scenario.resume;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.artifact.AgentArtifactService;
+import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
 import com.job.bootstrap.agent.orchestration.plan.AgentPlanParameterExtractor;
-import com.job.bootstrap.agent.runtime.progress.TaskProgressPublisher;
+import com.job.bootstrap.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactSearchProperties;
 import com.job.bootstrap.agent.orchestration.task.AgentTaskService;
-import com.job.bootstrap.agent.runtime.budget.TaskBudgetRegistry;
+import com.job.bootstrap.agent.core.budget.TaskBudgetRegistry;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.enums.AgentPlanStatus;

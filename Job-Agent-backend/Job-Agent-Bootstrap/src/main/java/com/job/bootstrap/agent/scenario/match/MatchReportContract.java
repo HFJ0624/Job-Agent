@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.scenario.match;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.react.TerminalContract;
+import com.job.bootstrap.agent.core.react.TerminalContract;
 import com.job.bootstrap.ai.turn.AiToolSpec;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;

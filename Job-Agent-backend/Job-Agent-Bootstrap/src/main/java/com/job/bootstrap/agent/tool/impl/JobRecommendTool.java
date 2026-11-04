@@ -3,7 +3,7 @@ package com.job.bootstrap.agent.tool.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.bootstrap.agent.runtime.schema.AgentToolGuard;
+import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.bootstrap.service.UserJobPreferenceService;
 import com.job.common.dto.preference.JobRecommendQueryDTO;

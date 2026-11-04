@@ -1,11 +1,11 @@
 package com.job.bootstrap.agent.scenario.jobsearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.runtime.executor.AgentToolExecutionResult;
-import com.job.bootstrap.agent.runtime.executor.AgentToolInvoker;
-import com.job.bootstrap.agent.runtime.react.AgentResult;
-import com.job.bootstrap.agent.runtime.react.ReActRunner;
-import com.job.bootstrap.agent.runtime.react.TerminalToolContract;
+import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
+import com.job.bootstrap.agent.core.react.AgentResult;
+import com.job.bootstrap.agent.core.react.ReActRunner;
+import com.job.bootstrap.agent.core.react.TerminalToolContract;
 import com.job.bootstrap.ai.turn.AiChatTurnResponse;
 import com.job.bootstrap.ai.turn.AiChatTurnRequest;
 import com.job.bootstrap.ai.turn.AiToolCall;

@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.support.guardrail;
 
-import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;

@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.support.guardrail;
 
-import com.job.bootstrap.agent.runtime.executor.AgentPlanExecutionResult;
-import com.job.bootstrap.agent.runtime.executor.AgentPlanStepExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
