@@ -1,10 +1,13 @@
 package com.job.bootstrap.agent.application.routing;
 
+import com.job.bootstrap.agent.application.task.AgentTaskService;
 import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
+import com.job.common.entity.agent.AgentPlan;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 功能: 对话请求路由（从 AgentChatServiceImpl 抽出）。
@@ -32,6 +35,7 @@ public class ChatRequestRouter {
         LEGACY
     }
 
+    private final AgentTaskService agentTaskService;
     private final JobSeekReactEntry jobSeekReactEntry;
     private final ResumeReactEntry resumeReactEntry;
     private final JobSearchReactEntry jobSearchReactEntry;
@@ -44,13 +48,32 @@ public class ChatRequestRouter {
      * @param message    用户原始消息（复合意图判断需要）
      */
     public Route route(String intentCode, Long planId, String message) {
-        if (jobSeekReactEntry.shouldHandle(intentCode, planId, message)) {
+        /*
+         * 已有任务：严格按持久化 runtimeMode 路由。
+         * 不能再用关键词判断——例如 WORKFLOW_RESUME 的补参消息里出现"简历、岗位"时，
+         * 若先走关键词匹配会被复合任务入口抢走，导致原任务无法续跑。
+         */
+        if (planId != null) {
+            AgentPlan plan = agentTaskService.load(planId);
+            if (plan == null || !StringUtils.hasText(plan.getRuntimeMode())) {
+                return Route.LEGACY; // 任务不存在/无模式：交给旧链路按原逻辑处理（含归属校验）
+            }
+            return switch (plan.getRuntimeMode()) {
+                case AgentTaskService.RUNTIME_MULTI_AGENT -> Route.MULTI_AGENT;
+                case ResumeReactEntry.RUNTIME_RESUME -> Route.RESUME;
+                case AgentTaskService.RUNTIME_REACT_SEARCH -> Route.REACT_SEARCH;
+                default -> Route.LEGACY; // TEMPLATE 或其他历史模式
+            };
+        }
+
+        // 新任务：意图 + 关键词 + 开关决定走哪条新链路，否则旧模板链路
+        if (jobSeekReactEntry.shouldHandle(intentCode, null, message)) {
             return Route.MULTI_AGENT;
         }
-        if (resumeReactEntry.shouldHandle(intentCode, planId, message)) {
+        if (resumeReactEntry.shouldHandle(intentCode, null, message)) {
             return Route.RESUME;
         }
-        if (jobSearchReactEntry.shouldHandle(intentCode, planId)) {
+        if (jobSearchReactEntry.shouldHandle(intentCode, null)) {
             return Route.REACT_SEARCH;
         }
         return Route.LEGACY;

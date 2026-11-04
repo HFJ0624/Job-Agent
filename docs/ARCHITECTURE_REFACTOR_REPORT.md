@@ -63,3 +63,35 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 
 **结论（写入验证规范）**：包迁移后必须使用 `clean package`；普通 `package` 会复用
 上一次编译的 `target/classes`，把旧包一起打进 jar，产生"源码干净但运行期 Bean 冲突"的假象。
+
+
+## 8. 收尾轮（2026-11-04，参考 859c681）
+
+### 任务一：已有任务路由 —— 已完成
+- `ChatRequestRouter` 增加 `AgentTaskService` 依赖：`planId != null` 时**只按持久化 `runtimeMode`** 选择
+  （`WORKFLOW_MULTI_AGENT`/`WORKFLOW_RESUME`/`WORKFLOW_REACT`/其余→LEGACY），不再看消息关键词；
+- 新任务（`planId == null`）才走"意图+关键词+开关"判断，Entry 的 `shouldHandle` 传 `null`；
+- 同步 `chat()` 与流式 `streamChat()` 共用同一路由结果。
+- 测试：`ChatRequestRouterTest` 4 例（RESUME 任务带"简历/岗位"仍走 RESUME 且不询问复合入口、
+  MULTI_AGENT 保持、新请求按关键词、未知任务回退 LEGACY）。
+
+### 任务二：拆分 AgentChatServiceImpl —— 未完成
+`AgentChatServiceImpl` 仍是 1900+ 行的协调类（会话/护栏/旧链路/结果落库/Trace）。
+本轮只做了路由外移；会话存储与结果写回尚未拆出。原因：3 个会话测试直接 mock Mapper 并断言落库，
+拆分必须同步改写测试断言，属于行为敏感改动，本轮预算不足，未开工以免留下半迁移状态。
+
+### 任务三：拆分 AgentPage.vue —— 未完成
+页面仍为单文件（1200+ 行）。`useAgentChat`/`useAgentTask`/`AgentTaskCard` 尚未提取。
+
+### 任务五：验证结果（实际执行）
+| 项 | 结果 |
+|---|---|
+| 后端全量单测 | **377 全绿** |
+| `mvn -pl Job-Agent-Bootstrap -am clean package` | 成功 |
+| Spring 容器启动（`--job.agent.react-search.enabled=true`） | `Started JobAgentApplication in 13.7s` |
+| 用户端 `npm run build` | 成功（12.45s，仅有既有 chunk 体积警告） |
+| 真实模型链路 | **未验证**：阿里云百炼返回 `Arrearage`（账户欠费），需充值或改用其他 OpenAI 兼容服务 |
+| 页面刷新恢复 / 取消 / 补参 / 重试 | **未做浏览器验证**，仅有单测与代码路径覆盖 |
+
+> 启动必须用 `clean package`：包迁移后 `target/classes` 会残留旧包，普通 package 会导致
+> `ConflictingBeanDefinitionException`（已在第 7 节记录）。
