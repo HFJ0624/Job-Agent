@@ -1,19 +1,19 @@
-package com.job.bootstrap.agent.scenario.match;
+package com.job.ai.agent.scenario.match;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.core.react.AgentDefinition;
 import com.job.ai.agent.core.react.AgentRunContext;
 import com.job.ai.agent.core.react.AgentRunExecutionHooks;
 import com.job.ai.agent.core.react.ReActRunner;
-import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
-import com.job.bootstrap.agent.scenario.resume.ResumeSections;
+import com.job.ai.agent.scenario.resume.ResumeProfile;
+import com.job.ai.agent.scenario.resume.ResumeSections;
 import com.job.ai.infrastructure.persistence.AgentRunService;
-import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
-import com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints;
+import com.job.ai.agent.scenario.jobsearch.JobCandidates;
+import com.job.ai.agent.scenario.jobsearch.SearchConstraints;
 import com.job.ai.model.turn.AiChatMessage;
 import com.job.ai.model.turn.AiToolSpec;
-import com.job.bootstrap.service.JobMatchService;
-import com.job.bootstrap.service.JobPositionService;
+import com.job.ai.agent.port.JobMatchPort;
+import com.job.ai.agent.port.JobSearchPort;
 import com.job.common.entity.agent.AgentRun;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
@@ -64,8 +64,8 @@ public class MatchAgentNode {
     private final ReActRunner reActRunner;
     private final MatchReportContract matchReportContract;
     private final AgentRunService agentRunService;
-    private final JobPositionService jobPositionService;
-    private final JobMatchService jobMatchService;
+    private final JobSearchPort jobSearchPort;
+    private final JobMatchPort jobMatchPort;
     private final ObjectMapper objectMapper;
 
     /**
@@ -273,7 +273,7 @@ public class MatchAgentNode {
         if (jobId == null || !candidateIds.contains(jobId)) {
             throw new IllegalArgumentException("jobId 不在当前候选集合：" + args.get("jobId"));
         }
-        JobPosition job = jobPositionService.getById(jobId);
+        JobPosition job = jobSearchPort.findById(jobId);
         if (job == null) {
             throw new IllegalArgumentException("岗位不存在：" + jobId);
         }
@@ -305,7 +305,7 @@ public class MatchAgentNode {
                     explicit.put("educationReq", constraints.educationReq());
                 }
             }
-            JobMatchVO preview = jobMatchService.previewMatch(userId, resume.getId(), jobId, explicit);
+            JobMatchVO preview = jobMatchPort.previewMatch(userId, resume.getId(), jobId, explicit);
             if (preview != null && preview.getMatchScore() != null) {
                 previewedScores.put(jobId, preview.getMatchScore());
             }

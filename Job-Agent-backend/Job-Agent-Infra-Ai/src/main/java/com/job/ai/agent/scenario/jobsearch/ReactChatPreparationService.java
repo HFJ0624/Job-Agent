@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobsearch;
+package com.job.ai.agent.scenario.jobsearch;
 
 import com.job.ai.persistence.model.mapper.AiConversationMapper;
 import com.job.ai.persistence.model.mapper.AiMessageMapper;

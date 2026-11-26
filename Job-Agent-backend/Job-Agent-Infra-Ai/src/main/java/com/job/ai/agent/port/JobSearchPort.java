@@ -28,4 +28,7 @@ public interface JobSearchPort {
      */
     IPage<JobPosition> pagePositions(Long pageNo, Long pageSize, String keyword, String city,
                                      String educationReq, String experienceReq, boolean onlyPublished);
+
+    /** 按 ID 取岗位（匹配前核对岗位是否仍存在）。 */
+    JobPosition findById(Long jobId);
 }

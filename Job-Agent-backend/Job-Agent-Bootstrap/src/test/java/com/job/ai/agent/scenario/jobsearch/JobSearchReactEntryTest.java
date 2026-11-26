@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobsearch;
+package com.job.ai.agent.scenario.jobsearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
@@ -56,7 +56,7 @@ class JobSearchReactEntryTest {
     @BeforeEach
     void setUp() {
         entry = new JobSearchReactEntry(properties, runService, workflow, extractor,
-                preferenceService, traceService, objectMapper);
+                new com.job.bootstrap.integration.agent.job.PreferenceAdapter(preferenceService), traceService, objectMapper);
         when(extractor.extract(anyString())).thenReturn(Map.of("keyword", "Java", "city", "上海"));
         when(preferenceService.getPreference(anyLong())).thenReturn(null);
     }

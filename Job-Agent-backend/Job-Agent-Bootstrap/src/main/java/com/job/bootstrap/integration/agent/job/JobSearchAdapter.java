@@ -31,4 +31,9 @@ public class JobSearchAdapter implements JobSearchPort {
                 educationReq, experienceReq,
                 null, null, onlyPublished);
     }
+
+    @Override
+    public JobPosition findById(Long jobId) {
+        return jobPositionService.getById(jobId);
+    }
 }

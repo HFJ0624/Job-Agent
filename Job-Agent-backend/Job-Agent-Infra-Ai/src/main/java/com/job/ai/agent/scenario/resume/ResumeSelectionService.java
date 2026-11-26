@@ -1,6 +1,6 @@
-package com.job.bootstrap.agent.scenario.resume;
+package com.job.ai.agent.scenario.resume;
 
-import com.job.bootstrap.service.JobResumeService;
+import com.job.ai.agent.port.ResumePort;
 import com.job.common.entity.resume.JobResume;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,7 +27,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ResumeSelectionService {
 
-    private final JobResumeService jobResumeService;
+    private final ResumePort resumePort;
 
     /**
      * 选择结果。
@@ -66,10 +66,10 @@ public class ResumeSelectionService {
         // 1. 显式 resumeId：交给服务校验归属（非法会抛业务异常）
         Long resumeId = longOf(params.get("resumeId"));
         if (resumeId != null) {
-            return Selection.picked(jobResumeService.getUserResumeRequired(userId, resumeId));
+            return Selection.picked(resumePort.getUserResumeRequired(userId, resumeId));
         }
 
-        List<JobResume> resumes = jobResumeService.listUserResumes(userId);
+        List<JobResume> resumes = resumePort.listUserResumes(userId);
         if (resumes.isEmpty()) {
             return Selection.needInput("你的账号下还没有可用的简历，请先上传一份简历，我再帮你" + actionLabel + "。");
         }

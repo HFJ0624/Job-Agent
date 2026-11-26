@@ -6,17 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.infrastructure.persistence.AgentArtifactService;
 import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
 import com.job.ai.agent.tool.registry.AgentToolInvoker;
-import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
-import com.job.bootstrap.agent.scenario.match.MatchReportContract;
+import com.job.ai.agent.scenario.match.MatchAgentNode;
+import com.job.ai.agent.scenario.match.MatchReportContract;
 import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.react.ReActRunner;
 import com.job.ai.agent.core.react.TerminalToolContract;
-import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;
-import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
-import com.job.bootstrap.agent.scenario.resume.ResumeProfileContract;
+import com.job.ai.agent.scenario.resume.ResumeAgentNode;
+import com.job.ai.agent.scenario.resume.ResumeProfile;
+import com.job.ai.agent.scenario.resume.ResumeProfileContract;
 import com.job.ai.infrastructure.persistence.AgentRunService;
-import com.job.bootstrap.agent.scenario.jobsearch.JobCandidatesAdapter;
-import com.job.bootstrap.agent.scenario.jobsearch.JobSearchWorkflow;
+import com.job.ai.agent.scenario.jobsearch.JobCandidatesAdapter;
+import com.job.ai.agent.scenario.jobsearch.JobSearchWorkflow;
 import com.job.ai.model.turn.AiChatTurnResponse;
 import com.job.ai.model.turn.AiChatTurnRequest;
 import com.job.ai.model.turn.AiToolCall;
@@ -93,14 +93,15 @@ class JobSeekWorkflowTest {
         ReActRunner runner = new ReActRunner(gateway, new TerminalToolContract(mapper), mapper);
         ResumeAgentNode resumeNode = new ResumeAgentNode(runner, new ResumeProfileContract(mapper), runService, mapper);
         MatchAgentNode matchNode = new MatchAgentNode(runner, new MatchReportContract(mapper), runService,
-                positionService, matchService, mapper);
+                new com.job.bootstrap.integration.agent.job.JobSearchAdapter(positionService),
+                new com.job.bootstrap.integration.agent.match.JobMatchAdapter(matchService), mapper);
         JobSearchWorkflow searchWorkflow = new JobSearchWorkflow(runner, new TerminalToolContract(mapper),
                 invoker, new JobCandidatesAdapter(mapper));
 
         workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow,
                 new SeekArtifactService(artifactService, mapper),
                 new SeekContextResolver(new AgentPlanParameterExtractor(),
-                        new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
+                        new com.job.ai.agent.scenario.resume.ResumeSelectionService(new com.job.bootstrap.integration.agent.resume.ResumeAdapter(resumeService)),
                         resumeService, preferenceService, mapper),
                 executor);
 

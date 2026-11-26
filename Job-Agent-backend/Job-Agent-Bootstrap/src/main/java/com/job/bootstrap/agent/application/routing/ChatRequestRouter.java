@@ -1,8 +1,8 @@
 package com.job.bootstrap.agent.application.routing;
 
 import com.job.ai.agent.application.task.AgentTaskService;
-import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
-import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
+import com.job.ai.agent.scenario.jobsearch.JobSearchReactEntry;
+import com.job.ai.agent.scenario.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.common.entity.agent.AgentPlan;
 import lombok.RequiredArgsConstructor;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobsearch;
+package com.job.ai.agent.scenario.jobsearch;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,7 +8,7 @@ import com.job.ai.agent.core.react.AgentRunExecutionHooks;
 import com.job.ai.infrastructure.persistence.AgentRunService;
 import com.job.ai.model.turn.AiChatMessage;
 import com.job.ai.agent.support.trace.AgentTraceService;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.ai.agent.port.PreferencePort;
 import com.job.common.entity.agent.AgentRun;
 import com.job.common.vo.preference.UserJobPreferenceVO;
 import com.job.enums.AgentRunStatus;
@@ -51,7 +51,7 @@ public class JobSearchReactEntry {
     private final AgentRunService agentRunService;
     private final JobSearchWorkflow jobSearchWorkflow;
     private final AgentPlanParameterExtractor parameterExtractor;
-    private final UserJobPreferenceService userJobPreferenceService;
+    private final PreferencePort preferencePort;
     private final AgentTraceService agentTraceService;
     private final ObjectMapper objectMapper;
 
@@ -296,7 +296,7 @@ public class JobSearchReactEntry {
 
     private UserJobPreferenceVO loadPreferenceSafely(Long userId) {
         try {
-            return userJobPreferenceService.getPreference(userId);
+            return preferencePort.getPreference(userId);
         } catch (Exception exception) {
             log.debug("求职偏好加载失败，按无偏好处理，userId={}, error={}", userId, exception.getMessage());
             return null;

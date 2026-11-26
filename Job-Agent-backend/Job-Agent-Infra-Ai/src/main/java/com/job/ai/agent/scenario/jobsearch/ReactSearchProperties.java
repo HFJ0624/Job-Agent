@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobsearch;
+package com.job.ai.agent.scenario.jobsearch;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

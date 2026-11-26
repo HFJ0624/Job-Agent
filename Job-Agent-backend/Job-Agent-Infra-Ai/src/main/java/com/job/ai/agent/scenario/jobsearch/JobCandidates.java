@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobsearch;
+package com.job.ai.agent.scenario.jobsearch;
 
 import java.util.List;
 import java.util.Map;

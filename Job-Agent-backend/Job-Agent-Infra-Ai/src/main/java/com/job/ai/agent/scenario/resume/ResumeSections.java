@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.resume;
+package com.job.ai.agent.scenario.resume;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

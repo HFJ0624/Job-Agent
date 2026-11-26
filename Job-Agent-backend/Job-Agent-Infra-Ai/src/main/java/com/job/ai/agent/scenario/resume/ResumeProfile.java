@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.resume;
+package com.job.ai.agent.scenario.resume;
 
 import java.util.List;
 

@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.resume;
+package com.job.ai.agent.scenario.resume;
 
 import com.job.bootstrap.service.JobResumeService;
 import com.job.common.entity.resume.JobResume;
@@ -25,7 +25,7 @@ class ResumeSelectionServiceTest {
     private static final Long USER_ID = 100L;
 
     private final JobResumeService resumeService = mock(JobResumeService.class);
-    private final ResumeSelectionService service = new ResumeSelectionService(resumeService);
+    private final ResumeSelectionService service = new ResumeSelectionService(new com.job.bootstrap.integration.agent.resume.ResumeAdapter(resumeService));
 
     private JobResume resume(Long id, String name, int isDefault) {
         JobResume resume = new JobResume();

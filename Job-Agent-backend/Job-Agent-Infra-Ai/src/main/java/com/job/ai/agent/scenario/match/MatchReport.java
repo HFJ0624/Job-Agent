@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.match;
+package com.job.ai.agent.scenario.match;
 
 import java.math.BigDecimal;
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.match;
+package com.job.ai.agent.scenario.match;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.core.react.TerminalContract;

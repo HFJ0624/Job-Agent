@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobsearch;
+package com.job.ai.agent.scenario.jobsearch;
 import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.ai.agent.support.trace.AgentTraceService;
 
@@ -120,7 +120,7 @@ class Phase1ReviewRegressionTest {
         waiting.setStatus(AgentRunStatus.WAITING_INPUT.name());
         when(runs.findLatestByPlan(88L)).thenReturn(waiting);
         var entry = new JobSearchReactEntry(props,runs,mock(JobSearchWorkflow.class),
-                new AgentPlanParameterExtractor(),mock(UserJobPreferenceService.class),
+                new AgentPlanParameterExtractor(),new com.job.bootstrap.integration.agent.job.PreferenceAdapter(mock(UserJobPreferenceService.class)),
                 mock(AgentTraceService.class),mapper);
         assertThat(entry.shouldHandle("GENERAL_CHAT",88L))
                 .as("existing run must retain its execution mode").isTrue();
@@ -144,7 +144,7 @@ class Phase1ReviewRegressionTest {
         when(workflow.execute(any())).thenReturn(new JobSearchWorkflow.WorkflowOutcome(
                 AgentResult.Outcome.EMPTY,null,"空",List.of(),List.of(),null,List.of(),0,1));
         var entry = new JobSearchReactEntry(props,runs,workflow,new AgentPlanParameterExtractor(),
-                mock(UserJobPreferenceService.class),mock(AgentTraceService.class),mapper);
+                new com.job.bootstrap.integration.agent.job.PreferenceAdapter(mock(UserJobPreferenceService.class)),mock(AgentTraceService.class),mapper);
         entry.execute(100L,10L,88L,"review","GENERAL_CHAT","Java");
         ArgumentCaptor<JobSearchWorkflow.WorkflowInput> input = ArgumentCaptor.forClass(JobSearchWorkflow.WorkflowInput.class);
         verify(workflow).execute(input.capture());
@@ -179,7 +179,7 @@ class Phase1ReviewRegressionTest {
         when(runs.finish(any(),anyInt(),any(),any(),any(),any())).thenReturn(true);
         ReactSearchProperties props = new ReactSearchProperties();props.setEnabled(true);
         var entry = new JobSearchReactEntry(props,runs,workflow(gateway,invoker),
-                new AgentPlanParameterExtractor(),mock(UserJobPreferenceService.class),trace,mapper);
+                new AgentPlanParameterExtractor(),new com.job.bootstrap.integration.agent.job.PreferenceAdapter(mock(UserJobPreferenceService.class)),trace,mapper);
         var result = entry.execute(100L,10L,null,"review","JOB_SEARCH","找上海Java岗位");
         assertThat(result.outcome().outcome()).as("new entry -> real invoker -> real search tool")
                 .isEqualTo(AgentResult.Outcome.FOUND);
@@ -250,7 +250,7 @@ class Phase1ReviewRegressionTest {
         when(wf.execute(any())).thenReturn(new JobSearchWorkflow.WorkflowOutcome(
                 AgentResult.Outcome.EMPTY,null,"空",List.of(),List.of(),null,List.of(),0,1));
         var entry = new JobSearchReactEntry(props,runs,wf,new AgentPlanParameterExtractor(),
-                mock(UserJobPreferenceService.class),mock(AgentTraceService.class),mapper);
+                new com.job.bootstrap.integration.agent.job.PreferenceAdapter(mock(UserJobPreferenceService.class)),mock(AgentTraceService.class),mapper);
         entry.execute(100L,10L,88L,"review","JOB_SEARCH","找上海Java");
         verify(runs,never()).create(any(),any(),any(),any(),any(),any(),any());
     }
