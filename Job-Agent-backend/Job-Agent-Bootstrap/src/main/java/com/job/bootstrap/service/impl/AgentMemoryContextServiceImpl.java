@@ -1,10 +1,10 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.job.bootstrap.mapper.AgentLongTermMemoryMapper;
+import com.job.ai.persistence.model.mapper.AgentLongTermMemoryMapper;
 import com.job.bootstrap.mapper.AgentUserMemoryProfileMapper;
 import com.job.bootstrap.service.AgentMemoryContextService;
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.ai.agent.support.memory.AgentMemoryService;
 import com.job.common.entity.agent.AgentLongTermMemory;
 import com.job.common.entity.agent.AgentUserMemoryProfile;
 import com.job.common.vo.agent.AgentMemoryContextVO;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.service;
+package com.job.ai.agent.support.memory;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;

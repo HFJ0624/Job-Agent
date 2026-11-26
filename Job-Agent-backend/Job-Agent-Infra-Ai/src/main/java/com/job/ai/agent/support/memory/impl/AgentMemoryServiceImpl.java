@@ -1,13 +1,13 @@
-package com.job.bootstrap.service.impl;
+package com.job.ai.agent.support.memory.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.job.bootstrap.agent.support.memory.AgentMemoryProperties;
-import com.job.bootstrap.mapper.AgentLongTermMemoryMapper;
-import com.job.bootstrap.mapper.AgentMemoryHistoryMapper;
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.ai.agent.support.memory.AgentMemoryProperties;
+import com.job.ai.persistence.model.mapper.AgentLongTermMemoryMapper;
+import com.job.ai.persistence.model.mapper.AgentMemoryHistoryMapper;
+import com.job.ai.agent.support.memory.AgentMemoryService;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.agent.AgentLongTermMemory;
 import com.job.common.entity.agent.AgentMemoryHistory;

@@ -1,14 +1,14 @@
 package com.job.bootstrap.service.impl;
 
-import com.job.bootstrap.agent.support.memory.AgentMemoryActionClassifier;
-import com.job.bootstrap.agent.support.memory.AgentMemoryActionDecision;
-import com.job.bootstrap.agent.support.memory.AgentMemoryCandidate;
-import com.job.bootstrap.agent.support.memory.AgentMemoryConflictGate;
-import com.job.bootstrap.agent.support.memory.AgentMemoryLlmExtractor;
-import com.job.bootstrap.agent.support.memory.AgentMemoryRuleExtractor;
-import com.job.bootstrap.agent.support.memory.AgentMemoryWritePolicy;
+import com.job.ai.agent.support.memory.AgentMemoryActionClassifier;
+import com.job.ai.agent.support.memory.AgentMemoryActionDecision;
+import com.job.ai.agent.support.memory.AgentMemoryCandidate;
+import com.job.ai.agent.support.memory.AgentMemoryConflictGate;
+import com.job.ai.agent.support.memory.AgentMemoryLlmExtractor;
+import com.job.ai.agent.support.memory.AgentMemoryRuleExtractor;
+import com.job.ai.agent.support.memory.AgentMemoryWritePolicy;
 import com.job.bootstrap.service.AgentMemoryContextService;
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.ai.agent.support.memory.AgentMemoryService;
 import com.job.common.entity.agent.AgentLongTermMemory;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.enums.AgentMemoryActionType;

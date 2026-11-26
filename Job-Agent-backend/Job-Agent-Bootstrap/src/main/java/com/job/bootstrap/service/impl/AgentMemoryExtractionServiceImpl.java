@@ -6,7 +6,7 @@ import com.job.ai.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.ai.agent.tool.registry.AgentPlanStepExecutionResult;
 import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.ai.agent.support.memory.AgentMemoryService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.enums.AgentMemorySourceType;
 import com.job.enums.AgentMemoryType;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.memory;
+package com.job.ai.agent.support.memory;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -1,7 +1,7 @@
-package com.job.bootstrap.agent.support.memory;
+package com.job.ai.agent.support.memory;
 
 import com.job.ai.model.observability.AgentObservationRecord;
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.ai.agent.support.memory.AgentMemoryService;
 import com.job.ai.model.observability.AgentObservationService;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.enums.AgentObservationEventType;

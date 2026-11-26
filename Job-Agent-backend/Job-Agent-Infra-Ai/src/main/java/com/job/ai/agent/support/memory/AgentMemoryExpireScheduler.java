@@ -1,6 +1,6 @@
-package com.job.bootstrap.agent.support.memory;
+package com.job.ai.agent.support.memory;
 
-import com.job.bootstrap.service.AgentMemoryService;
+import com.job.ai.agent.support.memory.AgentMemoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
