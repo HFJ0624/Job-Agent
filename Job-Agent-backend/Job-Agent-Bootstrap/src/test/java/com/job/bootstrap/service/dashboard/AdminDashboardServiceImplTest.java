@@ -2,8 +2,8 @@ package com.job.bootstrap.service.dashboard;
 
 import com.job.bootstrap.mapper.AgentObservationAlertRecordMapper;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
-import com.job.bootstrap.mapper.AiModelCallLogMapper;
-import com.job.bootstrap.mapper.AiModelConfigMapper;
+import com.job.ai.persistence.model.mapper.AiModelCallLogMapper;
+import com.job.ai.persistence.model.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiPromptVersionMapper;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
 import com.job.bootstrap.mapper.JobPositionMapper;

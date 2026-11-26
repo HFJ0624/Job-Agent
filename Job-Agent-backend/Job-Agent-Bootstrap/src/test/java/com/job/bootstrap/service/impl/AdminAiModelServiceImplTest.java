@@ -1,8 +1,8 @@
 package com.job.bootstrap.service.impl;
 
-import com.job.bootstrap.mapper.AiModelCallLogMapper;
-import com.job.bootstrap.mapper.AiModelConfigMapper;
-import com.job.bootstrap.mapper.AiModelRouteMapper;
+import com.job.ai.persistence.model.mapper.AiModelCallLogMapper;
+import com.job.ai.persistence.model.mapper.AiModelConfigMapper;
+import com.job.ai.persistence.model.mapper.AiModelRouteMapper;
 import com.job.common.dto.ai.AiModelCallLogQueryDTO;
 import com.job.common.dto.ai.AiModelRouteSaveDTO;
 import com.job.common.entity.ai.AiModelConfig;
