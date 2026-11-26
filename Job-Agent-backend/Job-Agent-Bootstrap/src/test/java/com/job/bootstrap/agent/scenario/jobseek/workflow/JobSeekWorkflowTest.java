@@ -97,13 +97,12 @@ class JobSeekWorkflowTest {
         JobSearchWorkflow searchWorkflow = new JobSearchWorkflow(runner, new TerminalToolContract(mapper),
                 invoker, new JobCandidatesAdapter(mapper));
 
-        workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow, resumeService,
-                new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
-                preferenceService, artifactService,
+        workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow,
                 new SeekArtifactService(artifactService, mapper),
-                new SeekContextResolver(new com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor(),
+                new SeekContextResolver(new AgentPlanParameterExtractor(),
                         new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
-                        resumeService, preferenceService, mapper), new AgentPlanParameterExtractor(), mapper, executor);
+                        resumeService, preferenceService, mapper),
+                executor);
 
         // run 生命周期
         AgentRun run = new AgentRun();

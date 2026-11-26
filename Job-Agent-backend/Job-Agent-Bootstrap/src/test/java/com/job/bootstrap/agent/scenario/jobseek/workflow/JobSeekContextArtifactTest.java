@@ -59,13 +59,12 @@ class JobSeekContextArtifactTest {
         executor.setMaxPoolSize(1);
         executor.setQueueCapacity(4);
         executor.initialize();
-        workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow, resumeService,
-                new ResumeSelectionService(resumeService), preferenceService, artifactService,
+        workflow = new JobSeekWorkflow(resumeNode, matchNode, searchWorkflow,
                 new SeekArtifactService(artifactService, mapper),
-                new SeekContextResolver(new com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor(),
+                new SeekContextResolver(new AgentPlanParameterExtractor(),
                         new com.job.bootstrap.agent.scenario.resume.ResumeSelectionService(resumeService),
                         resumeService, preferenceService, mapper),
-                new AgentPlanParameterExtractor(), mapper, executor);
+                executor);
     }
 
     private JobResume resume(Long id, String name) {
