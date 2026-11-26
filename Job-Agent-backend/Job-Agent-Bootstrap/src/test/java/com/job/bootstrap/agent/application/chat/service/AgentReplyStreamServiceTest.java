@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.application.chat.service;
+package com.job.ai.agent.application.chat.service;
 
 import com.job.ai.model.gateway.TokenConsumer;
 import com.job.ai.model.gateway.AiModelGatewayService;
