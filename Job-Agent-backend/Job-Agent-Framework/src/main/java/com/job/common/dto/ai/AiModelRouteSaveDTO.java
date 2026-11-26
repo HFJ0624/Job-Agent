@@ -56,6 +56,11 @@ public class AiModelRouteSaveDTO {
     private String abGroup;
 
     /**
+     * 模型档位：LIGHT/STANDARD/PRO；为空按 STANDARD。
+     */
+    private String tier;
+
+    /**
      * 状态。
      */
     private String status;

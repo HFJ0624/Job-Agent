@@ -35,5 +35,25 @@ public enum AgentObservationEventType {
     /**
      * 普通 Trace 事件。
      */
-    TRACE
+    TRACE,
+
+    /**
+     * 长期记忆事件（捕获、门控拦截、冲突等，任务 G7）。
+     */
+    MEMORY,
+
+    /**
+     * 查询改写事件（多轮指代消解，任务 G8）。
+     */
+    REWRITE,
+
+    /**
+     * 计划补偿事件（Saga 反向操作，任务 G9）。
+     */
+    COMPENSATION,
+
+    /**
+     * 语义缓存事件（命中/未命中/写入，任务 G10）。
+     */
+    CACHE
 }

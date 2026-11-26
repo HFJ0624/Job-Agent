@@ -48,6 +48,62 @@
       </aside>
 
       <section class="agent-chat-card">
+        <!-- 第三阶段：轻量任务卡片（复用现有样式语言，不重设计页面） -->
+        <div v-if="taskCard" class="agent-task-card">
+          <div class="task-head">
+            <strong>任务进度</strong>
+            <span class="task-status" :class="taskCard.status.toLowerCase()">
+              {{ TASK_STATUS_LABELS[taskCard.status] || taskCard.status }}
+            </span>
+          </div>
+
+          <div class="task-nodes">
+            <span
+              v-for="node in taskCard.nodes"
+              :key="node.key"
+              class="task-node"
+              :class="node.status.toLowerCase()"
+            >
+              {{ node.label }} · {{ NODE_STATUS_LABELS[node.status] || node.status }}
+            </span>
+          </div>
+
+          <p v-if="taskCard.summaries.length" class="task-summary">
+            {{ taskCard.summaries[taskCard.summaries.length - 1] }}
+          </p>
+          <p v-if="taskCard.status === 'WAITING_INPUT' && taskCard.pendingQuestion" class="task-question">
+            {{ taskCard.pendingQuestion }}
+          </p>
+          <p v-if="taskCard.status === 'CANCELLED' && taskCard.failReason" class="task-summary">
+            {{ taskCard.failReason }}
+          </p>
+          <p v-else-if="taskCard.failReason" class="task-error">{{ taskCard.failReason }}</p>
+
+          <div class="task-actions">
+            <button
+              v-if="taskCard.status === 'FAILED'"
+              class="primary-button"
+              type="button"
+              :disabled="loading"
+              @click="retryTask"
+            >
+              重试
+            </button>
+            <button
+              v-if="taskCard.status === 'RUNNING' || taskCard.status === 'WAITING_INPUT'"
+              class="danger-button"
+              type="button"
+              :disabled="cancelling"
+              @click="cancelTask"
+            >
+              {{ cancelling ? "取消中…" : "取消任务" }}
+            </button>
+            <button class="ghost-button" type="button" @click="startNewTaskFromCard">
+              新任务
+            </button>
+          </div>
+        </div>
+
         <div ref="messageListRef" class="agent-message-list">
           <div
             v-for="(message, index) in messages"
@@ -64,12 +120,6 @@
             </div>
           </div>
 
-          <div v-if="loading" class="agent-message assistant">
-            <div class="message-avatar">AI</div>
-            <div class="message-bubble">
-              <pre>正在思考中...</pre>
-            </div>
-          </div>
         </div>
 
         <div v-if="pendingConfirmation.planId" class="confirmation-panel">
@@ -112,14 +162,27 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from "vue";
+import { useAgentTask } from "../composables/agent/useAgentTask";
+import type { TaskCard, TaskNodeStatus } from "../composables/agent/taskTypes";
+import {
+  NODE_LABELS,
+  NODE_STATUS_LABELS,
+  PLAN_STATUS_MAP,
+  TASK_STATUS_LABELS
+} from "../composables/agent/taskLabels";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   chatWithAgent,
+  streamChatWithAgent,
   deleteAgentConversation,
+  fetchAgentTaskStatus,
+  cancelAgentTask,
   listAgentConversations,
   listAgentMessages
 } from "../api/agent";
+import type { AgentProgressEvent } from "../api/agent";
+import type { AgentChatPayload } from "../api/agent";
 import type {
   AgentChatMessage,
   AgentConversationInfo,
@@ -137,6 +200,36 @@ const conversationId = ref<number | null>(null);
  */
 const conversations = ref<AgentConversationInfo[]>([]);
 
+/* ===================== 第三阶段：任务进度与任务控制 ===================== */
+
+
+
+/* 后端计划状态 → 页面状态，集中一处映射，避免各组件各写一套 */
+
+
+
+const {
+  taskCard,
+  cancelling,
+  applyProgressEvent,
+  syncTaskFromServer,
+  restoreTaskForConversation,
+  retryTask,
+  cancelTask,
+  startNewTaskFromCard,
+  stopTaskPolling
+} = useAgentTask({
+  getConversationId: () => conversationId.value,
+  canRetry: () => !loading.value,
+  // 重试复用现有聊天流程：插入提示消息并按原 planId 续跑
+  onRetry: async (planId: number) => {
+    messages.value.push({ role: "USER", content: "重试该任务" });
+    loading.value = true;
+    errorMessage.value = "";
+    await runAgentTurn({ conversationId: conversationId.value, planId, message: "重试该任务", retry: true });
+  }
+});
+
 /**
  * 右侧聊天消息。
  */
@@ -150,6 +243,8 @@ const messages = ref<AgentChatMessage[]>([
 
 const inputMessage = ref("");
 const loading = ref(false);
+/** 助手气泡的占位文案：只在等待首 token 期间显示。 */
+const THINKING_PLACEHOLDER = "正在思考中...";
 const conversationLoading = ref(false);
 const errorMessage = ref("");
 const messageListRef = ref<HTMLElement | null>(null);
@@ -215,6 +310,8 @@ async function openConversation(id: number) {
     }
 
     await scrollToBottom();
+    // 第三阶段：进入会话时按已保存的 planId 恢复任务卡片（不重发聊天请求）
+    await restoreTaskForConversation(id);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "历史消息加载失败";
     ElMessage.error(errorMessage.value);
@@ -232,6 +329,9 @@ function startNewConversation() {
   conversationId.value = null;
   inputMessage.value = "";
   errorMessage.value = "";
+  // 第三阶段：新会话不继承旧任务的续跑标识
+  taskCard.value = null;
+  stopTaskPolling();
   clearPendingConfirmation();
   messages.value = [
     {
@@ -307,20 +407,15 @@ async function sendMessage() {
   errorMessage.value = "";
 
   await scrollToBottom();
-
-  try {
-    const result = await chatWithAgent({
-      conversationId: conversationId.value,
-      message
-    });
-
-    await handleAgentResult(result);
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
-    ElMessage.error(errorMessage.value);
-  } finally {
-    loading.value = false;
+  /*
+   * 第三阶段：任务处于 WAITING_INPUT 时，补充消息带回原 planId 续跑原任务，
+   * 不被当作新任务重新分类/重新创建。
+   */
+  const payload: AgentChatPayload = { conversationId: conversationId.value, message };
+  if (taskCard.value?.status === "WAITING_INPUT" && taskCard.value.planId) {
+    payload.planId = taskCard.value.planId;
   }
+  await runAgentTurn(payload);
 }
 
 /**
@@ -350,18 +445,77 @@ async function confirmToolExecution() {
   errorMessage.value = "";
   await scrollToBottom();
 
-  try {
-    const result = await chatWithAgent({
-      conversationId: conversationId.value,
-      planId: confirmedPlanId,
-      message: "确认执行",
-      confirmedToolNames
-    });
+  await runAgentTurn({
+    conversationId: conversationId.value,
+    planId: confirmedPlanId,
+    message: "确认执行",
+    confirmedToolNames
+  });
+}
 
-    await handleAgentResult(result);
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
-    ElMessage.error(errorMessage.value);
+/**
+ * 执行一轮对话（任务 G5：流式优先，失败回退阻塞）。
+ *
+ * 方法步骤:
+ * 1. 先插入一个空的助手气泡，流式 token 逐字追加，用户立刻看到“正在输出”；
+ * 2. 流式结束（done）后，用服务端最终答案校正气泡内容——输出护栏可能在流式后改写文本；
+ * 3. 流式不可用（旧浏览器/网络/服务端降级失败）时移除空气泡，回退阻塞接口，功能不降级。
+ *
+ * @param payload 对话请求参数
+ */
+async function runAgentTurn(payload: AgentChatPayload) {
+  // 单一气泡：先显示"正在思考中"，收到首个 token 后清空再逐字追加
+  const bubble: AgentChatMessage = { role: "ASSISTANT", content: THINKING_PLACEHOLDER };
+  let receivedToken = false;
+  messages.value.push(bubble);
+  await scrollToBottom();
+
+  try {
+    const result = await streamChatWithAgent(
+      payload,
+      token => {
+        if (!receivedToken) {
+          receivedToken = true;
+          bubble.content = "";   // 首个 token 到达，清掉"正在思考中"占位
+        }
+        bubble.content += token;
+        scrollToBottom();
+      },
+      applyProgressEvent
+    );
+    // 流式结束：以服务端最终答案为准；为空时给明确兜底，避免留下空气泡
+    bubble.content = result.answer || "（本次没有返回内容，请稍后重试，或查看任务状态）";
+    await applyAgentResultState(result);
+    // 最终任务状态以快照为准（不能只看 token 是否结束）
+    if (result.planId) {
+      await syncTaskFromServer(result.planId, true);
+    }
+  } catch (streamError) {
+    /*
+     * 审查 F2：已收到任务标识时，断流优先查询原任务状态，
+     * 不能盲目再提交一次阻塞请求（服务端可能仍在执行）。
+     */
+    const knownPlanId = payload.planId ?? taskCard.value?.planId ?? null;
+    if (knownPlanId) {
+      console.warn("[Job-Agent] 流式中断，改为查询任务状态", streamError);
+      bubble.content = bubble.content || "连接中断，正在确认任务状态…";
+      await syncTaskFromServer(knownPlanId, true);
+      const statusText = TASK_STATUS_LABELS[taskCard.value?.status ?? ""] ?? taskCard.value?.status ?? "未知";
+      bubble.content = `连接中断，任务当前状态：${statusText}。可稍后刷新查看结果，不会重复提交。`;
+      loading.value = false;
+      return;
+    }
+    // 流式失败且没有任务标识：回退阻塞接口（先移除空气泡，避免残留半截内容）
+    console.warn("[Job-Agent] 流式对话失败，回退阻塞接口", streamError);
+    messages.value.splice(messages.value.indexOf(bubble), 1);
+    try {
+      const result = await chatWithAgent(payload);
+      messages.value.push({ role: "ASSISTANT" as const, content: result.answer });
+      await applyAgentResultState(result);
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "AI 助手调用失败";
+      ElMessage.error(errorMessage.value);
+    }
   } finally {
     loading.value = false;
   }
@@ -380,20 +534,15 @@ function cancelConfirmation() {
 }
 
 /**
- * 统一处理后端 AI 助手返回结果。
+ * 统一应用后端 AI 助手返回结果到页面状态（消息内容由调用方写入）。
  *
  * @param result 后端返回结果
  */
-async function handleAgentResult(result: Awaited<ReturnType<typeof chatWithAgent>>) {
+async function applyAgentResultState(result: Awaited<ReturnType<typeof chatWithAgent>>) {
   /*
    * 后端第一次对话会自动创建 conversationId。
    */
   conversationId.value = result.conversationId;
-
-  messages.value.push({
-    role: "ASSISTANT",
-    content: result.answer
-  });
 
   if (result.requiresUserConfirmation && result.planId && result.requiredConfirmationToolNames?.length) {
     pendingConfirmation.value = {
@@ -433,6 +582,20 @@ async function scrollToBottom() {
     messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
   }
 }
+
+/**
+ * 第三阶段：组件卸载时清理轮询计时器，避免旧回调写已卸载组件。
+ */
+onUnmounted(() => {
+  stopTaskPolling();
+});
+
+/**
+ * 第三阶段：首次进入页面时恢复当前会话的任务卡片（按 planId 查询，不重发请求）。
+ */
+onMounted(() => {
+  restoreTaskForConversation(conversationId.value);
+});
 </script>
 
 <style scoped>
@@ -690,6 +853,65 @@ async function scrollToBottom() {
 
   .message-bubble {
     max-width: 86%;
+  }
+
+  /* 第三阶段：任务卡片 */
+  .agent-task-card {
+    margin: 12px 16px 0;
+    padding: 12px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fafbfc;
+    font-size: 13px;
+    color: #374151;
+
+    .task-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .task-status {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4338ca;
+
+      &.waiting_input { background: #fef3c7; color: #92400e; }
+      &.failed { background: #fee2e2; color: #b91c1c; }
+      &.cancelled { background: #f3f4f6; color: #4b5563; }
+      &.succeeded { background: #dcfce7; color: #166534; }
+    }
+
+    .task-nodes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .task-node {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #f3f4f6;
+      color: #6b7280;
+
+      &.running { background: #e0f2fe; color: #075985; }
+      &.succeeded { background: #dcfce7; color: #166534; }
+      &.failed { background: #fee2e2; color: #b91c1c; }
+    }
+
+    .task-summary { margin: 4px 0; color: #4b5563; }
+    .task-question { margin: 6px 0; color: #92400e; }
+    .task-error { margin: 6px 0; color: #b91c1c; }
+
+    .task-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
   }
 }
 </style>

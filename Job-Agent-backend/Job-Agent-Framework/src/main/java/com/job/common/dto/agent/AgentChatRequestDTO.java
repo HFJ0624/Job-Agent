@@ -45,4 +45,14 @@ public class AgentChatRequestDTO {
      * 3. 后端 Tool Guard 会再次校验，避免模型绕过确认直接调用工具。
      */
     private List<String> confirmedToolNames;
+
+    /**
+     * 是否恢复上次失败的计划。
+     *
+     * 说明:
+     * 1. 默认 false，保持原有语义：已失败的计划不会自动重跑。
+     * 2. 前端重试时传 true，并原样传回 planId 和 confirmedToolNames，
+     *    Executor 会从第一个未完成步骤继续，已完成的步骤不会重复执行。
+     */
+    private Boolean retry;
 }

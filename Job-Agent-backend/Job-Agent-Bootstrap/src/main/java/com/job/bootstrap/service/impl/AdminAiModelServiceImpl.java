@@ -1,6 +1,7 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
@@ -21,6 +22,7 @@ import com.job.common.vo.ai.AiModelCostStatsVO;
 import com.job.common.vo.ai.AiModelRouteVO;
 import com.job.enums.AiConfigStatus;
 import com.job.enums.AiModelCallStatus;
+import com.job.enums.AiModelTier;
 import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * 后台 AI 模型与路由管理服务实现。
@@ -56,7 +60,7 @@ import java.util.List;
  *   <li>模型编码全局唯一，创建和修改时做唯一性校验。</li>
  *   <li>API Key 编辑时若前端传脱敏值（含 ******），则保留数据库旧值，避免覆盖。</li>
  *   <li>路由配置支持主模型 + Fallback 模型，灰度百分比和 AB 分组用于渐进式上线。</li>
- *   <li>成本统计第一版在 Java 内存聚合，日志量大后建议迁移为数据库 group by 或报表表。</li>
+ *   <li>成本统计走数据库 SQL 聚合（COUNT/SUM/AVG 单行返回），不把全表日志拉回内存，避免日志量大时慢查询与高内存占用。</li>
  * </ul></p>
  *
  * @author hfj
@@ -290,34 +294,60 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
      *
      * 方法步骤:
      * 1. 复用调用日志查询条件，保证列表和统计口径一致。
-     * 2. 第一版直接在 Java 内存聚合，避免为了小规模后台统计写复杂 SQL。
-     * 3. 后续日志量大时，再把这里替换成数据库 group by 或报表表。
+     * 2. 聚合下推数据库：一次 SQL 完成 COUNT/SUM/AVG 并单行返回，
+     *    不再全表拉回 Java 内存聚合（原实现随日志量线性消耗内存与带宽）。
      *
      * @param query 查询条件
      * @return 成本统计
      */
     @Override
     public AiModelCostStatsVO costStats(AiModelCallLogQueryDTO query) {
-        List<AiModelCallLog> logs = aiModelCallLogMapper.selectList(buildCallLogWrapper(query));
+        /*
+         * 聚合下推数据库：COUNT/SUM/AVG 单行返回，不再全表拉回内存。
+         * 过滤条件与列表查询 buildCallLogWrapper 口径一致（此处用字符串列名的 QueryWrapper，
+         * 因为 LambdaQueryWrapper 的 select 只支持 SFunction，聚合表达式必须用字符串列）。
+         */
+        QueryWrapper<AiModelCallLog> wrapper = new QueryWrapper<AiModelCallLog>()
+                .eq("is_deleted", NOT_DELETED);
+        if (StringUtils.hasText(query.getTraceId())) {
+            wrapper.like("trace_id", query.getTraceId().trim());
+        }
+        if (query.getUserId() != null) {
+            wrapper.eq("user_id", query.getUserId());
+        }
+        if (StringUtils.hasText(query.getSceneCode())) {
+            wrapper.eq("scene_code", query.getSceneCode().trim());
+        }
+        if (StringUtils.hasText(query.getModelCode())) {
+            wrapper.eq("model_code", query.getModelCode().trim());
+        }
+        if (StringUtils.hasText(query.getStatus())) {
+            wrapper.eq("status", query.getStatus().trim());
+        }
+        if (StringUtils.hasText(query.getStartTime())) {
+            wrapper.ge("create_time", query.getStartTime().trim());
+        }
+        if (StringUtils.hasText(query.getEndTime())) {
+            wrapper.le("create_time", query.getEndTime().trim());
+        }
+        wrapper.select("COUNT(*) AS totalCalls",
+                "SUM(CASE WHEN status = '" + AiModelCallStatus.SUCCESS.name() + "' THEN 1 ELSE 0 END) AS successCalls",
+                "IFNULL(SUM(total_tokens), 0) AS totalTokens",
+                "IFNULL(SUM(total_cost), 0) AS totalCost",
+                "IFNULL(AVG(cost_time), 0) AS avgCostTime");
+
+        List<Map<String, Object>> rows = aiModelCallLogMapper.selectMaps(wrapper);
+        Map<String, Object> aggregate = rows.isEmpty() ? Map.of() : rows.get(0);
+
+        long totalCalls = longValue(aggregate.get("totalCalls"));
+        long successCalls = longValue(aggregate.get("successCalls"));
         AiModelCostStatsVO stats = new AiModelCostStatsVO();
-
-        long costTimeSum = 0L;
-        for (AiModelCallLog log : logs) {
-            stats.setTotalCalls(stats.getTotalCalls() + 1);
-            if (AiModelCallStatus.SUCCESS.name().equals(log.getStatus())) {
-                stats.setSuccessCalls(stats.getSuccessCalls() + 1);
-            } else {
-                stats.setFailedCalls(stats.getFailedCalls() + 1);
-            }
-            stats.setTotalTokens(stats.getTotalTokens() + nullToZero(log.getTotalTokens()));
-            stats.setTotalCost(stats.getTotalCost().add(nullToZero(log.getTotalCost())));
-            costTimeSum += nullToZero(log.getCostTime());
-        }
-
-        if (!logs.isEmpty()) {
-            stats.setAvgCostTime(costTimeSum / logs.size());
-        }
-        stats.setTotalCost(stats.getTotalCost().setScale(6, RoundingMode.HALF_UP));
+        stats.setTotalCalls(totalCalls);
+        stats.setSuccessCalls(successCalls);
+        stats.setFailedCalls(Math.max(0L, totalCalls - successCalls));
+        stats.setTotalTokens(longValue(aggregate.get("totalTokens")));
+        stats.setTotalCost(decimalValue(aggregate.get("totalCost")).setScale(6, RoundingMode.HALF_UP));
+        stats.setAvgCostTime(longValue(aggregate.get("avgCostTime")));
         return stats;
     }
 
@@ -364,6 +394,7 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
         route.setPromptVersionId(request.getPromptVersionId());
         route.setGrayPercent(normalizePercent(request.getGrayPercent()));
         route.setAbGroup(trimToNull(request.getAbGroup()));
+        route.setTier(normalizeTier(request.getTier()));
         route.setStatus(normalizeConfigStatus(request.getStatus()));
     }
 
@@ -481,6 +512,18 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
                 : AiConfigStatus.ACTIVE.name();
     }
 
+    // 模型档位规范化（任务 G1）：为空按 STANDARD；非法值直接抛错，避免库里出现未知档位
+    private String normalizeTier(String tier) {
+        if (!StringUtils.hasText(tier)) {
+            return AiModelTier.STANDARD.name();
+        }
+        try {
+            return AiModelTier.valueOf(tier.trim().toUpperCase(Locale.ROOT)).name();
+        } catch (IllegalArgumentException exception) {
+            throw new BizException("不支持的模型档位: " + tier);
+        }
+    }
+
     private String requireText(String value, String message) {
         if (!StringUtils.hasText(value)) {
             throw new BizException(message);
@@ -492,15 +535,25 @@ public class AdminAiModelServiceImpl implements AdminAiModelService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private long nullToZero(Long value) {
-        return value == null ? 0L : value;
+    // 数据库聚合值转 long：兼容 Long/Integer/BigDecimal/Double/字符串及 null
+    private long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text && StringUtils.hasText(text)) {
+            return (long) Double.parseDouble(text);
+        }
+        return 0L;
     }
 
-    private int nullToZero(Integer value) {
-        return value == null ? 0 : value;
-    }
-
-    private BigDecimal nullToZero(BigDecimal value) {
-        return value == null ? BigDecimal.ZERO : value;
+    // 数据库聚合值转 BigDecimal：兼容 BigDecimal/Number/null
+    private BigDecimal decimalValue(Object value) {
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        if (value instanceof Number number) {
+            return BigDecimal.valueOf(number.doubleValue());
+        }
+        return BigDecimal.ZERO;
     }
 }

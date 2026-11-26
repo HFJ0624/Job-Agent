@@ -79,4 +79,17 @@ public class AgentLongTermMemory extends BaseEntity {
      */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date lastUsedTime;
+
+    /**
+     * 过期时间（TTL）。
+     * NULL 表示不过期；到达后由每日归档任务置为 ARCHIVED，不再参与召回。
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date expireTime;
+
+    /**
+     * 是否存在待确认冲突。
+     * 1 = 有低置信度来源尝试覆盖这条高置信度记忆但被拒绝，已保留旧值，等待人工确认。
+     */
+    private Integer needConfirm;
 }

@@ -1326,6 +1326,7 @@ export interface AiModelRouteInfo {
   promptVersionId?: number | null;
   grayPercent?: number;
   abGroup?: string;
+  tier?: string;
   status?: string;
   createTime?: string;
   updateTime?: string;

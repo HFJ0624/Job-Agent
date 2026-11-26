@@ -107,6 +107,11 @@ export function pageEvalRuns(query: AgentEvalRunQuery) {
   return request<PageResult<AgentEvalRunInfo>>(`/admin/agent/eval/runs/page?${toSearchParams(query)}`);
 }
 
+// 查询单个批次（轮询异步 Eval 执行状态用）
+export function getEvalRun(runId: number) {
+  return request<AgentEvalRunInfo>(`/admin/agent/eval/runs/${runId}`);
+}
+
 export function pageEvalResults(query: AgentEvalResultQuery) {
   return request<PageResult<AgentEvalResultInfo>>(`/admin/agent/eval/results/page?${toSearchParams(query)}`);
 }

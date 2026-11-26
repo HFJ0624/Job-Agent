@@ -2,11 +2,13 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.intent.AgentIntentCode;
-import com.job.bootstrap.agent.plan.AgentPlanParameterExtractor;
-import com.job.bootstrap.agent.plan.AgentPlanStepTemplate;
-import com.job.bootstrap.agent.plan.AgentPlanTemplate;
-import com.job.bootstrap.agent.plan.AgentPlanTemplateFactory;
+import com.job.bootstrap.agent.support.intent.AgentIntentCode;
+import com.job.bootstrap.agent.legacy.template.AgentPlanAugmenter;
+import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
+import com.job.bootstrap.agent.legacy.template.AgentPlanParamLlmExtractor;
+import com.job.bootstrap.agent.legacy.template.AgentPlanStepTemplate;
+import com.job.bootstrap.agent.legacy.template.AgentPlanTemplate;
+import com.job.bootstrap.agent.legacy.template.AgentPlanTemplateFactory;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
 import com.job.bootstrap.service.AgentPlanningService;
@@ -23,10 +25,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Agent 计划生成服务实现，负责把用户目标拆成可执行的 Plan。
@@ -69,6 +74,8 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
     private final AgentPlanMapper agentPlanMapper;
     private final AgentPlanStepMapper agentPlanStepMapper;
     private final AgentPlanParameterExtractor parameterExtractor;
+    private final AgentPlanParamLlmExtractor agentPlanParamLlmExtractor;
+    private final AgentPlanAugmenter agentPlanAugmenter;
     private final AgentPlanTemplateFactory templateFactory;
     private final ObjectMapper objectMapper;
 
@@ -109,6 +116,13 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
         Map<String, Object> extractedParams = parameterExtractor.extract(extractionText);
         AgentPlanTemplate template = templateFactory.create(intentCode, userGoal);
         List<String> missingParams = findMissingParams(template.requiredParams(), extractedParams);
+        // 正则缺必填参数时，用 LLM 兜底补抽：只补白名单 key，正则已有值不覆盖（任务5 阶段二）
+        if (!missingParams.isEmpty()) {
+            Map<String, Object> llmParams = agentPlanParamLlmExtractor.extract(
+                    userId, traceId, userGoal, buildLlmAllowedKeys(missingParams));
+            llmParams.forEach(extractedParams::putIfAbsent);
+            missingParams = findMissingParams(template.requiredParams(), extractedParams);
+        }
         String status = CollectionUtils.isEmpty(missingParams)
                 ? AgentPlanStatus.PLANNED.name()
                 : AgentPlanStatus.NEED_CLARIFICATION.name();
@@ -148,6 +162,31 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
             step.setCreateTime(now);
             step.setUpdateTime(now);
             agentPlanStepMapper.insert(step);
+        }
+
+        /*
+         * LLM 补步（任务5 阶段三）：仅在参数齐全、将正常执行时，把白名单内的附加步骤追加到模板主干之后。
+         * 补步失败/场景未配置/非法步骤都会退化为空，计划保持纯模板，行为可预期。
+         */
+        if (missingParams.isEmpty()) {
+            for (AgentPlanAugmenter.AugmentedStep augmented :
+                    agentPlanAugmenter.augment(userId, traceId, intentCode.name(), userGoal)) {
+                AgentPlanStep step = new AgentPlanStep();
+                step.setPlanId(plan.getId());
+                step.setUserId(userId);
+                step.setConversationId(conversationId);
+                step.setStepNo(stepNo++);
+                step.setStepName(augmented.stepName());
+                step.setStepGoal(augmented.stepGoal());
+                step.setToolName(augmented.toolName());
+                step.setToolInputSchema(toJson(buildAugmentedInputSchema(augmented)));
+                step.setCompletionCriteria(augmented.completionCriteria());
+                step.setStatus(AgentPlanStepStatus.PENDING.name());
+                step.setIsDeleted(NOT_DELETED);
+                step.setCreateTime(now);
+                step.setUpdateTime(now);
+                agentPlanStepMapper.insert(step);
+            }
         }
 
         return buildPlanVO(plan);
@@ -190,6 +229,21 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
                 .toList();
     }
 
+    /**
+     * 组装允许 LLM 补抽的 key：缺失必填参数 + 其自然语言替代（resumeId→resumeName、jobId→jobTitle），
+     * 让 LLM 在 ID 之外也能补抽名称，再由 hasRequiredParam 判定必填是否满足。
+     */
+    private Set<String> buildLlmAllowedKeys(List<String> missingParams) {
+        Set<String> keys = new LinkedHashSet<>(missingParams);
+        if (keys.contains("resumeId")) {
+            keys.add("resumeName");
+        }
+        if (keys.contains("jobId")) {
+            keys.add("jobTitle");
+        }
+        return keys;
+    }
+
     private boolean hasRequiredParam(String param, Map<String, Object> extractedParams) {
         if (extractedParams.containsKey(param)) {
             return true;
@@ -213,8 +267,29 @@ public class AgentPlanningServiceImpl implements AgentPlanningService {
     ) {
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("expectedInput", stepTemplate.toolInputSchema());
-        schema.put("extractedParams", extractedParams);
+        /*
+         * 步骤级可执行参数（任务 J1）：模板步骤声明了自己的 stepParams 时，
+         * 以计划级 extractedParams 为基、步骤级覆盖——共享参数（如 resumeId）继承，
+         * 步骤特有参数（如 {{step_2.output.jobs[0].jobId}} 占位符）按步骤生效。
+         */
+        Map<String, Object> executableParams = new LinkedHashMap<>(extractedParams);
+        if (stepTemplate.stepParams() != null && !stepTemplate.stepParams().isEmpty()) {
+            executableParams.putAll(stepTemplate.stepParams());
+        }
+        schema.put("extractedParams", executableParams);
         schema.put("note", "Planner 生成工具约束，Executor 按计划步骤确定性调用工具。");
+        return schema;
+    }
+
+    /**
+     * 构造 LLM 补步的可执行参数结构：把 LLM 提供的 toolInput 作为 extractedParams 存入，
+     * Executor 的 readStepExecutableParams 会读取它，并解析其中的 {{step_N.output.xxx}} 占位符。
+     */
+    private Map<String, Object> buildAugmentedInputSchema(AgentPlanAugmenter.AugmentedStep augmented) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("extractedParams", augmented.toolInput());
+        schema.put("source", "LLM_AUGMENT");
+        schema.put("note", "LLM 补步生成的可执行参数，Executor 会解析其中的步骤间数据占位符。");
         return schema;
     }
 

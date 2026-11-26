@@ -99,6 +99,16 @@ public class RagProperties {
          * PostgreSQL JDBC 驱动类名。
          */
         private String driverClassName = "org.postgresql.Driver";
+
+        /**
+         * HikariCP 连接池最大连接数。
+         */
+        private Integer maximumPoolSize = 10;
+
+        /**
+         * HikariCP 连接池最小空闲连接数。
+         */
+        private Integer minimumIdle = 2;
     }
 
     @Data
@@ -182,6 +192,23 @@ public class RagProperties {
          * 最低相似度得分。
          */
         private Double minScore = 0.5D;
+
+        /**
+         * 是否启用交叉打分重排。
+         * 开启后用 query 向量与“标题+首句”文档向量的余弦作为语义重排的第二路信号。
+         */
+        private Boolean crossScoreEnabled = true;
+
+        /**
+         * 交叉得分在最终分中的权重（0~1）。
+         * 最终分 = (1-w)×规则分 + w×交叉分；w=0 时等价于只用规则分。
+         */
+        private Double crossScoreWeight = 0.3D;
+
+        /**
+         * 构造文档向量时取“标题 + 首句”的最大字符数，用于控制 embedding 成本。
+         */
+        private Integer crossScoreDocPreviewChars = 200;
 
         /**
          * 文本切片配置。

@@ -85,6 +85,38 @@
       </article>
     </section>
 
+    <section class="connector-panel">
+      <div class="panel-title">
+        <h2>MCP 协议通道</h2>
+        <el-tag effect="plain">POST /mcp · JSON-RPC 2.0</el-tag>
+      </div>
+      <p class="mcp-tip">
+        真实协议回路：以下每个操作都会经 McpClient 向 MCP Server 发起真实 JSON-RPC 调用，
+        右侧展示原始请求/响应帧（非示意数据）。tools/call 使用左侧选中的工具与入参。
+      </p>
+      <div class="action-row">
+        <el-button :icon="Connection" :loading="mcpLoading === 'initialize'" @click="runMcpInitialize">
+          握手 initialize
+        </el-button>
+        <el-button :icon="List" :loading="mcpLoading === 'tools'" @click="runMcpListTools">
+          工具列表 tools/list
+        </el-button>
+        <el-button :icon="Position" :loading="mcpLoading === 'call'" @click="runMcpCall">
+          调用 tools/call
+        </el-button>
+      </div>
+      <div class="mcp-frames">
+        <div>
+          <h3>请求帧</h3>
+          <pre class="json-box">{{ mcpRequest || "{}" }}</pre>
+        </div>
+        <div>
+          <h3>响应帧</h3>
+          <pre class="json-box">{{ mcpResponse || "{}" }}</pre>
+        </div>
+      </div>
+    </section>
+
     <el-drawer v-model="detailVisible" title="连接器工具详情" size="52%">
       <div v-if="detailTool" class="detail-content">
         <el-descriptions :column="2" border>
@@ -137,12 +169,16 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Refresh, View } from "@element-plus/icons-vue";
+import { Connection, List, Position, Refresh, View } from "@element-plus/icons-vue";
 import {
+  callMcpTool,
   getExternalConnectorTool,
+  initializeMcp,
   listExternalConnectorTools,
+  listMcpTools,
   previewExternalConnectorTool
 } from "../../api/externalConnector";
+import type { McpExchangeInfo } from "../../api/externalConnector";
 import type { AgentToolParamSchemaInfo, AgentToolSchemaInfo } from "../../api/types";
 
 const loading = ref(false);
@@ -153,6 +189,11 @@ const currentTool = ref<AgentToolSchemaInfo | null>(null);
 const detailTool = ref<AgentToolSchemaInfo | null>(null);
 const previewJson = ref("{}");
 const previewResult = ref("");
+
+// MCP 协议通道状态（任务 G6）
+const mcpLoading = ref("");
+const mcpRequest = ref("");
+const mcpResponse = ref("");
 
 onMounted(() => {
   loadTools();
@@ -227,6 +268,61 @@ async function runPreview() {
   } finally {
     previewLoading.value = false;
   }
+}
+
+// ===== MCP 协议通道（任务 G6）：展示真实 JSON-RPC 帧 =====
+
+async function runMcpInitialize() {
+  mcpLoading.value = "initialize";
+  try {
+    showMcpExchange(await initializeMcp());
+    ElMessage.success("MCP 握手成功");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "MCP 握手失败");
+  } finally {
+    mcpLoading.value = "";
+  }
+}
+
+async function runMcpListTools() {
+  mcpLoading.value = "tools";
+  try {
+    showMcpExchange(await listMcpTools());
+    ElMessage.success("已获取 MCP 工具列表");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "MCP 工具列表获取失败");
+  } finally {
+    mcpLoading.value = "";
+  }
+}
+
+async function runMcpCall() {
+  if (!currentTool.value) {
+    ElMessage.warning("请先选择连接器工具");
+    return;
+  }
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(previewJson.value || "{}");
+  } catch {
+    ElMessage.error("入参 JSON 格式不正确");
+    return;
+  }
+
+  mcpLoading.value = "call";
+  try {
+    showMcpExchange(await callMcpTool({ toolName: currentTool.value.toolName, arguments: args }));
+    ElMessage.success("MCP 调用完成");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "MCP 调用失败");
+  } finally {
+    mcpLoading.value = "";
+  }
+}
+
+function showMcpExchange(exchange: McpExchangeInfo) {
+  mcpRequest.value = formatJson(exchange.requestJson);
+  mcpResponse.value = formatJson(exchange.responseJson);
 }
 
 function exampleValue(param: AgentToolParamSchemaInfo) {
@@ -347,8 +443,25 @@ function sideEffectTag(value?: string) {
   gap: 12px;
 }
 
+.mcp-tip {
+  margin: 0 0 12px;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mcp-frames {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
 @media (max-width: 1180px) {
   .connector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mcp-frames {
     grid-template-columns: 1fr;
   }
 }

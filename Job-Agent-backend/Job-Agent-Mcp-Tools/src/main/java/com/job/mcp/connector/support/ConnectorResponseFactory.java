@@ -59,6 +59,66 @@ public final class ConnectorResponseFactory {
     }
 
     /**
+     * 构建真实执行成功响应（任务 J3）。
+     *
+     * <p>与 preview 的关键区别：status=EXECUTED、requiresRealAdapter=false，
+     * data 携带可核对结果（文件键/URL/大小/格式），Trace 与后台可明确区分
+     * “预览结果”和“实际执行结果”。</p>
+     */
+    public static String executed(
+            String toolName,
+            String connectorType,
+            String providerCode,
+            ConnectorSideEffectType sideEffectType,
+            String message,
+            Map<String, Object> request,
+            Map<String, Object> data
+    ) {
+        ConnectorToolResponse response = ConnectorToolResponse.builder()
+                .toolName(toolName)
+                .connectorType(connectorType)
+                .providerCode(normalize(providerCode))
+                .status("EXECUTED")
+                .sideEffectType(sideEffectType)
+                .requiresUserConfirmation(false)
+                .requiresRealAdapter(false)
+                .message(message)
+                .request(request == null ? Map.of() : request)
+                .data(data == null ? Map.of() : data)
+                .build();
+        return JSONUtil.toJsonStr(response);
+    }
+
+    /**
+     * 构建连接器错误响应（任务 J3）。
+     *
+     * <p>参数校验失败、归属校验失败（越权）、真实执行失败都走这里——
+     * 错误也是结构化响应，Agent/后台能看到原因，而不是只看到一个异常堆栈。</p>
+     */
+    public static String error(
+            String toolName,
+            String connectorType,
+            String providerCode,
+            ConnectorSideEffectType sideEffectType,
+            String message,
+            Map<String, Object> request
+    ) {
+        ConnectorToolResponse response = ConnectorToolResponse.builder()
+                .toolName(toolName)
+                .connectorType(connectorType)
+                .providerCode(normalize(providerCode))
+                .status("ERROR")
+                .sideEffectType(sideEffectType)
+                .requiresUserConfirmation(false)
+                .requiresRealAdapter(false)
+                .message(message)
+                .request(request == null ? Map.of() : request)
+                .data(Map.of())
+                .build();
+        return JSONUtil.toJsonStr(response);
+    }
+
+    /**
      * 用有序 Map 保存参数，保证测试、日志和排查时字段顺序稳定。
      */
     public static Map<String, Object> orderedRequest(Object... keyValues) {

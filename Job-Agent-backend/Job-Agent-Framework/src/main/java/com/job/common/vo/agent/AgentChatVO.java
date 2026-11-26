@@ -23,6 +23,11 @@ public class AgentChatVO {
     private Long planId;
 
     /**
+     * 第一阶段 ReAct 任务的 run 标识（兼容扩展，旧链路为 null）。
+     */
+    private Long runId;
+
+    /**
      * 助手回复内容。
      */
     private String answer;

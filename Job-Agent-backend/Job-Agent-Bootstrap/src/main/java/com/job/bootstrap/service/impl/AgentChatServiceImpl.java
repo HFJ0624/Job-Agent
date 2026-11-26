@@ -2,13 +2,24 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.context.AgentRuntimeContext;
-import com.job.bootstrap.agent.executor.AgentPlanExecutionResult;
-import com.job.bootstrap.agent.executor.AgentPlanStepExecutionResult;
-import com.job.bootstrap.agent.guardrail.AgentGuardrailService;
-import com.job.bootstrap.agent.intent.AgentIntentCode;
-import com.job.bootstrap.agent.intent.AgentIntentRouter;
-import com.job.bootstrap.agent.schema.AgentToolSchemaRegistry;
+import com.job.common.agent.AgentRuntimeContext;
+import com.job.bootstrap.agent.application.routing.ChatRequestRouter;
+import com.job.bootstrap.agent.support.context.AgentContextBuilder;
+import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
+import com.job.bootstrap.agent.support.rewrite.AgentQueryRewriter;
+import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
+import com.job.bootstrap.agent.scenario.jobsearch.ReactChatPreparationService;
+import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
+import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
+import com.job.bootstrap.agent.core.event.TaskProgressPublisher;
+import com.job.bootstrap.ai.TokenConsumer;
+import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
+import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
+import com.job.bootstrap.agent.support.intent.AgentIntentCode;
+import com.job.bootstrap.agent.support.intent.AgentIntentLlmClassifier;
+import com.job.bootstrap.agent.support.intent.AgentIntentRouter;
+import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
@@ -27,13 +38,16 @@ import com.job.common.vo.agent.AgentMemoryContextVO;
 import com.job.common.vo.agent.AgentMemoryVO;
 import com.job.common.vo.agent.AgentPlanStepVO;
 import com.job.common.vo.agent.AgentPlanVO;
+import com.job.bootstrap.agent.application.chat.support.ChatTraceAssembler;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.enums.AgentPlanStatus;
+import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -41,6 +55,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -61,6 +76,7 @@ import java.util.UUID;
  * <p>主要调用链：
  * 前端 -> AgentChatController -> AgentChatServiceImpl.chat
  * -> AgentGuardrailService (输入检查)
+ * -> AgentQueryRewriter (多轮指代消解，任务 G8)
  * -> AgentIntentRouter (意图识别)
  * -> AgentPlanningService (生成计划)
  * -> AgentPlanExecutorService (执行计划 + Tool Calling)
@@ -103,6 +119,12 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AiConversationMapper aiConversationMapper;
     private final AiMessageMapper aiMessageMapper;
 
+    /** 会话/消息存储（任务二抽取）。 */
+    private final com.job.bootstrap.agent.application.chat.service.ConversationService conversationService;
+
+    /** 新链路流式答复（方案 B）：已校验结果 → 逐 token 改写。 */
+    private final com.job.bootstrap.agent.application.chat.service.AgentReplyStreamService agentReplyStreamService;
+
     /**
      * 模型与 Prompt 动态网关。
      * 第一版先接入 Executor 总结场景，让管理员可以在后台改总结 Prompt 和模型路由。
@@ -121,10 +143,15 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final RagRetrievalService ragRetrievalService;
 
     /**
-     * 意图路由器。
-     * 第一版使用规则识别，后续可以升级为大模型分类。
+     * 意图路由器：规则优先识别 + 大模型兜底分类。
+     * 规则（关键词）命中则用规则；没命中时才调 AgentIntentLlmClassifier 让模型兜底。
      */
     private final AgentIntentRouter agentIntentRouter;
+
+    /**
+     * 意图 LLM 兜底分类器：规则没命中时用大模型兜底（任务5 阶段一）。
+     */
+    private final AgentIntentLlmClassifier agentIntentLlmClassifier;
 
     /**
      * Agent Planner 服务。
@@ -159,9 +186,72 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final AgentGuardrailService agentGuardrailService;
 
     /**
+     * 多轮上下文构建器：组装最近 N 轮历史 + 滚动摘要，并按预算裁剪（任务6）。
+     */
+    private final AgentContextBuilder agentContextBuilder;
+
+    /**
+     * 多轮查询改写器：把带指代/省略的消息改写成自包含查询（任务 G8）。
+     */
+    private final AgentQueryRewriter queryRewriter;
+
+    /**
+     * 答案语义缓存：重复/改写提问短路整条链路（任务 G10）。
+     */
+    private final AgentAnswerCacheService answerCacheService;
+
+    /**
+     * 第一阶段 ReAct 岗位搜索入口：开关开启且路由命中时接管（绕过缓存与模板链路）。
+     */
+    private final JobSearchReactEntry jobSearchReactEntry;
+
+    /**
+     * ReAct 分支的短事务会话准备（R6：会话/用户消息先提交，再进模型执行）。
+     */
+    private final ReactChatPreparationService reactChatPreparationService;
+
+    /**
+     * 第二阶段：求职复合任务入口（简历画像 + 岗位搜索 + 匹配报告）。
+     */
+    private final JobSeekReactEntry jobSeekReactEntry;
+
+    /**
+     * 第三阶段：独立简历分析入口（复用 ResumeAgentNode）。
+     */
+    private final ResumeReactEntry resumeReactEntry;
+
+    /** 对话路由：复合/简历/搜索/旧链路的优先级集中在这里（同步与流式共用）。 */
+    private final ChatRequestRouter chatRequestRouter;
+
+    /**
      * 统一 JSON 工具。
      */
     private final ObjectMapper objectMapper;
+
+    /**
+     * 旧链路事务模板：chatInternal 通过它包一层事务。
+     * 说明: 之前用 @Transactional 方法自调用（this.chatTransactional）不会经过代理，
+     * 事务实际不生效；这里显式用 TransactionTemplate，语义确定可控。
+     */
+    private final PlatformTransactionManager transactionManager;
+
+    private TransactionTemplate transactionTemplate() {
+        return new TransactionTemplate(transactionManager);
+    }
+
+    /**
+     * 兼容旧调用方的对话入口，等价于 retry=false（不恢复失败计划）。
+     */
+    @Override
+    public AgentChatVO chat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames
+    ) {
+        return chat(userId, conversationId, planId, message, confirmedToolNames, false);
+    }
 
     /**
      * 执行一次 AI 对话，是 Agent 主链路的统一入口。
@@ -186,16 +276,278 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param planId 已存在的计划 ID，为空表示新建计划；非空表示继续执行（如用户确认工具后再次请求）
      * @param message 用户原始输入文本，会按原样保存到聊天记录，但进入模型上下文前会脱敏
      * @param confirmedToolNames 本轮用户已确认允许执行的工具名列表，用于放行需要确认的副作用工具
+     * @param retry 是否恢复上次失败的计划；true 时 Executor 从第一个未完成步骤继续，已完成步骤不重复执行
      * @return Agent 回复，包含会话 ID、计划 ID、回复正文、是否需要用户确认及待确认工具名
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public AgentChatVO chat(
             Long userId,
             Long conversationId,
             Long planId,
             String message,
-            List<String> confirmedToolNames
+            List<String> confirmedToolNames,
+            Boolean retry
+    ) {
+        /*
+         * 第一阶段 ReAct 预分发（任务 R6 事务边界修复）:
+         * 1. 本方法**不再包事务**——ReAct 分支不能在旧链路的长事务里执行，
+         *    否则模型等待期间事务一直悬挂（NOT_SUPPORTED 只是挂起，不会提交）；
+         * 2. 只有“开关开启的岗位搜索新任务”或“已有 ReAct 任务续跑”才走新分支，
+         *    其余请求原样交给 chatTransactional（旧链路事务语义不变）；
+         * 3. 规则意图判断零成本（本地正则），不会触发 LLM 兜底。
+         */
+        AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
+        ChatRequestRouter.Route route = chatRequestRouter.route(ruleIntent.intentCode().name(), planId, message);
+        if (route == ChatRequestRouter.Route.MULTI_AGENT) {
+            return chatViaJobSeek(userId, conversationId, planId, message, retry, TaskProgressPublisher.NOOP);
+        }
+        if (route == ChatRequestRouter.Route.RESUME) {
+            return chatViaResume(userId, conversationId, planId, message, TaskProgressPublisher.NOOP,
+                    Boolean.TRUE.equals(retry));
+        }
+        if (route == ChatRequestRouter.Route.REACT_SEARCH) {
+            return chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry);
+        }
+        return chatTransactional(userId, conversationId, planId, message, confirmedToolNames, retry);
+    }
+
+    /**
+     * 旧链路的统一事务边界（模板计划 + 缓存 + Executor）。
+     */
+    public AgentChatVO chatTransactional(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry
+    ) {
+        long start = System.currentTimeMillis();
+        try {
+            return transactionTemplate().execute(status ->
+                    chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, null));
+        } finally {
+            log.info("[chat] 旧链路完成 userId={}, planId={}, elapsed={}ms",
+                    userId, planId, System.currentTimeMillis() - start);
+        }
+    }
+
+    /**
+     * 独立简历分析分支（事务外执行，第三阶段）：会话短事务 → ResumeAgent → 助手消息短事务。
+     */
+    private AgentChatVO chatViaResume(Long userId, Long conversationId, Long planId, String message,
+                                      TaskProgressPublisher publisher, boolean recover) {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        Long preparedConversationId = reactChatPreparationService.prepareConversation(
+                userId, conversationId, message);
+        ResumeReactEntry.Result result = resumeReactEntry.execute(
+                userId, preparedConversationId, planId, traceId, message, recover, publisher);
+        reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(preparedConversationId);
+        vo.setPlanId(result.planId());
+        vo.setAnswer(result.answer());
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
+    }
+
+    /**
+     * 求职复合任务分支（事务外执行，第二阶段）：
+     * 会话/用户消息短事务提交 → 父计划 + 三 Agent Workflow → 助手消息短事务落库。
+     */
+    private AgentChatVO chatViaJobSeek(Long userId, Long conversationId, Long planId,
+                                       String message, Boolean retry, TaskProgressPublisher publisher) {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        Long preparedConversationId = reactChatPreparationService.prepareConversation(
+                userId, conversationId, message);
+
+        JobSeekReactEntry.Result result = jobSeekReactEntry.execute(
+                userId, preparedConversationId, planId, traceId, message, Boolean.TRUE.equals(retry), publisher);
+
+        reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(preparedConversationId);
+        vo.setPlanId(result.planId());
+        vo.setAnswer(result.answer());
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
+    }
+
+    /**
+     * ReAct 岗位搜索分支（事务外执行）：
+     * 1. 会话与用户消息先走**短事务提交**（ReactChatPreparationService）；
+     * 2. 模型调用与工具执行在事务外（入口本身 NOT_SUPPORTED，且此时无外层事务）；
+     * 3. 助手消息再走一次短事务落库。
+     */
+    private AgentChatVO chatViaReactSearch(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            AgentIntentRouter.IntentResolution ruleIntent,
+            Boolean retry
+    ) {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        Long preparedConversationId = reactChatPreparationService.prepareConversation(
+                userId, conversationId, message);
+
+        JobSearchReactEntry.Result result = jobSearchReactEntry.execute(
+                userId,
+                preparedConversationId,
+                planId,
+                traceId,
+                ruleIntent.intentCode().name(),
+                message,
+                Boolean.TRUE.equals(retry)
+        );
+
+        reactChatPreparationService.saveAssistantMessage(preparedConversationId, userId, result.answer());
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(preparedConversationId);
+        vo.setPlanId(planId);
+        vo.setRunId(result.runId());
+        vo.setAnswer(result.answer());
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
+    }
+
+    /**
+     * 流式对话（任务 G5）：主链路与 chat 完全一致，仅“总结生成”走流式逐 token 回调。
+     *
+     * <p>说明:
+     * 1. streamSink 为 null 时行为与 chat 完全一致（阻塞总结）；
+     * 2. 非空时总结 token 实时回调给调用方（SSE 控制器推给前端）；
+     * 3. 落库/记忆/Trace/护栏行为不变——流式只改“token 怎么到前端”，不改“数据怎么落库”；
+     * 4. 澄清/待确认等非总结分支，会把既有文本作为一个 token 回调，前端渲染一致。</p>
+     *
+     * @param streamSink token 消费者，可为 null
+     */
+    @Override
+    public AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
+    ) {
+        return streamChat(userId, conversationId, planId, message, confirmedToolNames, retry,
+                streamSink, TaskProgressPublisher.NOOP);
+    }
+
+    @Override
+    public AgentChatVO streamChat(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink,
+            TaskProgressPublisher progressPublisher
+    ) {
+        /*
+         * 第二阶段：chat 与 streamChat **共用同一套分发**——
+         * 简历分析/独立搜索/复合任务都按同一引擎路由，不能同步接口走新链路而 SSE 默默落回旧链路。
+         * 新链路当前把最终答复作为单个 token 推送（token/done/error 协议不变，前端无需改造）。
+         */
+        AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
+        ChatRequestRouter.Route route = chatRequestRouter.route(ruleIntent.intentCode().name(), planId, message);
+        if (route == ChatRequestRouter.Route.MULTI_AGENT) {
+            return streamWithSummary(chatViaJobSeek(userId, conversationId, planId, message, retry, progressPublisher), streamSink);
+        }
+        if (route == ChatRequestRouter.Route.RESUME) {
+            return streamWithSummary(chatViaResume(userId, conversationId, planId, message, progressPublisher,
+                    Boolean.TRUE.equals(retry)), streamSink);
+        }
+        if (route == ChatRequestRouter.Route.REACT_SEARCH) {
+            return streamWithSummary(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);
+        }
+        return streamTransactional(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
+    }
+
+    /**
+     * 新链路流式输出（方案 B）：
+     * 1. 先拿到已校验答复（事实来源）；
+     * 2. 走 AGENT_SUMMARY 流式改写，token 实时推送；
+     * 3. 成功后回写最后一条助手消息；失败/空结果则退回"整段一个 token"，保证前端一定有输出。
+     */
+    private AgentChatVO streamWithSummary(AgentChatVO vo, TokenConsumer streamSink) {
+        if (streamSink == null || vo == null || !StringUtils.hasText(vo.getAnswer())) {
+            return vo;
+        }
+        String grounded = vo.getAnswer();
+        java.util.concurrent.atomic.AtomicBoolean emitted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        TokenConsumer proxy = token -> {
+            emitted.set(true);
+            streamSink.onToken(token);
+        };
+        String traceId = java.util.UUID.randomUUID().toString().replace("-", "");
+
+        try {
+            String streamed = agentReplyStreamService.stream(
+                    grounded, vo.getConversationId(), traceId, proxy);
+            if (StringUtils.hasText(streamed) && streamed.trim().length() >= 10) {
+                vo.setAnswer(streamed);
+                try {
+                    conversationService.updateLastAssistantContent(vo.getConversationId(), streamed);
+                } catch (Exception exception) {
+                    log.warn("流式答复回写失败，保留原消息，error={}", exception.getMessage());
+                }
+                return vo;
+            }
+        } catch (Exception exception) {
+            log.warn("流式答复生成失败，降级为整段输出，error={}", exception.getMessage());
+        }
+
+        if (!emitted.get()) {
+            try {
+                streamSink.onToken(grounded);
+            } catch (Exception ignored) {
+                // 前端断开不影响已落库结果
+            }
+        }
+        return vo;
+    }
+
+    public AgentChatVO streamTransactional(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
+    ) {
+        long start = System.currentTimeMillis();
+        try {
+            return transactionTemplate().execute(status ->
+                    chatInternal(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink));
+        } finally {
+            log.info("[chat] 流式旧链路完成 userId={}, planId={}, elapsed={}ms",
+                    userId, planId, System.currentTimeMillis() - start);
+        }
+    }
+
+    /**
+     * Agent 主链路统一编排（chat/streamChat 共用）。
+     * streamSink 为空 = 阻塞总结；非空 = 总结走流式回调（任务 G5）。
+     */
+    private AgentChatVO chatInternal(
+            Long userId,
+            Long conversationId,
+            Long planId,
+            String message,
+            List<String> confirmedToolNames,
+            Boolean retry,
+            TokenConsumer streamSink
     ) {
         long start = System.currentTimeMillis();
 
@@ -227,12 +579,16 @@ public class AgentChatServiceImpl implements AgentChatService {
         String safeMessage = String.valueOf(agentGuardrailService.maskSensitiveData(message));
 
         /*
-         * 4. 识别用户意图。
-         *    当前只是规则识别，作用是:
-         *    - Trace 日志可以分类
-         *    - 后续可以根据意图走不同 Agent 编排流程
+         * 4. 识别用户意图：规则优先，规则没命中时用 LLM 兜底分类（任务5 阶段一）。
+         *    意图用于 Trace 分类与后续编排；LLM 兜底失败或置信度不足时保持规则的 GENERAL_CHAT。
          */
-        AgentIntentCode intentCode = agentIntentRouter.route(safeMessage);
+        log.info("[chat] 护栏通过，开始意图识别 userId={}, chars={}", userId, safeMessage.length());
+        AgentIntentRouter.IntentResolution intentResolution = agentIntentRouter.routeDetailed(safeMessage);
+        AgentIntentCode intentCode = intentResolution.ruleMatched()
+                ? intentResolution.intentCode()
+                : agentIntentLlmClassifier.classify(userId, traceId, safeMessage).orElse(intentResolution.intentCode());
+        log.info("[chat] 意图={} (规则命中={}), userId={}, conversationId={}, planId={}",
+                intentCode, intentResolution.ruleMatched(), userId, conversationId, planId);
 
         /*
          * 5. 如果前端传入 planId，说明这是“继续执行已有计划”。
@@ -251,12 +607,12 @@ public class AgentChatServiceImpl implements AgentChatService {
          * 6. 获取或创建会话。
          *    conversationId 为空时自动创建新会话。
          */
-        AiConversation conversation = getOrCreateConversation(userId, conversationId, safeMessage);
+        AiConversation conversation = conversationService.getOrCreate(userId, conversationId, safeMessage);
 
         /*
          * 7. 保存用户消息。
          */
-        saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
+        conversationService.save(conversation.getId(), userId, ROLE_USER, message, null);
 
         /*
          * 7.1 捕获用户自然语言里的长期记忆。
@@ -274,13 +630,58 @@ public class AgentChatServiceImpl implements AgentChatService {
         );
 
         /*
-         * 7.2 在 Planner 前构造长期记忆上下文。
+         * 7.2 构建多轮上下文（任务6）+ 查询改写（任务 G8）。
          *
-         * 设计原因:
-         * - 第一版只在 Executor 总结前召回记忆，无法帮助 Planner 补齐城市、岗位、称呼等参数。
-         * - 第二版把压缩后的记忆上下文提供给 Planner 的参数抽取阶段，但不覆盖用户原始输入。
+         * 设计说明:
+         * 1. 这里构建一次历史上下文：既供查询改写消解指代，总结阶段复用同一份，
+         *    避免二次读取消息和二次触发滚动摘要；
+         * 2. build 内部会排除刚保存的当前轮用户消息，历史里只有“之前的对话”；
+         * 3. 改写只在消息含指代/延续信号时发起（LIGHT 档模型），自包含消息原样返回；
+         * 4. 改写失败一律回退原消息——改写是增强，不能成为主流程故障点。
          */
-        AgentMemoryContextVO planningMemoryContext = buildLongTermMemoryContext(userId, safeMessage);
+        AgentContextBuilder.BuiltContext contextBundle = agentContextBuilder.build(userId, traceId, conversation);
+        String planningMessage = queryRewriter.rewrite(
+                userId,
+                traceId,
+                safeMessage,
+                contextBundle.historyText()
+        );
+
+        /*
+         * 7.2.5 语义缓存查询（任务 G10）：用改写后的自包含查询查同用户历史答案。
+         *
+         * 设计说明:
+         * 1. 命中即短路：不规划、不执行、不总结，直接以缓存答案回复并正常落库/Trace；
+         * 2. 位置在改写之后——“那第二个呢”和完整表述能命中同一条缓存，这是 G8 的红利；
+         * 3. 记忆捕获（7.1）已先执行且本身幂等（同 key 等价值会被 G7 门控跳过），
+         *    缓存命中不会造成记忆库污染；
+         * 4. 缓存故障（embedding 不可用等）内部降级为未命中，不影响主流程。
+         */
+        log.info("[chat] 开始语义缓存查询");
+        Optional<String> cachedAnswer = answerCacheService.lookup(userId, planningMessage);
+        log.info("[chat] 语义缓存查询完成，命中={}", cachedAnswer.isPresent());
+        if (cachedAnswer.isPresent()) {
+            return buildCacheHitResult(
+                    userId,
+                    conversation,
+                    traceId,
+                    intentCode,
+                    message,
+                    planningMessage,
+                    cachedAnswer.get(),
+                    start
+            );
+        }
+
+        /*
+         * 7.3 在 Planner 前构造长期记忆上下文。
+         *
+         * 设计说明:
+         * - 用改写后的自包含查询做记忆检索：“那第二个呢”检索不到任何记忆，
+         *    “刚才推荐的第二个Java岗位的匹配度如何”才能召回相关岗位决策记忆；
+         * - 用户原始输入优先，记忆只补缺省、不覆盖的语义不变。
+         */
+        AgentMemoryContextVO planningMemoryContext = buildLongTermMemoryContext(userId, planningMessage);
 
         AgentPlanVO plan = null;
         try {
@@ -296,15 +697,16 @@ public class AgentChatServiceImpl implements AgentChatService {
                             conversation.getId(),
                             traceId,
                             intentCode,
-                            safeMessage,
+                            // 用改写后的自包含查询做规划（任务 G8），指代/省略已消解
+                            planningMessage,
                             planningMemoryContext.getPromptContext()
                     );
             String activeIntentCode = plan.getIntentCode();
 
             if (needClarification(plan)) {
                 String answer = buildClarificationAnswer(plan);
-                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
-                touchConversation(conversation);
+                conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+                conversationService.touch(conversation);
 
                 agentTraceService.saveTrace(
                         traceId,
@@ -312,8 +714,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                         conversation.getId(),
                         activeIntentCode,
                         null,
-                        buildPlanOnlyTraceInput(message, plan),
-                        buildPlanOnlyTraceOutput(answer, plan),
+                        ChatTraceAssembler.buildPlanOnlyTraceInput(message, plan),
+                        ChatTraceAssembler.buildPlanOnlyTraceOutput(answer, plan),
                         "SUCCESS",
                         null,
                         System.currentTimeMillis() - start
@@ -331,8 +733,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<AgentToolSchema> unconfirmedTools = findUnconfirmedTools(plan, confirmedToolNames);
             if (!unconfirmedTools.isEmpty()) {
                 String answer = buildConfirmationAnswer(unconfirmedTools);
-                saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
-                touchConversation(conversation);
+                conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+                conversationService.touch(conversation);
 
                 agentTraceService.saveTrace(
                         traceId,
@@ -340,8 +742,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                         conversation.getId(),
                         activeIntentCode,
                         null,
-                        buildPlanOnlyTraceInput(message, plan, confirmedToolNames),
-                        buildPlanOnlyTraceOutput(answer, plan, unconfirmedTools),
+                        ChatTraceAssembler.buildPlanOnlyTraceInput(message, plan, confirmedToolNames),
+                        ChatTraceAssembler.buildPlanOnlyTraceOutput(answer, plan, unconfirmedTools),
                         "SUCCESS",
                         null,
                         System.currentTimeMillis() - start
@@ -356,6 +758,17 @@ public class AgentChatServiceImpl implements AgentChatService {
                 vo.setConfirmationMessage("请确认是否允许执行这些有副作用的工具。");
                 return vo;
             }
+
+            /*
+             * 4.5 RAG 预检索（任务2）：
+             *     在计划执行前，按意图门控调用 retrieveRagContext，把召回知识注入总结阶段。
+             *     RAG 失败不中断聊天（retrieveRagContext 内部降级为 ragStatus=FAILED）。
+             *     RAG 可观测性由 retrieveRagContext 自己写入的 Tool Trace 承载。
+             */
+            RagContext ragContext = ragEnabledFor(activeIntentCode)
+                    // 用改写后的自包含查询做 RAG 检索（任务 G8）：“那第二个呢”检索不到有效知识
+                    ? retrieveRagContext(userId, conversation.getId(), activeIntentCode, planningMessage)
+                    : new RagContext(false, "DISABLED", null, List.of(), null);
 
             /*
              * 5. 设置 Agent 运行时上下文。
@@ -380,8 +793,13 @@ public class AgentChatServiceImpl implements AgentChatService {
              * - 之前是“模型看到计划后自己决定是否调用工具”。
              * - 现在是“后端 Executor 按 agent_plan_step 顺序确定性执行工具”。
              * - 每一步都会回写 step.status/resultSummary/errorMsg。
+             * - retry=true 时允许恢复上次失败的计划，已完成的步骤会采用历史结果，不会重复调用工具。
              */
-            AgentPlanExecutionResult executionResult = agentPlanExecutorService.executePlan(userId, plan.getId());
+            AgentPlanExecutionResult executionResult = agentPlanExecutorService.executePlan(
+                    userId,
+                    plan.getId(),
+                    Boolean.TRUE.equals(retry)
+            );
 
             /*
              * 7.1 召回长期记忆。
@@ -398,6 +816,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             List<AgentMemoryVO> retrievedMemories = executionMemoryContext.getMemories();
 
             /*
+             * 6.5 多轮上下文复用（任务6 + G8）：
+             *      上下文已在 7.2（改写前）构建一次，此处直接复用——
+             *      期间没有新消息落库（助手消息在总结之后才保存），内容等价，
+             *      且避免二次读取消息、二次触发滚动摘要。
+             */
+
+            /*
              * 7. 总结执行结果。
              *
              * 注意:
@@ -412,20 +837,24 @@ public class AgentChatServiceImpl implements AgentChatService {
                     plan,
                     executionResult,
                     retrievedMemories,
-                    executionMemoryContext.getPromptContext()
+                    executionMemoryContext.getPromptContext(),
+                    // 传入 RAG 增强消息（含召回知识、引用与防注入声明），让总结基于真实知识回答
+                    ragContext.enhancedMessage(),
+                    contextBundle,
+                    streamSink
             );
             String answer = agentGuardrailService.sanitizeFinalAnswer(rawAnswer, executionResult);
 
             /*
              * 8. 保存助手消息。
              */
-            saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+            conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
 
             /*
              * 9. 更新会话时间。
              *    这样前端会话列表可以按最近聊天排序。
              */
-            touchConversation(conversation);
+            conversationService.touch(conversation);
 
             /*
              * 10. 保存主对话 Trace。
@@ -446,6 +875,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             );
 
             //返回结果
+            /*
+             * 任务 G10：成功答案写回语义缓存。
+             * 只缓存这一条路径的答案——需要用户确认的、执行失败的、护栏拦截的
+             * 答案都不具备“重复提问可直接复用”的性质，不进缓存。
+             */
+            answerCacheService.remember(userId, planningMessage, answer);
+
             AgentChatVO vo = new AgentChatVO();
             vo.setConversationId(conversation.getId());
             vo.setPlanId(plan.getId());
@@ -465,7 +901,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     conversation.getId(),
                     plan == null ? intentCode.name() : plan.getIntentCode(),
                     null,
-                    buildPlanOnlyTraceInput(message, plan),
+                    ChatTraceAssembler.buildPlanOnlyTraceInput(message, plan),
                     null,
                     "FAILED",
                     e.getMessage(),
@@ -481,6 +917,56 @@ public class AgentChatServiceImpl implements AgentChatService {
              */
             AgentRuntimeContext.clear();
         }
+    }
+
+    /**
+     * 语义缓存命中后的短路返回（任务 G10）。
+     *
+     * 方法步骤:
+     * 1. 缓存答案作为助手消息正常落库，保证聊天上下文连续（用户回看时看到的就是当时回复）；
+     * 2. 写一条 executionMode=CACHE_HIT 的成功 Trace，后台可区分“缓存回复”与“模型回复”；
+     * 3. planId 返回 null——本轮没有创建计划，前端按普通回答渲染即可。
+     */
+    private AgentChatVO buildCacheHitResult(
+            Long userId,
+            AiConversation conversation,
+            String traceId,
+            AgentIntentCode intentCode,
+            String originalMessage,
+            String planningMessage,
+            String cachedAnswer,
+            long start
+    ) {
+        conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, cachedAnswer, null);
+        conversationService.touch(conversation);
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("message", originalMessage);
+        input.put("planningMessage", planningMessage);
+        input.put("executionMode", "CACHE_HIT");
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("answer", cachedAnswer);
+        output.put("executionMode", "CACHE_HIT");
+        agentTraceService.saveTrace(
+                traceId,
+                userId,
+                conversation.getId(),
+                intentCode.name(),
+                null,
+                input,
+                output,
+                "SUCCESS",
+                null,
+                System.currentTimeMillis() - start
+        );
+
+        AgentChatVO vo = new AgentChatVO();
+        vo.setConversationId(conversation.getId());
+        vo.setPlanId(null);
+        vo.setAnswer(cachedAnswer);
+        vo.setRequiresUserConfirmation(false);
+        vo.setRequiredConfirmationToolNames(List.of());
+        return vo;
     }
 
     /**
@@ -500,16 +986,16 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentGuardrailResult guardrailResult,
             long start
     ) {
-        AiConversation conversation = getOrCreateConversation(
+        AiConversation conversation = conversationService.getOrCreate(
                 userId,
                 conversationId,
                 String.valueOf(agentGuardrailService.maskSensitiveData(message))
         );
-        saveMessage(conversation.getId(), userId, ROLE_USER, message, null);
+        conversationService.save(conversation.getId(), userId, ROLE_USER, message, null);
 
         String answer = guardrailResult.getUserMessage();
-        saveMessage(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
-        touchConversation(conversation);
+        conversationService.save(conversation.getId(), userId, ROLE_ASSISTANT, answer, null);
+        conversationService.touch(conversation);
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
@@ -550,6 +1036,24 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 2. 检索结果会进入本轮提示词，帮助模型基于真实简历、岗位、公司和沟通记录回答。
      * 3. 检索结果同时写入 Agent Trace，后台管理员可以看到回答依据。
      */
+    /**
+     * 判断当前意图是否启用 RAG 预检索。
+     *
+     * 设计说明:
+     * - GENERAL_CHAT / JOB_MATCH / RESUME_ANALYZE 需要用户知识库（简历、岗位、公司、沟通记录）支撑回答，启用预检索。
+     * - JOB_SEARCH / INTERVIEW_PREPARE / MOCK_INTERVIEW / GREETING_GENERATE / JOB_FAVORITE / JOB_SEEK_FLOW
+     *   走结构化工具（主流程也是纯工具链），不依赖向量知识库，跳过预检索以节省 embedding 成本。
+     */
+    private boolean ragEnabledFor(String intentCode) {
+        if (!StringUtils.hasText(intentCode)) {
+            return false;
+        }
+        return switch (intentCode) {
+            case "GENERAL_CHAT", "JOB_MATCH", "RESUME_ANALYZE" -> true;
+            default -> false;
+        };
+    }
+
     private RagContext retrieveRagContext(Long userId, Long conversationId, String intentCode, String message) {
         long start = System.currentTimeMillis();
 
@@ -841,6 +1345,8 @@ public class AgentChatServiceImpl implements AgentChatService {
      * @param plan Agent 计划
      * @param executionResult Executor 执行结果
      * @param retrievedMemories 已召回长期记忆
+     * @param ragEnhancedMessage RAG 预检索增强消息（含召回知识与引用；未启用时为空）
+     * @param streamSink 流式 token 消费者（任务 G5）；为空时阻塞调用，非空时逐 token 回调
      * @return 模型总结文本
      */
     private String summarizeExecutorResult(
@@ -850,23 +1356,46 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
-            String memoryPromptContext
+            String memoryPromptContext,
+            String ragEnhancedMessage,
+            AgentContextBuilder.BuiltContext contextBundle,
+            TokenConsumer streamSink
     ) {
         String executorSummaryMessage = buildExecutorSummaryMessage(
                 safeMessage,
                 plan,
                 executionResult,
                 retrievedMemories,
-                memoryPromptContext
+                memoryPromptContext,
+                ragEnhancedMessage,
+                contextBundle
         );
 
         try {
-            return aiModelGatewayService.chat(
-                AI_SCENE_AGENT_SUMMARY,
-                buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext),
-                executorSummaryMessage,
-                userId,
-                traceId
+            if (streamSink == null) {
+                return aiModelGatewayService.chat(
+                    AI_SCENE_AGENT_SUMMARY,
+                    AiModelTier.PRO, // 对话总结用户直接可见，质量优先走强模型档（任务 G1）
+                    buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
+                    executorSummaryMessage,
+                    userId,
+                    traceId
+                );
+            }
+
+            /*
+             * 流式总结（任务 G5）：token 实时回调给调用方推送给前端。
+             * 网关内部已处理“流式失败降级阻塞”（整段一个 token），这里再兜底一层：
+             * 网关整体不可用时用确定性兜底摘要，并作为一个 token 回调，保证前端有输出。
+             */
+            return aiModelGatewayService.chatStream(
+                    AI_SCENE_AGENT_SUMMARY,
+                    AiModelTier.PRO,
+                    buildExecutorSummaryVariables(safeMessage, plan, executionResult, retrievedMemories, memoryPromptContext, ragEnhancedMessage, contextBundle),
+                    executorSummaryMessage,
+                    userId,
+                    traceId,
+                    streamSink
             );
         } catch (Exception exception) {
             log.warn(
@@ -876,7 +1405,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                     exception.getMessage(),
                     exception
             );
-            return buildDeterministicExecutorAnswer(plan, executionResult);
+            String fallbackAnswer = buildDeterministicExecutorAnswer(plan, executionResult);
+            if (streamSink != null) {
+                // 兜底摘要也走流式通道输出，前端渲染逻辑不变
+                streamSink.onToken(fallbackAnswer);
+            }
+            return fallbackAnswer;
         }
     }
 
@@ -959,13 +1493,21 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
-            String memoryPromptContext
+            String memoryPromptContext,
+            String ragEnhancedMessage,
+            AgentContextBuilder.BuiltContext contextBundle
     ) {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("currentUserInput", safeMessage);
         variables.put("current_user_input", safeMessage);
-        variables.put("planJson", toJson(buildPlanSnapshot(plan)));
-        variables.put("plan_json", toJson(buildPlanSnapshot(plan)));
+        // RAG 增强消息：未启用预检索时为空字符串，启用时含召回知识与引用，供总结 Prompt 使用
+        variables.put("ragContextMessage", StringUtils.hasText(ragEnhancedMessage) ? ragEnhancedMessage : "");
+        variables.put("rag_context_message", variables.get("ragContextMessage"));
+        // 多轮历史与滚动摘要（任务6）
+        variables.put("historyText", contextBundle == null ? "" : contextBundle.historyText());
+        variables.put("rollingSummary", contextBundle == null ? "" : contextBundle.rollingSummary());
+        variables.put("planJson", toJson(ChatTraceAssembler.buildPlanSnapshot(plan)));
+        variables.put("plan_json", toJson(ChatTraceAssembler.buildPlanSnapshot(plan)));
         variables.put("executionResultJson", toJson(executionResult));
         variables.put("execution_result_json", toJson(executionResult));
         variables.put("retrievedMemoriesJson", toJson(buildMemorySnapshots(retrievedMemories)));
@@ -990,11 +1532,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentPlanVO plan,
             AgentPlanExecutionResult executionResult,
             List<AgentMemoryVO> retrievedMemories,
-            String memoryPromptContext
+            String memoryPromptContext,
+            String ragEnhancedMessage,
+            AgentContextBuilder.BuiltContext contextBundle
     ) {
         StringBuilder builder = new StringBuilder();
+        // RAG 启用时，用注入检索知识后的增强消息作为总结基底；否则用原始用户输入。
         builder.append("【当前用户输入】\n")
-                .append(originalMessage)
+                .append(StringUtils.hasText(ragEnhancedMessage) ? ragEnhancedMessage : originalMessage)
                 .append("\n\n");
 
         builder.append("【长期记忆上下文】\n");
@@ -1024,6 +1569,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             builder.append("\n");
         }
 
+        // 多轮历史与滚动摘要（任务6）：让总结看到上下文，而非只有当前轮
+        if (contextBundle != null && StringUtils.hasText(contextBundle.historyText())) {
+            builder.append("【最近多轮对话历史】\n").append(contextBundle.historyText()).append("\n\n");
+        }
+        if (contextBundle != null && StringUtils.hasText(contextBundle.rollingSummary())) {
+            builder.append("【更早历史的滚动摘要】\n").append(contextBundle.rollingSummary()).append("\n\n");
+        }
+
         builder.append("【计划原始目标】\n")
                 .append(plan.getUserGoal())
                 .append("\n\n");
@@ -1035,7 +1588,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         builder.append("意图: ").append(nullToDash(plan.getIntentCode())).append("\n\n");
 
         builder.append("【Executor 执行结果】\n");
-        builder.append(toJson(executionResult)).append("\n\n");
+        builder.append(agentContextBuilder.previewExecution(executionResult)).append("\n\n");
 
         builder.append("【总结要求】\n");
         builder.append("1. 只总结 Executor 已经完成的步骤和工具结果。\n");
@@ -1057,7 +1610,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
         input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
-        input.put("agentPlan", buildPlanSnapshot(plan));
+        input.put("agentPlan", ChatTraceAssembler.buildPlanSnapshot(plan));
         input.put("memoryHitCount", retrievedMemories == null ? 0 : retrievedMemories.size());
         input.put("retrievedMemories", buildMemorySnapshots(retrievedMemories));
         input.put("executionMode", "PLAN_EXECUTOR");
@@ -1125,157 +1678,6 @@ public class AgentChatServiceImpl implements AgentChatService {
             case "mockSessionId" -> "模拟面试会话ID（mockSessionId）";
             default -> param;
         };
-    }
-
-    private String buildPlannedAgentMessage(String enhancedMessage, AgentPlanVO plan) {
-        if (plan == null) {
-            return enhancedMessage;
-        }
-
-        StringBuilder builder = new StringBuilder();
-        builder.append("【后端生成的执行计划】\n");
-        builder.append("计划ID: ").append(plan.getId()).append("\n");
-        builder.append("计划标题: ").append(nullToDash(plan.getPlanTitle())).append("\n");
-        builder.append("计划摘要: ").append(nullToDash(plan.getPlanSummary())).append("\n");
-        builder.append("意图: ").append(nullToDash(plan.getIntentCode())).append("\n");
-        builder.append("状态: ").append(nullToDash(plan.getStatus())).append("\n");
-        builder.append("已抽取参数: ").append(nullToDash(plan.getExtractedParamsJson())).append("\n");
-        builder.append("缺失参数: ").append(nullToDash(plan.getMissingParamsJson())).append("\n");
-        builder.append("步骤:\n");
-
-        if (CollectionUtils.isEmpty(plan.getSteps())) {
-            builder.append("- 暂无步骤\n");
-        } else {
-            for (AgentPlanStepVO step : plan.getSteps()) {
-                builder.append(step.getStepNo()).append(". ")
-                        .append(nullToDash(step.getStepName()))
-                        .append("，目标: ")
-                        .append(nullToDash(step.getStepGoal()))
-                        .append("，建议工具: ")
-                        .append(nullToDash(step.getToolName()))
-                        .append("，完成条件: ")
-                        .append(nullToDash(step.getCompletionCriteria()))
-                        .append("\n");
-            }
-        }
-
-        builder.append("\n【执行要求】\n");
-        builder.append("1. 必须优先按后端计划选择工具。\n");
-        builder.append("2. 缺参时不能编造参数，也不能跳过计划要求的关键参数。\n");
-        builder.append("3. 工具返回 JSON 后整理成中文，不要把原始 JSON 直接贴给用户。\n\n");
-        builder.append(enhancedMessage);
-        return builder.toString();
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceInput(String message, AgentPlanVO plan) {
-        return buildPlanOnlyTraceInput(message, plan, List.of());
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceInput(
-            String message,
-            AgentPlanVO plan,
-            List<String> confirmedToolNames
-    ) {
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("message", message);
-        input.put("confirmedToolNames", confirmedToolNames == null ? List.of() : confirmedToolNames);
-        input.put("agentPlan", buildPlanSnapshot(plan));
-        return input;
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceOutput(String answer, AgentPlanVO plan) {
-        return buildPlanOnlyTraceOutput(answer, plan, List.of());
-    }
-
-    private Map<String, Object> buildPlanOnlyTraceOutput(
-            String answer,
-            AgentPlanVO plan,
-            List<AgentToolSchema> unconfirmedTools
-    ) {
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("answer", answer);
-        output.put("agentPlan", buildPlanSnapshot(plan));
-        output.put("unconfirmedTools", buildToolSchemaSnapshots(unconfirmedTools));
-        return output;
-    }
-
-    private List<Map<String, Object>> buildToolSchemaSnapshots(List<AgentToolSchema> schemas) {
-        if (CollectionUtils.isEmpty(schemas)) {
-            return List.of();
-        }
-
-        List<Map<String, Object>> snapshots = new ArrayList<>();
-        for (AgentToolSchema schema : schemas) {
-            Map<String, Object> snapshot = new LinkedHashMap<>();
-            snapshot.put("toolName", schema.getToolName());
-            snapshot.put("displayName", schema.getDisplayName());
-            snapshot.put("permissionType", schema.getPermissionType());
-            snapshot.put("sideEffectType", schema.getSideEffectType());
-            snapshot.put("hasSideEffect", schema.getHasSideEffect());
-            snapshot.put("requiresUserConfirmation", schema.getRequiresUserConfirmation());
-            snapshot.put("confirmationMessage", schema.getConfirmationMessage());
-            snapshots.add(snapshot);
-        }
-        return snapshots;
-    }
-
-    private Map<String, Object> buildPlanSnapshot(AgentPlanVO plan) {
-        if (plan == null) {
-            return Map.of();
-        }
-
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("id", plan.getId());
-        snapshot.put("traceId", plan.getTraceId());
-        snapshot.put("userId", plan.getUserId());
-        snapshot.put("conversationId", plan.getConversationId());
-        snapshot.put("intentCode", plan.getIntentCode());
-        snapshot.put("planTitle", plan.getPlanTitle());
-        snapshot.put("planSummary", plan.getPlanSummary());
-        snapshot.put("requiredParamsJson", plan.getRequiredParamsJson());
-        snapshot.put("extractedParamsJson", plan.getExtractedParamsJson());
-        snapshot.put("missingParamsJson", plan.getMissingParamsJson());
-        snapshot.put("status", plan.getStatus());
-
-        List<Map<String, Object>> steps = new ArrayList<>();
-        if (!CollectionUtils.isEmpty(plan.getSteps())) {
-            for (AgentPlanStepVO step : plan.getSteps()) {
-                Map<String, Object> stepSnapshot = new LinkedHashMap<>();
-                stepSnapshot.put("id", step.getId());
-                stepSnapshot.put("stepNo", step.getStepNo());
-                stepSnapshot.put("stepName", step.getStepName());
-                stepSnapshot.put("stepGoal", step.getStepGoal());
-                stepSnapshot.put("toolName", step.getToolName());
-                stepSnapshot.put("toolInputSchema", step.getToolInputSchema());
-                stepSnapshot.put("completionCriteria", step.getCompletionCriteria());
-                stepSnapshot.put("status", step.getStatus());
-                steps.add(stepSnapshot);
-            }
-        }
-        snapshot.put("steps", steps);
-        return snapshot;
-    }
-
-    private Map<String, Object> buildChatTraceInput(String message, RagContext ragContext, AgentPlanVO plan) {
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("message", message);
-        input.put("ragEnabled", ragContext.enabled());
-        input.put("ragStatus", ragContext.status());
-        input.put("ragHitCount", ragContext.results().size());
-        input.put("agentPlan", buildPlanSnapshot(plan));
-        return input;
-    }
-
-    private Map<String, Object> buildChatTraceOutput(String answer, RagContext ragContext, AgentPlanVO plan) {
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("answer", answer);
-        output.put("ragEnabled", ragContext.enabled());
-        output.put("ragStatus", ragContext.status());
-        output.put("ragError", ragContext.errorMessage());
-        output.put("ragHitCount", ragContext.results().size());
-        output.put("ragReferences", buildRagReferences(ragContext.results(), false));
-        output.put("agentPlan", buildPlanSnapshot(plan));
-        return output;
     }
 
     /**
@@ -1370,60 +1772,16 @@ public class AgentChatServiceImpl implements AgentChatService {
     /**
      * 获取或创建会话。
      */
-    private AiConversation getOrCreateConversation(Long userId, Long conversationId, String firstMessage) {
-        if (conversationId != null) {
-            AiConversation exist = aiConversationMapper.selectById(conversationId);
-
-            /*
-             * 只允许用户访问自己的会话。
-             * 这一步是用户数据隔离，防止越权访问。
-             */
-            if (exist != null && userId.equals(exist.getUserId())) {
-                return exist;
-            }
-        }
-
-        AiConversation conversation = new AiConversation();
-        conversation.setUserId(userId);
-        conversation.setConversationType("JOB_AGENT");
-        conversation.setTitle(buildConversationTitle(firstMessage));
-        conversation.setIsDeleted(NOT_DELETED);
-        aiConversationMapper.insert(conversation);
-        return conversation;
-    }
 
     /**
      * 生成会话标题。
      */
-    private String buildConversationTitle(String message) {
-        if (message == null || message.isBlank()) {
-            return "新的求职对话";
-        }
-
-        String title = message.trim();
-        return title.length() > 20 ? title.substring(0, 20) + "..." : title;
-    }
 
     /**
      * 保存一条聊天消息。
      */
-    private void saveMessage(Long conversationId, Long userId, String role, String content, String toolName) {
-        AiMessage message = new AiMessage();
-        message.setConversationId(conversationId);
-        message.setUserId(userId);
-        message.setRole(role);
-        message.setContent(content);
-        message.setToolName(toolName);
-        message.setTokenCount(0);
-        message.setIsDeleted(NOT_DELETED);
-        aiMessageMapper.insert(message);
-    }
 
     /**
      * 更新会话更新时间。
      */
-    private void touchConversation(AiConversation conversation) {
-        conversation.setUpdateTime(new java.util.Date());
-        aiConversationMapper.updateById(conversation);
-    }
 }

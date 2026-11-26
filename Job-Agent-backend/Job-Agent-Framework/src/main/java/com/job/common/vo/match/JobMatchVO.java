@@ -39,6 +39,22 @@ public class JobMatchVO {
     private List<String> riskPoints;
     private List<String> suggestions;
 
+    /**
+     * 匹配证据列表（任务 J5）：技能与基础条件的“要求 ↔ 简历原文”对，可逐条核对。
+     */
+    private List<MatchEvidenceVO> evidences;
+
+    /**
+     * 硬性条件违反项（任务 J5）：用户明确要求（城市/岗位/薪资/学历）与岗位不符的清单。
+     * 空列表表示通过；非空时 recommendApply 一定为 false。
+     */
+    private List<String> hardConditionViolations;
+
+    /**
+     * 硬性条件是否通过（任务 J5）。无偏好数据时视为通过（不误伤）。
+     */
+    private Boolean hardConditionPassed;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date createTime;
 

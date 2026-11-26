@@ -3,6 +3,3 @@ spring:
     name: job-agent
   profiles:
     active: dev,local
-
-
-

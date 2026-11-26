@@ -1,0 +1,6 @@
+# 生产 profile：关闭 MyBatis-Plus SQL stdout 全量日志
+# dev 环境保留 StdOutImpl 方便调试；生产改用 Slf4j（默认 DEBUG 级，生产不输出，可按需开启）。
+# 说明：真实生产运行还需在此 profile 配置数据源等（建议通过环境变量注入，勿写明文）。
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl

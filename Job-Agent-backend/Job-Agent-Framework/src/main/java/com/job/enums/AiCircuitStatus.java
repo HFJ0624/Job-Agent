@@ -18,7 +18,8 @@ public enum AiCircuitStatus {
     OPEN,
 
     /**
-     * 半开状态，预留给后续探测恢复。
+     * 半开状态：熔断冷却后放行单个探测请求，成功则转 CLOSED、失败则转 OPEN。
+     * 已在模型网关（AiModelGatewayServiceImpl.isCircuitOpen）实现。
      */
     HALF_OPEN
 }

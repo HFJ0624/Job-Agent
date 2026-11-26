@@ -3,13 +3,14 @@ server:
   port: 8500
 
 # 配置数据库连接信息 url需要改成自己的虚拟机ip地址192.168.10.100
+# 安全：口令等敏感配置改为环境变量注入，不在仓库保留明文；已泄露口令需轮换（改配置不够）。
 spring:
   datasource:
     type: com.zaxxer.hikari.HikariDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://192.168.10.100:3306/job_agent?characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: root
-    password: 1234
+    password: ${DB_PASSWORD:}
 
   servlet:
     multipart:
@@ -21,20 +22,27 @@ spring:
     redis:
       host: 192.168.10.100
       port: 6379
-  #  password: 1234
+  #  password: ${REDIS_PASSWORD:}
 
 # 自定义配置 访问权限路由配置
 job:
   minio:
     endpointUrl: http://192.168.10.100:9001
-    accessKey: admin
-    secreKey: admin123456
+    accessKey: ${MINIO_ACCESS_KEY:}
+    secreKey: ${MINIO_SECRET_KEY:}
     bucketName: job-agent-bucket
 
   agent:
+    # 第一阶段 ReAct 岗位搜索开关（默认关闭；开启后仅 JOB_SEARCH 场景走新 Workflow）
+    react-search:
+      enabled: false
     draft:
       # Agent 草稿过期时间，单位：分钟
       ttl-minutes: 15
+
+  workflow:
+    # 工作流调度器轮询间隔（毫秒）。原为硬编码 1 小时，现改为可配置；默认 5 秒。
+    poll-interval-ms: 5000
 
 # MyBatis-Plus配置
 mybatis-plus:
@@ -44,7 +52,8 @@ mybatis-plus:
   type-aliases-package: com.job.common
   configuration:
     map-underscore-to-camel-case: true # 下划线转驼峰
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 打印SQL日志（开发用）
+    # SQL 走 SLF4J：默认打印到控制台 + sql.log（定时任务轮询 SQL 已被 SchedulerLogFilter 过滤）；SQL_LOG_LEVEL=OFF 可关闭
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:
       logic-delete-field: isDeleted # 逻辑删除字段使用实体属性名

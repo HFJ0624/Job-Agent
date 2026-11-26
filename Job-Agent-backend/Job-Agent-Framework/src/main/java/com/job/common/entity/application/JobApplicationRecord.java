@@ -1,6 +1,7 @@
 package com.job.common.entity.application;
 
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.job.common.entity.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -94,6 +95,14 @@ public class JobApplicationRecord extends BaseEntity {
      * 面试时间。
      */
     private Date interviewTime;
+
+    /**
+     * 面试通知邮件已发送时间。
+     * 幂等状态位：NULL 表示尚未发送面试通知邮件；非空表示已发送。
+     * 用于工作流任务重试/重复执行时，保证同一求职记录只发一封邮件。
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date interviewEmailSentAt;
 
     /**
      * 下次跟进时间。
