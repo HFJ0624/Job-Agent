@@ -9,7 +9,7 @@ import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;
 import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
 import com.job.bootstrap.agent.scenario.resume.ResumeSelectionService;
 import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
-import com.job.bootstrap.agent.core.react.AgentResult;
+import com.job.ai.agent.core.react.AgentResult;
 import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.bootstrap.service.UserJobPreferenceService;

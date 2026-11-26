@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.core.react;
+package com.job.ai.agent.core.react;
 
 import java.util.List;
 

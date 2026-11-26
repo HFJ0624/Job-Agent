@@ -2,12 +2,12 @@ package com.job.bootstrap.agent.scenario.jobsearch;
 
 import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
 import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
-import com.job.bootstrap.agent.core.react.AgentDefinition;
-import com.job.bootstrap.agent.core.react.AgentResult;
-import com.job.bootstrap.agent.core.react.AgentRunContext;
-import com.job.bootstrap.agent.core.react.AgentRunExecutionHooks;
-import com.job.bootstrap.agent.core.react.ReActRunner;
-import com.job.bootstrap.agent.core.react.TerminalToolContract;
+import com.job.ai.agent.core.react.AgentDefinition;
+import com.job.ai.agent.core.react.AgentResult;
+import com.job.ai.agent.core.react.AgentRunContext;
+import com.job.ai.agent.core.react.AgentRunExecutionHooks;
+import com.job.ai.agent.core.react.ReActRunner;
+import com.job.ai.agent.core.react.TerminalToolContract;
 import com.job.ai.model.turn.AiChatMessage;
 import com.job.ai.model.turn.AiToolSpec;
 import com.job.common.agent.AgentRuntimeContext;

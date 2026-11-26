@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.core.react;
+package com.job.ai.agent.core.react;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.core.budget.TaskBudgetContext;

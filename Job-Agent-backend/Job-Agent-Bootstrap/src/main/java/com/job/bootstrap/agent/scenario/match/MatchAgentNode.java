@@ -1,10 +1,10 @@
 package com.job.bootstrap.agent.scenario.match;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.core.react.AgentDefinition;
-import com.job.bootstrap.agent.core.react.AgentRunContext;
-import com.job.bootstrap.agent.core.react.AgentRunExecutionHooks;
-import com.job.bootstrap.agent.core.react.ReActRunner;
+import com.job.ai.agent.core.react.AgentDefinition;
+import com.job.ai.agent.core.react.AgentRunContext;
+import com.job.ai.agent.core.react.AgentRunExecutionHooks;
+import com.job.ai.agent.core.react.ReActRunner;
 import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
 import com.job.bootstrap.agent.scenario.resume.ResumeSections;
 import com.job.bootstrap.agent.infrastructure.persistence.AgentRunService;
