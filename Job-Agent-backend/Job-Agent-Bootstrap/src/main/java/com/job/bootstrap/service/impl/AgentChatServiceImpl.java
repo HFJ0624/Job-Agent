@@ -23,7 +23,7 @@ import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.ai.persistence.model.mapper.AiConversationMapper;
 import com.job.ai.persistence.model.mapper.AiMessageMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
-import com.job.bootstrap.service.AgentChatService;
+import com.job.ai.api.chat.AgentChatService;
 import com.job.bootstrap.service.AgentMemoryCaptureService;
 import com.job.bootstrap.service.AgentMemoryContextService;
 import com.job.bootstrap.service.AgentPlanExecutorService;

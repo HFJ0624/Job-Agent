@@ -12,7 +12,7 @@ import com.job.bootstrap.mapper.AgentEvalDatasetMapper;
 import com.job.bootstrap.mapper.AgentEvalResultMapper;
 import com.job.bootstrap.mapper.AgentEvalRunMapper;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
-import com.job.bootstrap.service.AgentChatService;
+import com.job.ai.api.chat.AgentChatService;
 import com.job.bootstrap.service.AgentEvalService;
 import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.WorkflowTaskService;

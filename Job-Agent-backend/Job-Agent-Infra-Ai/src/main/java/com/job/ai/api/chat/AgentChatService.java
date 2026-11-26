@@ -1,4 +1,4 @@
-package com.job.bootstrap.service;
+package com.job.ai.api.chat;
 import com.job.ai.model.gateway.AiModelGatewayService;
 
 import com.job.ai.model.gateway.TokenConsumer;

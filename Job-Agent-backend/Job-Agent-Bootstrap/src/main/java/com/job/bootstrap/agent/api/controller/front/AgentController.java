@@ -4,7 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.job.ai.agent.core.event.SseTaskProgressPublisher;
 import com.job.ai.agent.application.task.AgentTaskStatusService;
 import com.job.ai.agent.core.budget.TaskBudgetRegistry;
-import com.job.bootstrap.service.AgentChatService;
+import com.job.ai.api.chat.AgentChatService;
 import com.job.bootstrap.service.AgentHistoryService;
 import com.job.common.dto.agent.AgentChatRequestDTO;
 import com.job.common.entity.base.Result;

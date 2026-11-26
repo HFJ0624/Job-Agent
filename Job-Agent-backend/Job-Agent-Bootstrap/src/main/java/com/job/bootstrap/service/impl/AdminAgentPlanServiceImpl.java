@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.job.ai.persistence.model.mapper.AgentPlanMapper;
-import com.job.bootstrap.mapper.AgentPlanStepMapper;
+import com.job.ai.persistence.model.mapper.AgentPlanStepMapper;
 import com.job.bootstrap.service.AdminAgentPlanService;
 import com.job.common.dto.agent.AgentPlanQueryDTO;
 import com.job.common.entity.agent.AgentPlan;

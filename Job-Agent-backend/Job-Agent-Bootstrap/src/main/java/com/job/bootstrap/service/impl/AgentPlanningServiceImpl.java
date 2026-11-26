@@ -10,7 +10,7 @@ import com.job.bootstrap.agent.legacy.template.AgentPlanStepTemplate;
 import com.job.bootstrap.agent.legacy.template.AgentPlanTemplate;
 import com.job.bootstrap.agent.legacy.template.AgentPlanTemplateFactory;
 import com.job.ai.persistence.model.mapper.AgentPlanMapper;
-import com.job.bootstrap.mapper.AgentPlanStepMapper;
+import com.job.ai.persistence.model.mapper.AgentPlanStepMapper;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
