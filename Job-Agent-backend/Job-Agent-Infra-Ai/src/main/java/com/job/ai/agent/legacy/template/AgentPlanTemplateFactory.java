@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.legacy.template;
+package com.job.ai.agent.legacy.template;
 
 import com.job.ai.agent.support.intent.AgentIntentCode;
 import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;

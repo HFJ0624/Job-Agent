@@ -7,7 +7,7 @@ import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
 import com.job.ai.agent.tool.registry.AgentToolInvoker;
 import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.compensation.AgentPlanCompensator;
-import com.job.bootstrap.agent.legacy.template.AgentReplanner;
+import com.job.ai.agent.legacy.template.AgentReplanner;
 import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.ai.persistence.model.mapper.AgentPlanMapper;
 import com.job.ai.persistence.model.mapper.AgentPlanStepMapper;
