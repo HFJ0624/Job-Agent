@@ -88,3 +88,40 @@ agent/
 6. 前端 `AgentPage.vue` 拆 composable/组件。
 
 每批验证：`mvn -pl Job-Agent-Bootstrap -am test`（当前 373 全绿）→ 必要时 `package` + 启动检查；URL/Schema/工具名/状态字符串/表名/产物版本算法**不得随包迁移改变**。
+
+---
+
+## 7. 模块迁移现状（2026-11-26，分支 wordbuddy-stage）
+
+### 已迁入 `Job-Agent-Infra-Ai`（包根 `com.job.ai`）
+
+| 包 | 内容 |
+|---|---|
+| `agent/core/react` | ReActRunner、AgentDefinition/Result/Context、TerminalContract |
+| `agent/core/budget`、`agent/core/event` | 共享预算、进度事件 |
+| `agent/tool/{impl,registry}` | 8 个业务 Tool、注册表、Schema/执行结果 |
+| `agent/support/{guardrail,memory,cache,context,intent,rewrite,eval,trace}` | 护栏、记忆、缓存、上下文、意图、改写、评估、Trace 接口 |
+| `agent/scenario/{jobseek,jobsearch,resume,match}` | 复合编排、独立搜索、简历、匹配 |
+| `agent/application/{routing,task,plan}` | ChatRequestRouter、任务生命周期、参数解析 |
+| `agent/port` | 11 个业务端口（JobSearch/ResumeScore/JobMatch/Rag/JobRecommend/Greeting/Interview/MockReview/Connector/EntityResolver/Embedding） |
+| `model/{gateway,prompt,turn,observability}` | 模型网关（含实现）、提示词运行时、ChatTurn 协议、观测 |
+| `persistence/model/mapper` | 9 个 AI 自有 Mapper（模型配置/路由/调用日志/熔断/会话/消息/计划/运行/产物） |
+
+### 仍在 Bootstrap
+
+| 位置 | 内容 | 状态 |
+|---|---|---|
+| `api/controller/AgentController` | HTTP/SSE 入口 | 按规范保留 |
+| `integration/agent/**` | 11 个端口适配器 | 按规范保留 |
+| `legacy/template` | 旧模板链路（5 类） | 按规范保留 |
+| `service/impl/AgentChatServiceImpl`（1800 行）等 4 个服务 | 聊天/记忆捕获/记忆上下文/计划执行 | **未迁**：与 legacy、compensation、`AgentPlanStepMapper` 形成粘连集群 |
+| `support/compensation`（8 类） | 补偿动作 | 未迁：需 `NotificationPort` |
+
+### 依赖约束（已满足）
+
+```
+Bootstrap → Infra-Ai, Mcp-Tools, Framework
+Infra-Ai  → Framework
+Mcp-Tools → Framework
+```
+`Infra-Ai` / `Mcp-Tools` 对 `com.job.bootstrap` 的引用数均为 **0**。
