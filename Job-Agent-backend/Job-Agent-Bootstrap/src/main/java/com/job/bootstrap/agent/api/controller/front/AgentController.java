@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.api.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.agent.core.event.SseTaskProgressPublisher;
+import com.job.ai.agent.core.event.SseTaskProgressPublisher;
 import com.job.bootstrap.agent.application.task.AgentTaskStatusService;
 import com.job.bootstrap.agent.core.budget.TaskBudgetRegistry;
 import com.job.bootstrap.service.AgentChatService;

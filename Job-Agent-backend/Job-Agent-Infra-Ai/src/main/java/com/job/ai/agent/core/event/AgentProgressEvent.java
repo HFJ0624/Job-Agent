@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.core.event;
+package com.job.ai.agent.core.event;
 
 /**
  * 功能: 任务进度事件（第三阶段）。

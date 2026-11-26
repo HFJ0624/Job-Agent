@@ -91,7 +91,7 @@ public interface AgentChatService {
             List<String> confirmedToolNames,
             Boolean retry,
             com.job.bootstrap.ai.TokenConsumer streamSink,
-            com.job.bootstrap.agent.core.event.TaskProgressPublisher progressPublisher
+            com.job.ai.agent.core.event.TaskProgressPublisher progressPublisher
     ) {
         return streamChat(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
     }

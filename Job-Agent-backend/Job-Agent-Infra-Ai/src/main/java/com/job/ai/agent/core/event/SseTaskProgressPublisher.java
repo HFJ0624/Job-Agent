@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.core.event;
+package com.job.ai.agent.core.event;
 
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;

@@ -11,7 +11,7 @@ import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactChatPreparationService;
 import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
-import com.job.bootstrap.agent.core.event.TaskProgressPublisher;
+import com.job.ai.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.ai.TokenConsumer;
 import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
