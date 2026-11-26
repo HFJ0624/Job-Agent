@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.JobPositionService;
+import com.job.ai.agent.port.JobSearchPort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.position.JobPosition;
 import com.job.exception.AgentToolException;
@@ -38,7 +38,7 @@ public class JobSearchTool {
 
     private static final String TOOL_NAME = "JobSearchTool.searchJobs";
 
-    private final JobPositionService jobPositionService;
+    private final JobSearchPort jobSearchPort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -102,18 +102,13 @@ public class JobSearchTool {
              */
             long pageNo = page == null || page < 1 ? 1L : Math.min(page, 20);
             long size = pageSize == null || pageSize < 1 ? 5L : Math.min(pageSize, 10);
-            IPage<JobPosition> resultPage = jobPositionService.pagePositions(
+            IPage<JobPosition> resultPage = jobSearchPort.pagePositions(
                     pageNo,
                     size,
                     normalize(keyword),
-                    null,
                     normalize(city),
-                    null,
-                    null,
                     normalize(educationReq),
                     normalize(experienceReq),
-                    null,
-                    null,
                     true
             );
 

@@ -160,7 +160,7 @@ class Phase1ReviewRegressionTest {
         Page<JobPosition> page = new Page<>();page.setRecords(List.of(job));page.setTotal(1);
         when(positions.pagePositions(anyLong(),anyLong(),any(),any(),any(),any(),any(),any(),any(),any(),any(),anyBoolean()))
                 .thenReturn(page);
-        JobSearchTool search = new JobSearchTool(positions,mapper,trace,mock(AgentToolGuard.class));
+        JobSearchTool search = new JobSearchTool(new com.job.bootstrap.integration.agent.job.JobSearchAdapter(positions),mapper,trace,mock(AgentToolGuard.class));
         AgentToolInvoker invoker = new AgentToolInvoker(
                 mock(ResumeAnalyzeTool.class),mock(JobMatchTool.class),mock(GreetingGenerateTool.class),
                 search,mock(JobRecommendTool.class),mock(InterviewPrepareTool.class),
