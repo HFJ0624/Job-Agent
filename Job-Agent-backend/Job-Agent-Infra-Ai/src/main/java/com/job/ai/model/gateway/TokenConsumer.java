@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model.gateway;
 
 /**
  * 功能: 模型流式输出的 token 消费者（任务 G5）。

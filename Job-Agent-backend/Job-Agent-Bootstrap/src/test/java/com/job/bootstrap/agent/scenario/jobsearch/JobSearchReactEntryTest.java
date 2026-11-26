@@ -5,7 +5,7 @@ import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.core.react.AgentResult;
 import com.job.bootstrap.agent.infrastructure.persistence.AgentRunService;
 import com.job.bootstrap.ai.turn.AiChatMessage;
-import com.job.bootstrap.service.AgentTraceService;
+import com.job.ai.agent.support.trace.AgentTraceService;
 import com.job.bootstrap.service.UserJobPreferenceService;
 import com.job.common.entity.agent.AgentRun;
 import com.job.enums.AgentRunStatus;

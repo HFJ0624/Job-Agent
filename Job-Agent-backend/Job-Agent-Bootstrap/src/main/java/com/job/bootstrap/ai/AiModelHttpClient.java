@@ -1,4 +1,5 @@
 package com.job.bootstrap.ai;
+import com.job.ai.model.gateway.TokenConsumer;
 
 import com.job.common.entity.ai.AiModelConfig;
 

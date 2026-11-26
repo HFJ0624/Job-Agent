@@ -2,7 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.support.context.AgentContextBuilder;
-import com.job.bootstrap.ai.TokenConsumer;
+import com.job.ai.model.gateway.TokenConsumer;
 import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.intent.AgentIntentCode;
@@ -22,7 +22,7 @@ import com.job.bootstrap.rag.service.RagRetrievalService;import com.job.bootstra
 import com.job.bootstrap.service.AgentMemoryContextService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
-import com.job.bootstrap.service.AgentTraceService;
+import com.job.ai.agent.support.trace.AgentTraceService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.common.entity.agent.AiMessage;
 import com.job.common.vo.agent.AgentChatVO;

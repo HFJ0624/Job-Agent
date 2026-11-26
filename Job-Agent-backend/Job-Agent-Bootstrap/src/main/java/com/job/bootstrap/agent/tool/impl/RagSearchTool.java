@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.ai.agent.port.RagSearchPort;
-import com.job.bootstrap.service.AgentTraceService;
+import com.job.ai.agent.support.trace.AgentTraceService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
 import com.job.exception.AgentToolException;

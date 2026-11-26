@@ -1,6 +1,6 @@
 package com.job.bootstrap.service;
 
-import com.job.bootstrap.ai.TokenConsumer;
+import com.job.ai.model.gateway.TokenConsumer;
 import com.job.common.vo.agent.AgentChatVO;
 
 import java.util.List;
@@ -90,7 +90,7 @@ public interface AgentChatService {
             String message,
             List<String> confirmedToolNames,
             Boolean retry,
-            com.job.bootstrap.ai.TokenConsumer streamSink,
+            com.job.ai.model.gateway.TokenConsumer streamSink,
             com.job.ai.agent.core.event.TaskProgressPublisher progressPublisher
     ) {
         return streamChat(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);

@@ -26,7 +26,7 @@ import com.job.bootstrap.service.AgentMemoryContextService;
 import com.job.bootstrap.service.AgentObservationService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
-import com.job.bootstrap.service.AgentTraceService;
+import com.job.ai.agent.support.trace.AgentTraceService;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.agent.AiConversation;

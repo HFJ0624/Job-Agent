@@ -1,4 +1,4 @@
-package com.job.bootstrap.service;
+package com.job.ai.agent.support.trace;
 
 /**
  * Agent Trace 记录服务接口。

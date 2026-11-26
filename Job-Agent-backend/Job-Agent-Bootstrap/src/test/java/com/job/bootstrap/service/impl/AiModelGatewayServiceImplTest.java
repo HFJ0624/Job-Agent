@@ -7,7 +7,7 @@ import com.job.bootstrap.ai.AiModelHttpClient;
 import com.job.bootstrap.ai.AiModelRateLimiter;
 import com.job.bootstrap.ai.AiRenderedPrompt;
 import com.job.bootstrap.ai.AiRetryPolicy;
-import com.job.bootstrap.ai.TokenConsumer;
+import com.job.ai.model.gateway.TokenConsumer;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelCircuitStateMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;

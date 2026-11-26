@@ -1,4 +1,5 @@
 package com.job.bootstrap.ai;
+import com.job.ai.model.gateway.TokenConsumer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.job.bootstrap.ai.turn.AiChatMessage;

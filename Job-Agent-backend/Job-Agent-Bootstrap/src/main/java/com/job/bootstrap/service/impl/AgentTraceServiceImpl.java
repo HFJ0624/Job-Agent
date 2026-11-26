@@ -6,7 +6,7 @@ import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentObservationService;
-import com.job.bootstrap.service.AgentTraceService;
+import com.job.ai.agent.support.trace.AgentTraceService;
 import com.job.common.entity.agent.AgentTraceLog;
 import com.job.enums.AgentObservationEventType;
 import com.job.enums.AgentObservationStatus;

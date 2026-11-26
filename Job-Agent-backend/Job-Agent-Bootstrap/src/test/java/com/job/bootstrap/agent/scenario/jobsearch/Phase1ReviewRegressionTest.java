@@ -1,4 +1,5 @@
 package com.job.bootstrap.agent.scenario.jobsearch;
+import com.job.ai.agent.support.trace.AgentTraceService;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;

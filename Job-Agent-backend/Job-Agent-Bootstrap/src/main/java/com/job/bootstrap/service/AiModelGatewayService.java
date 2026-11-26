@@ -1,6 +1,6 @@
 package com.job.bootstrap.service;
 
-import com.job.bootstrap.ai.TokenConsumer;
+import com.job.ai.model.gateway.TokenConsumer;
 import com.job.enums.AiModelTier;
 
 import java.util.Map;

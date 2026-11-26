@@ -3,7 +3,7 @@ package com.job.bootstrap.agent.tool.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
-import com.job.bootstrap.service.AgentTraceService;
+import com.job.ai.agent.support.trace.AgentTraceService;
 import com.job.ai.agent.port.InterviewPreparePort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.interview.InterviewPrepareVO;

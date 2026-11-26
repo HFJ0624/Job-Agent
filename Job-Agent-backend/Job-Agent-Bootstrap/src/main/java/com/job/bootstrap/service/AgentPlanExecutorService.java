@@ -1,4 +1,5 @@
 package com.job.bootstrap.service;
+import com.job.ai.agent.support.trace.AgentTraceService;
 
 import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
 

@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.application.chat.service;
 
-import com.job.bootstrap.ai.TokenConsumer;
+import com.job.ai.model.gateway.TokenConsumer;
 import com.job.bootstrap.service.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import org.junit.jupiter.api.Test;

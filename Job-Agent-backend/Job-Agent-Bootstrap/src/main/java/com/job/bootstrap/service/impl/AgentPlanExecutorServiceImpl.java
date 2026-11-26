@@ -1,4 +1,5 @@
 package com.job.bootstrap.service.impl;
+import com.job.ai.agent.support.trace.AgentTraceService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
