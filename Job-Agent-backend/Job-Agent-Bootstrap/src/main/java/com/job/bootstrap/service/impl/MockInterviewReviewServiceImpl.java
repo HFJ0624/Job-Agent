@@ -7,7 +7,7 @@ import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.mapper.MockInterviewReviewRecordMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.MockInterviewReviewService;
 import com.job.common.enums.MockInterviewErrorCode;
 import com.job.common.entity.interview.MockInterviewAnswer;

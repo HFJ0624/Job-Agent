@@ -7,7 +7,7 @@ import com.job.ai.model.turn.AiChatMessage;
 import com.job.ai.model.turn.AiChatTurnRequest;
 import com.job.ai.model.turn.AiChatTurnResponse;
 import com.job.ai.model.turn.AiToolCall;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -14,7 +14,7 @@ import com.job.bootstrap.mapper.AgentEvalRunMapper;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.service.AgentChatService;
 import com.job.bootstrap.service.AgentEvalService;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.WorkflowTaskService;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;

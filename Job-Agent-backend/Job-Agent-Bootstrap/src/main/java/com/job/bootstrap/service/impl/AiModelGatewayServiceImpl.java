@@ -21,7 +21,7 @@ import com.job.bootstrap.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiModelRouteMapper;
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.ai.model.observability.AgentObservationService;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.AiPromptRuntimeService;
 import com.job.common.entity.ai.AiModelCallLog;
 import com.job.common.entity.ai.AiModelCircuitState;

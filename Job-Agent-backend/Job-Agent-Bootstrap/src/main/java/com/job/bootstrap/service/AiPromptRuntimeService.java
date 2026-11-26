@@ -1,4 +1,5 @@
 package com.job.bootstrap.service;
+import com.job.ai.model.gateway.AiModelGatewayService;
 
 import com.job.ai.model.AiRenderedPrompt;
 import com.job.common.entity.ai.AiModelRoute;

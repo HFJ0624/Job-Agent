@@ -8,7 +8,7 @@ import com.job.bootstrap.mapper.HrReplyRecognitionRecordMapper;
 import com.job.bootstrap.mapper.JobApplicationRecordMapper;
 import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.HrReplyRecognitionService;
 import com.job.bootstrap.service.JobApplicationService;
 import com.job.bootstrap.service.JobReminderService;

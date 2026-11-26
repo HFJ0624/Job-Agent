@@ -2,7 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.common.vo.agent.AgentInboxVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

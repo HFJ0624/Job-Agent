@@ -9,7 +9,7 @@ import com.job.bootstrap.agent.core.react.TerminalToolContract;
 import com.job.ai.model.turn.AiChatTurnResponse;
 import com.job.ai.model.turn.AiChatTurnRequest;
 import com.job.ai.model.turn.AiToolCall;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

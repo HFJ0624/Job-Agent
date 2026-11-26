@@ -1,4 +1,5 @@
 package com.job.agent;
+import com.job.ai.model.gateway.AiModelGatewayService;
 
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;

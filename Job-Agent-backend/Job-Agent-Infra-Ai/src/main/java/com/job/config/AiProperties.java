@@ -1,4 +1,5 @@
 package com.job.config;
+import com.job.ai.model.gateway.AiModelGatewayService;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

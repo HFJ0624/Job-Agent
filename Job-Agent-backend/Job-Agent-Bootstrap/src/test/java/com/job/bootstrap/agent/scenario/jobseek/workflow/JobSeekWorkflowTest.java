@@ -20,7 +20,7 @@ import com.job.bootstrap.agent.scenario.jobsearch.JobSearchWorkflow;
 import com.job.ai.model.turn.AiChatTurnResponse;
 import com.job.ai.model.turn.AiChatTurnRequest;
 import com.job.ai.model.turn.AiToolCall;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.JobMatchService;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.bootstrap.service.JobResumeService;

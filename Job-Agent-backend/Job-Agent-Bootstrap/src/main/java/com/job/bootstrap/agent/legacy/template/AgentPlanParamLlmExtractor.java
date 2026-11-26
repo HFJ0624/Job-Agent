@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.legacy.template;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

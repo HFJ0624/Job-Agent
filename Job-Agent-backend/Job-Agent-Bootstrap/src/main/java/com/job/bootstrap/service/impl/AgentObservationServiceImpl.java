@@ -1,4 +1,5 @@
 package com.job.bootstrap.service.impl;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.ai.agent.support.trace.AgentTraceService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.service;
+package com.job.ai.model.gateway;
 
 import com.job.ai.model.gateway.TokenConsumer;
 import com.job.enums.AiModelTier;

@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.support.memory;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import com.job.enums.AgentMemoryType;
 import lombok.RequiredArgsConstructor;

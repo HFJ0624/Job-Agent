@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.support.rewrite;
 
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.ai.model.observability.AgentObservationService;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import com.job.enums.AgentObservationEventType;
 import com.job.enums.AgentObservationStatus;

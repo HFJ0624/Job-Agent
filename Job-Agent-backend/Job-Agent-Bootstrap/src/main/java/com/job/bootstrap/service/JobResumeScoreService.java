@@ -1,4 +1,5 @@
 package com.job.bootstrap.service;
+import com.job.ai.model.gateway.AiModelGatewayService;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.job.common.entity.resume.JobResumeScoreRecord;

@@ -8,7 +8,7 @@ import com.job.bootstrap.mapper.AgentEvalResultMapper;
 import com.job.bootstrap.mapper.AgentEvalRunMapper;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.service.AgentChatService;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.WorkflowTaskService;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentEvalCase;

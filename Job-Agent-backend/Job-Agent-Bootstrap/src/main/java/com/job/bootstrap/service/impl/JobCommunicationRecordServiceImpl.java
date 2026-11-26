@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
 import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.JobApplicationService;
 import com.job.bootstrap.service.JobCommunicationRecordService;
 import com.job.bootstrap.service.JobReminderService;

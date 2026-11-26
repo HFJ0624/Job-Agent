@@ -5,7 +5,7 @@ import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.guardrail.PiiMasker;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
-import com.job.bootstrap.service.AiModelGatewayService;
+import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.enums.AiModelTier;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
