@@ -32,6 +32,7 @@
 | 提示词 | 各 `*Node` 的 `systemPrompt(...)`（或 Prompt 模板表） |
 | 模型场景/超时/重试 | 模型路由表 + `AiModelGatewayServiceImpl`（额度唯一扣费点） |
 | 预算数值 | `core/budget/TaskExecutionBudget.DEFAULT_*` |
+| 新链路流式答复 | `agent/application/chat/service/AgentReplyStreamService`（改提示词/降级阈值） |
 | SSE 事件名/载荷 | `core/event/AgentProgressEvent` + `AgentController` + 前端 `api/agent.ts` |
 | 任务状态语义 | `orchestration/task/AgentTaskService` + `AgentPlanStatus` |
 

@@ -122,6 +122,9 @@ public class AgentChatServiceImpl implements AgentChatService {
     /** 会话/消息存储（任务二抽取）。 */
     private final com.job.bootstrap.agent.application.chat.service.ConversationService conversationService;
 
+    /** 新链路流式答复（方案 B）：已校验结果 → 逐 token 改写。 */
+    private final com.job.bootstrap.agent.application.chat.service.AgentReplyStreamService agentReplyStreamService;
+
     /**
      * 模型与 Prompt 动态网关。
      * 第一版先接入 Executor 总结场景，让管理员可以在后台改总结 Prompt 和模型路由。
@@ -458,19 +461,63 @@ public class AgentChatServiceImpl implements AgentChatService {
         AgentIntentRouter.IntentResolution ruleIntent = agentIntentRouter.routeDetailed(message);
         ChatRequestRouter.Route route = chatRequestRouter.route(ruleIntent.intentCode().name(), planId, message);
         if (route == ChatRequestRouter.Route.MULTI_AGENT) {
-            return emitAsStream(chatViaJobSeek(userId, conversationId, planId, message, retry, progressPublisher), streamSink);
+            return streamWithSummary(chatViaJobSeek(userId, conversationId, planId, message, retry, progressPublisher), streamSink);
         }
         if (route == ChatRequestRouter.Route.RESUME) {
-            return emitAsStream(chatViaResume(userId, conversationId, planId, message, progressPublisher,
+            return streamWithSummary(chatViaResume(userId, conversationId, planId, message, progressPublisher,
                     Boolean.TRUE.equals(retry)), streamSink);
         }
         if (route == ChatRequestRouter.Route.REACT_SEARCH) {
-            return emitAsStream(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);
+            return streamWithSummary(chatViaReactSearch(userId, conversationId, planId, message, ruleIntent, retry), streamSink);
         }
         return streamTransactional(userId, conversationId, planId, message, confirmedToolNames, retry, streamSink);
     }
 
-    // 新链路复用 token/done 协议：整段答复作为一个 token 推给前端
+    /**
+     * 新链路流式输出（方案 B）：
+     * 1. 先拿到已校验答复（事实来源）；
+     * 2. 走 AGENT_SUMMARY 流式改写，token 实时推送；
+     * 3. 成功后回写最后一条助手消息；失败/空结果则退回"整段一个 token"，保证前端一定有输出。
+     */
+    private AgentChatVO streamWithSummary(AgentChatVO vo, TokenConsumer streamSink) {
+        if (streamSink == null || vo == null || !StringUtils.hasText(vo.getAnswer())) {
+            return vo;
+        }
+        String grounded = vo.getAnswer();
+        java.util.concurrent.atomic.AtomicBoolean emitted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        TokenConsumer proxy = token -> {
+            emitted.set(true);
+            streamSink.onToken(token);
+        };
+        String traceId = java.util.UUID.randomUUID().toString().replace("-", "");
+
+        try {
+            String streamed = agentReplyStreamService.stream(
+                    grounded, vo.getConversationId(), traceId, proxy);
+            if (StringUtils.hasText(streamed) && streamed.trim().length() >= 10) {
+                vo.setAnswer(streamed);
+                try {
+                    conversationService.updateLastAssistantContent(vo.getConversationId(), streamed);
+                } catch (Exception exception) {
+                    log.warn("流式答复回写失败，保留原消息，error={}", exception.getMessage());
+                }
+                return vo;
+            }
+        } catch (Exception exception) {
+            log.warn("流式答复生成失败，降级为整段输出，error={}", exception.getMessage());
+        }
+
+        if (!emitted.get()) {
+            try {
+                streamSink.onToken(grounded);
+            } catch (Exception ignored) {
+                // 前端断开不影响已落库结果
+            }
+        }
+        return vo;
+    }
+
+    // 兼容保留：整段答复作为一个 token 推送
     private AgentChatVO emitAsStream(AgentChatVO vo, TokenConsumer streamSink) {
         if (streamSink != null && vo != null && StringUtils.hasText(vo.getAnswer())) {
             try {

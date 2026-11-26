@@ -108,3 +108,17 @@ cd Job-Agent-Frontend/apps/user && npx vue-tsc --noEmit && npm run build
 
 > 启动必须用 `clean package`：包迁移后 `target/classes` 会残留旧包，普通 package 会导致
 > `ConflictingBeanDefinitionException`（已在第 7 节记录）。
+
+
+## 9. 新链路流式答复（方案 B，2026-11-26）
+
+**问题**：复合/简历/搜索三条新链路把最终答复当作**一个 token** 推送（`emitAsStream`），前端一次渲染完，观感是"想很久然后整段蹦出"；旧模板链路本身已是真流式。
+
+**实现**：
+- 新增 `agent/application/chat/service/AgentReplyStreamService`：把**已校验答复**作为唯一事实来源，经 `AGENT_SUMMARY` 场景流式改写（只做表达优化，提示词禁止新增事实）；
+- `AgentChatServiceImpl.streamWithSummary`：三条新分支改走该服务；成功后回写最后一条助手消息（`ConversationService.updateLastAssistantContent`），保证刷新后看到同一份文本；
+- 降级策略：网关不可用、返回空、文本过短（<10 字）或一 token 未发出 → 退回整段推送，前端一定有输出；已发出部分不重复推。
+
+**兼容性**：SSE 事件名与载荷不变（仍 `token`/`done`）；同步 `chat()` 完全不受影响（`streamSink == null` 直接返回）。
+
+**验证**：378 单测全绿；`clean package` 成功；容器启动通过。真实模型流式效果需前端联调确认（依赖数据库 `ai_model_config` 指向可用模型）。

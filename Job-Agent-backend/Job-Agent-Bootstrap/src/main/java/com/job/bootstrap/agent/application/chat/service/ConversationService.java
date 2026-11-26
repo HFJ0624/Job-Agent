@@ -1,11 +1,13 @@
 package com.job.bootstrap.agent.application.chat.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * 功能: 会话与消息存储（从 AgentChatServiceImpl 抽出）。
@@ -55,6 +57,27 @@ public class ConversationService {
         message.setTokenCount(0);
         message.setIsDeleted(NOT_DELETED);
         aiMessageMapper.insert(message);
+    }
+
+    /**
+     * 回写最后一条助手消息内容（流式答复落库用）。
+     *
+     * <p>新链路先落"已校验答复"，流式改写成功后用本方法覆盖，保证刷新后看到的是同一份文本。</p>
+     */
+    public void updateLastAssistantContent(Long conversationId, String content) {
+        if (conversationId == null || !StringUtils.hasText(content)) {
+            return;
+        }
+        AiMessage last = aiMessageMapper.selectOne(new QueryWrapper<AiMessage>()
+                .eq("conversation_id", conversationId)
+                .eq("role", "ASSISTANT")
+                .orderByDesc("id")
+                .last("limit 1"));
+        if (last == null) {
+            return;
+        }
+        last.setContent(content);
+        aiMessageMapper.updateById(last);
     }
 
     /** 更新会话更新时间（列表排序用）。 */
