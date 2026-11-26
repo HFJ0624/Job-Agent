@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.legacy.template;
+package com.job.ai.agent.application.plan;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

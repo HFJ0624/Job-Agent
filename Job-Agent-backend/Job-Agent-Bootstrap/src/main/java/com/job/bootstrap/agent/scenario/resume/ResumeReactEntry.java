@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.scenario.resume;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.infrastructure.persistence.AgentArtifactService;
-import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
+import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.event.AgentProgressEvent;
 import com.job.ai.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactSearchProperties;

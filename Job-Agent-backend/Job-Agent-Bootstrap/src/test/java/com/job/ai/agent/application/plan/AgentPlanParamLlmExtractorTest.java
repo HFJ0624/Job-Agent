@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.legacy.template;
+package com.job.ai.agent.application.plan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.model.gateway.AiModelGatewayService;

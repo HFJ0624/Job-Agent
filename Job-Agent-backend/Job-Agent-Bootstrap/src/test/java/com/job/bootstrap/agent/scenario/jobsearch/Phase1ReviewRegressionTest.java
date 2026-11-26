@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
 import com.job.ai.agent.tool.registry.AgentToolInvoker;
 import com.job.ai.agent.support.guardrail.AgentGuardrailService;
-import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
+import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.react.*;
 import com.job.ai.infrastructure.persistence.AgentRunService;
 import com.job.ai.agent.tool.registry.AgentToolGuard;

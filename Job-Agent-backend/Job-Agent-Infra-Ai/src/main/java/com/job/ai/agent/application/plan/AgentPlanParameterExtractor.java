@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.legacy.template;
+package com.job.ai.agent.application.plan;
 
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;

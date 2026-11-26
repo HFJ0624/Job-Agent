@@ -8,7 +8,7 @@ import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
 import com.job.ai.agent.tool.registry.AgentToolInvoker;
 import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
 import com.job.bootstrap.agent.scenario.match.MatchReportContract;
-import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
+import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.react.ReActRunner;
 import com.job.ai.agent.core.react.TerminalToolContract;
 import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;

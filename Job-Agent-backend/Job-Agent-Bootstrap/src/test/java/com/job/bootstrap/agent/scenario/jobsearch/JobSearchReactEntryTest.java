@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.scenario.jobsearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
+import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.react.AgentResult;
 import com.job.ai.infrastructure.persistence.AgentRunService;
 import com.job.ai.model.turn.AiChatMessage;

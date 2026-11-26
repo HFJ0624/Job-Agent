@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.legacy.template;
+package com.job.ai.agent.application.plan;
 
 import org.junit.jupiter.api.Test;
 

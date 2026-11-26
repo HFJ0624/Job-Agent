@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.scenario.jobseek.entry;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.scenario.jobseek.workflow.JobSeekWorkflow;
-import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
+import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactSearchProperties;
 import com.job.ai.agent.application.task.AgentTaskService;
