@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.application.routing;
 
-import com.job.bootstrap.agent.application.task.AgentTaskService;
+import com.job.ai.agent.application.task.AgentTaskService;
 import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;

@@ -9,7 +9,7 @@ import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.compensation.AgentPlanCompensator;
 import com.job.bootstrap.agent.legacy.template.AgentReplanner;
 import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
-import com.job.bootstrap.mapper.AgentPlanMapper;
+import com.job.ai.persistence.model.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentMemoryExtractionService;

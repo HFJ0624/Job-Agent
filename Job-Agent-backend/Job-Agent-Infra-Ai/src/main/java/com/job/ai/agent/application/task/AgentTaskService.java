@@ -1,6 +1,6 @@
-package com.job.bootstrap.agent.application.task;
+package com.job.ai.agent.application.task;
 
-import com.job.bootstrap.mapper.AgentPlanMapper;
+import com.job.ai.persistence.model.mapper.AgentPlanMapper;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.enums.AgentPlanStatus;
 import lombok.RequiredArgsConstructor;

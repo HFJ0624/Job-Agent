@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.api.controller.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.job.ai.agent.core.event.SseTaskProgressPublisher;
-import com.job.bootstrap.agent.application.task.AgentTaskStatusService;
+import com.job.ai.agent.application.task.AgentTaskStatusService;
 import com.job.ai.agent.core.budget.TaskBudgetRegistry;
 import com.job.bootstrap.service.AgentChatService;
 import com.job.bootstrap.service.AgentHistoryService;
@@ -37,7 +37,7 @@ public class AgentController {
     /** 第三阶段：任务状态快照与取消。 */
     private final AgentTaskStatusService agentTaskStatusService;
     private final TaskBudgetRegistry taskBudgetRegistry;
-    private final com.job.bootstrap.agent.application.task.AgentTaskService agentTaskService;
+    private final com.job.ai.agent.application.task.AgentTaskService agentTaskService;
 
     /**
      * SSE 流式超时时间（毫秒）。

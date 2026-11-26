@@ -1,7 +1,7 @@
-package com.job.bootstrap.agent.infrastructure.persistence;
+package com.job.ai.infrastructure.persistence;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.job.bootstrap.mapper.AgentArtifactMapper;
+import com.job.ai.persistence.model.mapper.AgentArtifactMapper;
 import com.job.common.entity.agent.AgentArtifact;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
