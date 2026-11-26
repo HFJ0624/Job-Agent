@@ -1,11 +1,12 @@
-package com.job.bootstrap.service.impl;
+package com.job.ai.model.prompt.impl;
+import com.job.ai.model.gateway.impl.AiModelGatewayServiceImpl;
 import com.job.ai.model.gateway.AiModelGatewayService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.job.ai.model.AiRenderedPrompt;
-import com.job.bootstrap.mapper.AiPromptTemplateMapper;
-import com.job.bootstrap.mapper.AiPromptVersionMapper;
-import com.job.bootstrap.service.AiPromptRuntimeService;
+import com.job.ai.persistence.model.mapper.AiPromptTemplateMapper;
+import com.job.ai.persistence.model.mapper.AiPromptVersionMapper;
+import com.job.ai.model.prompt.AiPromptRuntimeService;
 import com.job.common.entity.ai.AiModelRoute;
 import com.job.common.entity.ai.AiPromptTemplate;
 import com.job.common.entity.ai.AiPromptVersion;

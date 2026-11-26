@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.core.react;
 
-import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
+import com.job.ai.agent.core.budget.TaskExecutionBudget;
 import com.job.ai.model.turn.AiChatMessage;
 
 import java.util.List;

@@ -1,8 +1,8 @@
 package com.job.bootstrap.agent.core.react;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.core.budget.TaskBudgetContext;
-import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
+import com.job.ai.agent.core.budget.TaskBudgetContext;
+import com.job.ai.agent.core.budget.TaskExecutionBudget;
 import com.job.ai.model.turn.AiChatMessage;
 import com.job.ai.model.turn.AiChatTurnRequest;
 import com.job.ai.model.turn.AiChatTurnResponse;

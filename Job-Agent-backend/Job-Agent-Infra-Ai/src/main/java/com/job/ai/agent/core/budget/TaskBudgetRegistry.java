@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.core.budget;
+package com.job.ai.agent.core.budget;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

@@ -8,7 +8,7 @@ import com.job.bootstrap.agent.scenario.jobseek.config.JobSeekExecutorConfig;
 import com.job.bootstrap.agent.infrastructure.persistence.AgentArtifactService;
 import com.job.ai.agent.core.event.AgentProgressEvent;
 import com.job.ai.agent.core.event.TaskProgressPublisher;
-import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
+import com.job.ai.agent.core.budget.TaskExecutionBudget;
 import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
 import com.job.bootstrap.agent.scenario.match.MatchReport;
 import com.job.bootstrap.agent.core.react.AgentResult;

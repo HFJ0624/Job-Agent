@@ -1,4 +1,5 @@
 package com.job.bootstrap.service.impl;
+import com.job.ai.model.gateway.impl.AiModelGatewayServiceImpl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.model.AiGatewayProperties;
@@ -13,7 +14,7 @@ import com.job.ai.persistence.model.mapper.AiModelCircuitStateMapper;
 import com.job.ai.persistence.model.mapper.AiModelConfigMapper;
 import com.job.ai.persistence.model.mapper.AiModelRouteMapper;
 import com.job.ai.model.observability.AgentObservationService;
-import com.job.bootstrap.service.AiPromptRuntimeService;
+import com.job.ai.model.prompt.AiPromptRuntimeService;
 import com.job.common.entity.ai.AiModelCallLog;
 import com.job.common.entity.ai.AiModelCircuitState;
 import com.job.common.entity.ai.AiModelConfig;

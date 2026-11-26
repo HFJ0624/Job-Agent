@@ -1,4 +1,5 @@
 package com.job.ai.model;
+import com.job.ai.model.gateway.impl.AiModelGatewayServiceImpl;
 import com.job.ai.model.gateway.TokenConsumer;
 
 import com.fasterxml.jackson.databind.JsonNode;

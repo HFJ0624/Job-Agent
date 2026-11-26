@@ -1,4 +1,4 @@
-package com.job.bootstrap.service.impl;
+package com.job.ai.model.gateway.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -8,8 +8,8 @@ import com.job.ai.model.AiGatewayProperties;
 import com.job.ai.model.AiModelCallResponse;
 import com.job.ai.model.turn.AiChatTurnRequest;
 import com.job.ai.model.turn.AiChatTurnResponse;
-import com.job.bootstrap.agent.core.budget.TaskBudgetContext;
-import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
+import com.job.ai.agent.core.budget.TaskBudgetContext;
+import com.job.ai.agent.core.budget.TaskExecutionBudget;
 import com.job.ai.model.AiModelHttpClient;
 import com.job.ai.model.AiModelRateLimiter;
 import com.job.ai.model.AiRetryPolicy;
@@ -22,7 +22,7 @@ import com.job.ai.persistence.model.mapper.AiModelRouteMapper;
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.ai.model.observability.AgentObservationService;
 import com.job.ai.model.gateway.AiModelGatewayService;
-import com.job.bootstrap.service.AiPromptRuntimeService;
+import com.job.ai.model.prompt.AiPromptRuntimeService;
 import com.job.common.entity.ai.AiModelCallLog;
 import com.job.common.entity.ai.AiModelCircuitState;
 import com.job.common.entity.ai.AiModelConfig;

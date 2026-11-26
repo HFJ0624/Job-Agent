@@ -6,7 +6,7 @@ import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactSearchProperties;
 import com.job.bootstrap.agent.application.task.AgentTaskService;
-import com.job.bootstrap.agent.core.budget.TaskBudgetRegistry;
+import com.job.ai.agent.core.budget.TaskBudgetRegistry;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.enums.AgentPlanStatus;

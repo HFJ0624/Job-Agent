@@ -1,4 +1,6 @@
 package com.job.ai.model.gateway;
+import com.job.ai.model.prompt.AiPromptRuntimeService;
+import com.job.ai.model.gateway.impl.AiModelGatewayServiceImpl;
 
 import com.job.ai.model.gateway.TokenConsumer;
 import com.job.enums.AiModelTier;

@@ -95,7 +95,7 @@ public class MatchAgentNode {
                           JobResume resume, ResumeProfile profile, List<JobCandidates.JobCandidateItem> candidates,
                           SearchConstraints constraints, int topK, String constraintVersion,
                           Long profileArtifactId, Long candidatesArtifactId,
-                          com.job.bootstrap.agent.core.budget.TaskExecutionBudget budget) {
+                          com.job.ai.agent.core.budget.TaskExecutionBudget budget) {
         Set<Long> candidateIds = candidates.stream()
                 .map(JobCandidates.JobCandidateItem::jobId).collect(Collectors.toSet());
         Map<Long, BigDecimal> previewedScores = new HashMap<>();

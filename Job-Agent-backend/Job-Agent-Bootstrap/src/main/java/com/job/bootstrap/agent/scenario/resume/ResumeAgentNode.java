@@ -75,7 +75,7 @@ public class ResumeAgentNode {
      */
     public Result execute(Long userId, Long conversationId, Long planId, String traceId,
                           JobResume resume, String resumeVersion, String targetRoleHint,
-                          com.job.bootstrap.agent.core.budget.TaskExecutionBudget budget) {
+                          com.job.ai.agent.core.budget.TaskExecutionBudget budget) {
         List<ResumeSections.Section> sections = ResumeSections.of(resume, objectMapper);
         String rawResume = normalize(resume.getRawText());
 

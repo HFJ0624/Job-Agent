@@ -1,4 +1,5 @@
-package com.job.bootstrap.service;
+package com.job.ai.model.prompt;
+import com.job.ai.model.prompt.impl.AiPromptRuntimeServiceImpl;
 import com.job.ai.model.gateway.AiModelGatewayService;
 
 import com.job.ai.model.AiRenderedPrompt;

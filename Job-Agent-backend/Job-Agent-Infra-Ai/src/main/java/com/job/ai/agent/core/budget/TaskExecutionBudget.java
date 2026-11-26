@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.core.budget;
+package com.job.ai.agent.core.budget;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
