@@ -22,10 +22,6 @@
         </dependency>
 
         <!-- 内部模块：工具调用 AI 能力完成评分、匹配、公司分析和打招呼语生成 -->
-        <dependency>
-            <groupId>com.job</groupId>
-            <artifactId>Job-Agent-Infra-Ai</artifactId>
-        </dependency>
 
         <!-- Spring 基础容器：将 Tool、Registry 和工具适配器注册为 Bean -->
         <dependency>
