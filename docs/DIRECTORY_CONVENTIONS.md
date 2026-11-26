@@ -113,9 +113,8 @@ agent/
 |---|---|---|
 | `api/controller/AgentController` | HTTP/SSE 入口 | 按规范保留 |
 | `integration/agent/**` | 11 个端口适配器 | 按规范保留 |
-| `legacy/template` | 旧模板链路（5 类） | 按规范保留 |
-| `service/impl/AgentChatServiceImpl`（1800 行）等 4 个服务 | 聊天/记忆捕获/记忆上下文/计划执行 | **未迁**：与 legacy、compensation、`AgentPlanStepMapper` 形成粘连集群 |
-| `support/compensation`（8 类） | 补偿动作 | 未迁：需 `NotificationPort` |
+| — | 旧模板链路（5 类） | ✅ 已迁 `com.job.ai.agent.legacy.template` |
+| — | 聊天/记忆捕获/记忆上下文/计划执行/补偿 | ✅ 已全部迁入 `com.job.ai.agent.application.chat`、`agent.support.compensation`、`agent.legacy.template` |
 
 ### 依赖约束（已满足）
 
