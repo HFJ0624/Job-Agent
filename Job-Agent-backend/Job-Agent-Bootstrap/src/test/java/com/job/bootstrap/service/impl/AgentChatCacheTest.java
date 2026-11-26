@@ -1,14 +1,14 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
+import com.job.ai.agent.support.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactChatPreparationService;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.bootstrap.support.SimpleTransactionManager;
 import com.job.bootstrap.agent.scenario.resume.ResumeReactEntry;
-import com.job.bootstrap.agent.support.cache.AgentCacheProperties;
-import com.job.bootstrap.agent.support.cache.InMemorySemanticCacheStore;
+import com.job.ai.agent.support.cache.AgentCacheProperties;
+import com.job.ai.agent.support.cache.InMemorySemanticCacheStore;
 import com.job.ai.agent.support.context.AgentContextBuilder;
 import com.job.ai.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.ai.agent.support.guardrail.AgentGuardrailService;
@@ -97,7 +97,7 @@ class AgentChatCacheTest {
         cacheProperties.setTtlMinutes(30);
         answerCacheService = new AgentAnswerCacheService(
                 cacheProperties, new InMemorySemanticCacheStore(cacheProperties),
-                ragEmbeddingService, agentObservationService);
+                new com.job.bootstrap.integration.agent.rag.EmbeddingAdapter(ragEmbeddingService), agentObservationService);
         queryRewriter = new AgentQueryRewriter(aiModelGatewayService, agentObservationService);
         service = new AgentChatServiceImpl(
                 aiConversationMapper, aiMessageMapper,

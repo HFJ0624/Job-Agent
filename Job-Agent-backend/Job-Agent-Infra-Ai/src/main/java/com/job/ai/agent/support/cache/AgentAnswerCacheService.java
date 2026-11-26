@@ -1,7 +1,7 @@
-package com.job.bootstrap.agent.support.cache;
+package com.job.ai.agent.support.cache;
 
 import com.job.ai.model.observability.AgentObservationRecord;
-import com.job.bootstrap.rag.service.RagEmbeddingService;
+import com.job.ai.agent.port.EmbeddingPort;
 import com.job.ai.model.observability.AgentObservationService;
 import com.job.enums.AgentObservationEventType;
 import com.job.enums.AgentObservationStatus;
@@ -35,7 +35,7 @@ public class AgentAnswerCacheService {
 
     private final AgentCacheProperties properties;
     private final CacheStore cacheStore;
-    private final RagEmbeddingService ragEmbeddingService;
+    private final EmbeddingPort embeddingPort;
     private final AgentObservationService agentObservationService;
 
     /**
@@ -79,7 +79,7 @@ public class AgentAnswerCacheService {
         }
 
         try {
-            float[] embedding = ragEmbeddingService.embed(query.trim());
+            float[] embedding = embeddingPort.embed(query.trim());
             long expireAt = System.currentTimeMillis()
                     + Math.max(1, properties.getTtlMinutes()) * 60_000L;
             cacheStore.put(userId, new CacheStore.CacheEntry(query.trim(), embedding, answer.trim(), expireAt));
@@ -92,7 +92,7 @@ public class AgentAnswerCacheService {
 
     private float[] embed(String query) {
         try {
-            return ragEmbeddingService.embed(query.trim());
+            return embeddingPort.embed(query.trim());
         } catch (Exception exception) {
             // embedding 不可用（未配置/网络）：缓存整体退化为不可用
             log.warn("语义缓存 embedding 失败，本次降级为无缓存，error={}", exception.getMessage());

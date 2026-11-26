@@ -7,7 +7,7 @@ import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.ai.agent.support.intent.AgentIntentCode;
 import com.job.ai.agent.support.intent.AgentIntentLlmClassifier;
 import com.job.ai.agent.support.intent.AgentIntentRouter;
-import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
+import com.job.ai.agent.support.cache.AgentAnswerCacheService;
 import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactChatPreparationService;
 import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;

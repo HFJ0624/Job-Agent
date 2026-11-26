@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.cache;
+package com.job.ai.agent.support.cache;
 
 /**
  * 功能: 语义缓存存储契约（任务 G10）。

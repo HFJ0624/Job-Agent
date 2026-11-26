@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.cache;
+package com.job.ai.agent.support.cache;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

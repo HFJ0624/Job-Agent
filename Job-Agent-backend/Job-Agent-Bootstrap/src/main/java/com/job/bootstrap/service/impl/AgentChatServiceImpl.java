@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.application.routing.ChatRequestRouter;
 import com.job.ai.agent.support.context.AgentContextBuilder;
-import com.job.bootstrap.agent.support.cache.AgentAnswerCacheService;
+import com.job.ai.agent.support.cache.AgentAnswerCacheService;
 import com.job.ai.agent.support.rewrite.AgentQueryRewriter;
 import com.job.bootstrap.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.bootstrap.agent.scenario.jobsearch.ReactChatPreparationService;

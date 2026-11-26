@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.cache;
+package com.job.ai.agent.support.cache;
 
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.bootstrap.rag.service.RagEmbeddingService;
@@ -48,7 +48,8 @@ class AgentAnswerCacheServiceTest {
         properties.setSimilarityThreshold(0.9);
         properties.setTtlMinutes(30);
         service = new AgentAnswerCacheService(
-                properties, new InMemorySemanticCacheStore(properties), embeddingService, observationService);
+                properties, new InMemorySemanticCacheStore(properties),
+                new com.job.bootstrap.integration.agent.rag.EmbeddingAdapter(embeddingService), observationService);
         // 同一文本 → 同一向量（确定性），不同文本 → 不同向量
         when(embeddingService.embed(anyString())).thenAnswer(invocation -> {
             String text = invocation.getArgument(0);

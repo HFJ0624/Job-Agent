@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.cache;
+package com.job.ai.agent.support.cache;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
