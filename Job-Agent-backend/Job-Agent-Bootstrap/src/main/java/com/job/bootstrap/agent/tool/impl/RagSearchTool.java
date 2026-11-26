@@ -3,7 +3,7 @@ package com.job.bootstrap.agent.tool.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
-import com.job.bootstrap.rag.service.RagRetrievalService;
+import com.job.ai.agent.port.RagSearchPort;
 import com.job.bootstrap.service.AgentTraceService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.rag.RagSearchResultVO;
@@ -28,7 +28,7 @@ public class RagSearchTool {
 
     private static final String TOOL_NAME = "RagSearchTool.searchKnowledge";
 
-    private final RagRetrievalService ragRetrievalService;
+    private final RagSearchPort ragSearchPort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -68,7 +68,7 @@ public class RagSearchTool {
              * 1. Tool 不直接拼 SQL，也不直接操作向量库。
              * 2. Tool 只调用领域服务，便于记录 Trace、做权限隔离、后续替换检索策略。
              */
-            List<RagSearchResultVO> results = ragRetrievalService.search(userId, query, limit);
+            List<RagSearchResultVO> results = ragSearchPort.search(userId, query, limit);
 
             Map<String, Object> output = new LinkedHashMap<>();
             output.put("total", results.size());

@@ -5,7 +5,7 @@ import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.agent.tool.impl.resolver.AgentEntityResolver;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.JobResumeScoreService;
+import com.job.ai.agent.port.ResumeScorePort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.resume.ResumeScoreVO;
@@ -29,7 +29,7 @@ public class ResumeAnalyzeTool {
 
     private static final String TOOL_NAME = "ResumeAnalyzeTool.analyzeResume";
 
-    private final JobResumeScoreService jobResumeScoreService;
+    private final ResumeScorePort resumeScorePort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -84,7 +84,7 @@ public class ResumeAnalyzeTool {
             input.put("resolvedResumeName", resume.getResumeName());
             Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
-            ResumeScoreVO result = jobResumeScoreService.scoreResume(userId, resume.getId(), targetPosition);
+            ResumeScoreVO result = resumeScorePort.scoreResume(userId, resume.getId(), targetPosition);
             String json = objectMapper.writeValueAsString(result);
 
             agentTraceService.saveToolTrace(

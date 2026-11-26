@@ -6,7 +6,7 @@ import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.agent.tool.impl.resolver.AgentEntityResolveResult;
 import com.job.bootstrap.agent.tool.impl.resolver.AgentEntityResolver;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.JobMatchService;
+import com.job.ai.agent.port.JobMatchPort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
@@ -32,7 +32,7 @@ public class JobMatchTool {
 
     private static final String TOOL_NAME = "JobMatchTool.matchJob";
 
-    private final JobMatchService jobMatchService;
+    private final JobMatchPort jobMatchPort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -113,8 +113,8 @@ public class JobMatchTool {
                 explicitParams.put("minSalary", minSalary);
             }
             JobMatchVO result = explicitParams.isEmpty()
-                    ? jobMatchService.matchJob(userId, resume.getId(), job.getId())
-                    : jobMatchService.matchJob(userId, resume.getId(), job.getId(), explicitParams);
+                    ? jobMatchPort.matchJob(userId, resume.getId(), job.getId())
+                    : jobMatchPort.matchJob(userId, resume.getId(), job.getId(), explicitParams);
             agentTraceService.saveToolTrace(
                     userId,
                     conversationId,

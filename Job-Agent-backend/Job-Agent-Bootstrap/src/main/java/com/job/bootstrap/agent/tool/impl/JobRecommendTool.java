@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.ai.agent.port.JobRecommendPort;
 import com.job.common.dto.preference.JobRecommendQueryDTO;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.preference.JobRecommendVO;
@@ -32,7 +32,7 @@ public class JobRecommendTool {
 
     private static final String TOOL_NAME = "JobRecommendTool.recommendJobs";
 
-    private final UserJobPreferenceService userJobPreferenceService;
+    private final JobRecommendPort jobRecommendPort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -72,7 +72,7 @@ public class JobRecommendTool {
             query.setCity(city);
             query.setLimit(limit == null ? 10 : limit);
 
-            List<JobRecommendVO> list = userJobPreferenceService.recommendJobs(userId, query);
+            List<JobRecommendVO> list = jobRecommendPort.recommendJobs(userId, query);
 
             /*
              * 工具调用成功，记录 Trace。
