@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.intent;
+package com.job.ai.agent.support.intent;
 
 /**
  * 作者: hfj

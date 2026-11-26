@@ -1,4 +1,4 @@
-package com.job.bootstrap.mapper;
+package com.job.ai.persistence.model.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.job.common.entity.agent.AiConversation;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.context;
+package com.job.ai.agent.support.context;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

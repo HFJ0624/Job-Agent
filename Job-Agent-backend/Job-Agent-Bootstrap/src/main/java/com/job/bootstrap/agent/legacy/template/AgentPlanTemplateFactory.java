@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.legacy.template;
 
-import com.job.bootstrap.agent.support.intent.AgentIntentCode;
+import com.job.ai.agent.support.intent.AgentIntentCode;
 import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

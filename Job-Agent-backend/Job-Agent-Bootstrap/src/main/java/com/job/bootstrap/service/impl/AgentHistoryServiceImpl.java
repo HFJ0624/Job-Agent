@@ -1,8 +1,8 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.job.bootstrap.mapper.AiConversationMapper;
-import com.job.bootstrap.mapper.AiMessageMapper;
+import com.job.ai.persistence.model.mapper.AiConversationMapper;
+import com.job.ai.persistence.model.mapper.AiMessageMapper;
 import com.job.bootstrap.service.AgentHistoryService;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;

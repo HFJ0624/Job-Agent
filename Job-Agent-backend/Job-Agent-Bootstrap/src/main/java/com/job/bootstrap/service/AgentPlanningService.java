@@ -1,7 +1,7 @@
 package com.job.bootstrap.service;
 import com.job.ai.model.gateway.AiModelGatewayService;
 
-import com.job.bootstrap.agent.support.intent.AgentIntentCode;
+import com.job.ai.agent.support.intent.AgentIntentCode;
 import com.job.common.vo.agent.AgentPlanVO;
 
 /**

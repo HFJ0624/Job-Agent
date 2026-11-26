@@ -2,7 +2,7 @@ package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.support.intent.AgentIntentCode;
+import com.job.ai.agent.support.intent.AgentIntentCode;
 import com.job.bootstrap.agent.legacy.template.AgentPlanAugmenter;
 import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.legacy.template.AgentPlanParamLlmExtractor;

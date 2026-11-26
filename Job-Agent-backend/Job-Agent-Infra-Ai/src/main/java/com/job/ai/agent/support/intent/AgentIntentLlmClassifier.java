@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.intent;
+package com.job.ai.agent.support.intent;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

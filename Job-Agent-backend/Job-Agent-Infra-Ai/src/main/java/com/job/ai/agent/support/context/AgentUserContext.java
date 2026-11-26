@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.context;
+package com.job.ai.agent.support.context;
 
 /**
  * 作者:hfj

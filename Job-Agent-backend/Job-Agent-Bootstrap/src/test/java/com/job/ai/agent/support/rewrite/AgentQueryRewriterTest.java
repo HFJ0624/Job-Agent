@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.rewrite;
+package com.job.ai.agent.support.rewrite;
 
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.ai.model.observability.AgentObservationService;

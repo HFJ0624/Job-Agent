@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.support.eval;
+package com.job.ai.agent.support.eval;
 
 import org.junit.jupiter.api.Test;
 

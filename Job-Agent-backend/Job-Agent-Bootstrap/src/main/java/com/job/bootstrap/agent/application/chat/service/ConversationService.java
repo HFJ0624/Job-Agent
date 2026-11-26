@@ -1,8 +1,8 @@
 package com.job.bootstrap.agent.application.chat.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.job.bootstrap.mapper.AiConversationMapper;
-import com.job.bootstrap.mapper.AiMessageMapper;
+import com.job.ai.persistence.model.mapper.AiConversationMapper;
+import com.job.ai.persistence.model.mapper.AiMessageMapper;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import lombok.RequiredArgsConstructor;
