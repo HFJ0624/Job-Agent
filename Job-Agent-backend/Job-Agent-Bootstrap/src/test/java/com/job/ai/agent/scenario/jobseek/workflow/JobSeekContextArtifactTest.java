@@ -1,7 +1,7 @@
-package com.job.bootstrap.agent.scenario.jobseek.workflow;
+package com.job.ai.agent.scenario.jobseek.workflow;
 
-import com.job.bootstrap.agent.scenario.jobseek.service.SeekArtifactService;
-import com.job.bootstrap.agent.scenario.jobseek.service.SeekContextResolver;
+import com.job.ai.agent.scenario.jobseek.service.SeekArtifactService;
+import com.job.ai.agent.scenario.jobseek.service.SeekContextResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.scenario.jobsearch.JobSearchWorkflow;
 import com.job.ai.agent.scenario.match.MatchAgentNode;
@@ -63,7 +63,8 @@ class JobSeekContextArtifactTest {
                 new SeekArtifactService(artifactService, mapper),
                 new SeekContextResolver(new AgentPlanParameterExtractor(),
                         new ResumeSelectionService(new com.job.bootstrap.integration.agent.resume.ResumeAdapter(resumeService)),
-                        resumeService, preferenceService, mapper),
+                        new com.job.bootstrap.integration.agent.resume.ResumeAdapter(resumeService),
+                        new com.job.bootstrap.integration.agent.job.PreferenceAdapter(preferenceService), mapper),
                 executor);
     }
 

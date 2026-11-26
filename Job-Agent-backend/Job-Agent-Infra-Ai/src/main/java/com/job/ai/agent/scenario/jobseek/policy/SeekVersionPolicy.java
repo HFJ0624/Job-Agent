@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobseek.policy;
+package com.job.ai.agent.scenario.jobseek.policy;
 
 import com.job.ai.agent.scenario.jobsearch.SearchConstraints;
 import com.job.common.entity.resume.JobResume;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobseek.assembler;
+package com.job.ai.agent.scenario.jobseek.assembler;
 
 import com.job.ai.agent.scenario.jobsearch.JobCandidates;
 import com.job.ai.agent.scenario.match.MatchReport;

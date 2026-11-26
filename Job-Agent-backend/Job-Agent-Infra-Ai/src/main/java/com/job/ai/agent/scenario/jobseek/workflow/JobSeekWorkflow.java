@@ -1,10 +1,10 @@
-package com.job.bootstrap.agent.scenario.jobseek.workflow;
+package com.job.ai.agent.scenario.jobseek.workflow;
 
-import com.job.bootstrap.agent.scenario.jobseek.service.SeekArtifactService;
-import com.job.bootstrap.agent.scenario.jobseek.service.SeekContextResolver;
-import com.job.bootstrap.agent.scenario.jobseek.policy.SeekVersionPolicy;
-import com.job.bootstrap.agent.scenario.jobseek.assembler.SeekAnswerAssembler;
-import com.job.bootstrap.agent.scenario.jobseek.config.JobSeekExecutorConfig;
+import com.job.ai.agent.scenario.jobseek.service.SeekArtifactService;
+import com.job.ai.agent.scenario.jobseek.service.SeekContextResolver;
+import com.job.ai.agent.scenario.jobseek.policy.SeekVersionPolicy;
+import com.job.ai.agent.scenario.jobseek.assembler.SeekAnswerAssembler;
+import com.job.ai.agent.scenario.jobseek.config.JobSeekExecutorConfig;
 import com.job.ai.infrastructure.persistence.AgentArtifactService;
 import com.job.ai.agent.core.event.AgentProgressEvent;
 import com.job.ai.agent.core.event.TaskProgressPublisher;

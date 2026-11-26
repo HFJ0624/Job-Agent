@@ -11,7 +11,7 @@ import com.job.ai.agent.support.intent.AgentIntentRouter;
 import com.job.ai.agent.support.cache.AgentAnswerCacheService;
 import com.job.ai.agent.scenario.jobsearch.JobSearchReactEntry;
 import com.job.ai.agent.scenario.jobsearch.ReactChatPreparationService;
-import com.job.bootstrap.agent.scenario.jobseek.entry.JobSeekReactEntry;
+import com.job.ai.agent.scenario.jobseek.entry.JobSeekReactEntry;
 import com.job.bootstrap.support.SimpleTransactionManager;
 import com.job.ai.agent.scenario.resume.ResumeReactEntry;
 import com.job.ai.agent.support.rewrite.AgentQueryRewriter;
@@ -88,7 +88,7 @@ class AgentChatRagFallbackTest {
             ragRetrievalService, agentIntentRouter, agentIntentLlmClassifier, agentPlanningService, agentPlanExecutorService,
             agentMemoryCaptureService, agentMemoryContextService, agentToolSchemaRegistry,
             agentGuardrailService, agentContextBuilder, queryRewriter, answerCacheService,
-            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, mock(com.job.bootstrap.agent.application.routing.ChatRequestRouter.class), objectMapper, new SimpleTransactionManager());
+            jobSearchReactEntry, reactChatPreparationService, jobSeekReactEntry, resumeReactEntry, mock(com.job.ai.agent.application.routing.ChatRequestRouter.class), objectMapper, new SimpleTransactionManager());
 
     @Test
     void ragFailureShouldNotBreakChatAndTraceFailed() {

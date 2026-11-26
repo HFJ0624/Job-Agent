@@ -1,4 +1,4 @@
-package com.job.bootstrap.agent.scenario.jobseek.model;
+package com.job.ai.agent.scenario.jobseek.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.scenario.jobsearch.JobCandidates;

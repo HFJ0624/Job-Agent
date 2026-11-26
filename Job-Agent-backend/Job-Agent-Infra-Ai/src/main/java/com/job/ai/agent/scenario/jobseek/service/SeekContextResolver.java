@@ -1,11 +1,11 @@
-package com.job.bootstrap.agent.scenario.jobseek.service;
+package com.job.ai.agent.scenario.jobseek.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.ai.agent.scenario.jobsearch.SearchConstraints;
 import com.job.ai.agent.scenario.resume.ResumeSelectionService;
 import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
-import com.job.bootstrap.service.JobResumeService;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.ai.agent.port.ResumePort;
+import com.job.ai.agent.port.PreferencePort;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.preference.UserJobPreferenceVO;
 import com.job.exception.BizException;
@@ -35,8 +35,8 @@ public class SeekContextResolver {
 
     private final AgentPlanParameterExtractor parameterExtractor;
     private final ResumeSelectionService resumeSelectionService;
-    private final JobResumeService jobResumeService;
-    private final UserJobPreferenceService userJobPreferenceService;
+    private final ResumePort resumePort;
+    private final PreferencePort preferencePort;
     private final ObjectMapper objectMapper;
 
     /** 简历解析结果（question 非空表示需要用户补充）。 */
@@ -52,7 +52,7 @@ public class SeekContextResolver {
 
         UserJobPreferenceVO preference = null;
         try {
-            preference = userJobPreferenceService.getPreference(userId);
+            preference = preferencePort.getPreference(userId);
         } catch (Exception exception) {
             log.debug("偏好加载失败，按无偏好处理，error={}", exception.getMessage());
         }
@@ -80,7 +80,7 @@ public class SeekContextResolver {
     /** 准备阶段允许写：未解析的简历在这里触发解析（不把带写入的动作伪装成只读）。 */
     public void ensureParsed(JobResume resume) {
         if (!StringUtils.hasText(resume.getRawText())) {
-            JobResume parsed = jobResumeService.parseResumeText(resume.getUserId(), resume.getId());
+            JobResume parsed = resumePort.parseResumeText(resume.getUserId(), resume.getId());
             if (parsed != null && StringUtils.hasText(parsed.getRawText())) {
                 resume.setRawText(parsed.getRawText());
             } else {
