@@ -292,20 +292,6 @@ public class ResumeReactEntry {
         return value == null ? null : String.valueOf(value).trim();
     }
 
-    private Long longOf(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        if (value instanceof String text && StringUtils.hasText(text)) {
-            try {
-                return Long.parseLong(text.trim());
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
-    }
-
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);

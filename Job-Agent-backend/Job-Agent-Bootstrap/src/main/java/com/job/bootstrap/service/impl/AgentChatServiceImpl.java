@@ -517,18 +517,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         return vo;
     }
 
-    // 兼容保留：整段答复作为一个 token 推送
-    private AgentChatVO emitAsStream(AgentChatVO vo, TokenConsumer streamSink) {
-        if (streamSink != null && vo != null && StringUtils.hasText(vo.getAnswer())) {
-            try {
-                streamSink.onToken(vo.getAnswer());
-            } catch (Exception ignored) {
-                // 前端断连不影响已落库的结果
-            }
-        }
-        return vo;
-    }
-
     public AgentChatVO streamTransactional(
             Long userId,
             Long conversationId,
@@ -1690,69 +1678,6 @@ public class AgentChatServiceImpl implements AgentChatService {
             case "mockSessionId" -> "模拟面试会话ID（mockSessionId）";
             default -> param;
         };
-    }
-
-    private String buildPlannedAgentMessage(String enhancedMessage, AgentPlanVO plan) {
-        if (plan == null) {
-            return enhancedMessage;
-        }
-
-        StringBuilder builder = new StringBuilder();
-        builder.append("【后端生成的执行计划】\n");
-        builder.append("计划ID: ").append(plan.getId()).append("\n");
-        builder.append("计划标题: ").append(nullToDash(plan.getPlanTitle())).append("\n");
-        builder.append("计划摘要: ").append(nullToDash(plan.getPlanSummary())).append("\n");
-        builder.append("意图: ").append(nullToDash(plan.getIntentCode())).append("\n");
-        builder.append("状态: ").append(nullToDash(plan.getStatus())).append("\n");
-        builder.append("已抽取参数: ").append(nullToDash(plan.getExtractedParamsJson())).append("\n");
-        builder.append("缺失参数: ").append(nullToDash(plan.getMissingParamsJson())).append("\n");
-        builder.append("步骤:\n");
-
-        if (CollectionUtils.isEmpty(plan.getSteps())) {
-            builder.append("- 暂无步骤\n");
-        } else {
-            for (AgentPlanStepVO step : plan.getSteps()) {
-                builder.append(step.getStepNo()).append(". ")
-                        .append(nullToDash(step.getStepName()))
-                        .append("，目标: ")
-                        .append(nullToDash(step.getStepGoal()))
-                        .append("，建议工具: ")
-                        .append(nullToDash(step.getToolName()))
-                        .append("，完成条件: ")
-                        .append(nullToDash(step.getCompletionCriteria()))
-                        .append("\n");
-            }
-        }
-
-        builder.append("\n【执行要求】\n");
-        builder.append("1. 必须优先按后端计划选择工具。\n");
-        builder.append("2. 缺参时不能编造参数，也不能跳过计划要求的关键参数。\n");
-        builder.append("3. 工具返回 JSON 后整理成中文，不要把原始 JSON 直接贴给用户。\n\n");
-        builder.append(enhancedMessage);
-        return builder.toString();
-    }
-
-
-    private Map<String, Object> buildChatTraceInput(String message, RagContext ragContext, AgentPlanVO plan) {
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("message", message);
-        input.put("ragEnabled", ragContext.enabled());
-        input.put("ragStatus", ragContext.status());
-        input.put("ragHitCount", ragContext.results().size());
-        input.put("agentPlan", ChatTraceAssembler.buildPlanSnapshot(plan));
-        return input;
-    }
-
-    private Map<String, Object> buildChatTraceOutput(String answer, RagContext ragContext, AgentPlanVO plan) {
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("answer", answer);
-        output.put("ragEnabled", ragContext.enabled());
-        output.put("ragStatus", ragContext.status());
-        output.put("ragError", ragContext.errorMessage());
-        output.put("ragHitCount", ragContext.results().size());
-        output.put("ragReferences", buildRagReferences(ragContext.results(), false));
-        output.put("agentPlan", ChatTraceAssembler.buildPlanSnapshot(plan));
-        return output;
     }
 
     /**

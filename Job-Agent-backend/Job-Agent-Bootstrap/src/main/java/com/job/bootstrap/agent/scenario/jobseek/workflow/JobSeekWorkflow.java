@@ -1,6 +1,5 @@
 package com.job.bootstrap.agent.scenario.jobseek.workflow;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.agent.scenario.jobseek.service.SeekArtifactService;
 import com.job.bootstrap.agent.scenario.jobseek.service.SeekContextResolver;
 import com.job.bootstrap.agent.scenario.jobseek.policy.SeekVersionPolicy;
@@ -12,7 +11,6 @@ import com.job.bootstrap.agent.core.event.TaskProgressPublisher;
 import com.job.bootstrap.agent.core.budget.TaskExecutionBudget;
 import com.job.bootstrap.agent.scenario.match.MatchAgentNode;
 import com.job.bootstrap.agent.scenario.match.MatchReport;
-import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.bootstrap.agent.core.react.AgentResult;
 import com.job.bootstrap.agent.core.react.AgentRunExecutionHooks;
 import com.job.bootstrap.agent.scenario.resume.ResumeAgentNode;
@@ -20,12 +18,7 @@ import com.job.bootstrap.agent.scenario.resume.ResumeProfile;
 import com.job.bootstrap.agent.scenario.jobsearch.JobCandidates;
 import com.job.bootstrap.agent.scenario.jobsearch.JobSearchWorkflow;
 import com.job.bootstrap.agent.scenario.jobsearch.SearchConstraints;
-import com.job.bootstrap.service.JobResumeService;
-import com.job.bootstrap.service.UserJobPreferenceService;
-import com.job.common.entity.agent.AgentArtifact;
 import com.job.common.entity.resume.JobResume;
-import com.job.common.vo.preference.UserJobPreferenceVO;
-import com.job.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -33,11 +26,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -71,14 +59,8 @@ public class JobSeekWorkflow {
     private final ResumeAgentNode resumeAgentNode;
     private final MatchAgentNode matchAgentNode;
     private final JobSearchWorkflow jobSearchWorkflow;
-    private final JobResumeService jobResumeService;
-    private final com.job.bootstrap.agent.scenario.resume.ResumeSelectionService resumeSelectionService;
-    private final UserJobPreferenceService userJobPreferenceService;
-    private final AgentArtifactService agentArtifactService;
     private final SeekArtifactService seekArtifactService;
     private final SeekContextResolver seekContextResolver;
-    private final AgentPlanParameterExtractor parameterExtractor;
-    private final ObjectMapper objectMapper;
 
     @Qualifier(JobSeekExecutorConfig.EXECUTOR_BEAN)
     private final ThreadPoolTaskExecutor nodeExecutor;
@@ -460,30 +442,6 @@ public class JobSeekWorkflow {
         return future.get(timeout, TimeUnit.MILLISECONDS);
     }
 
-    // ---------- 简历解析 ----------
-
-
-
-    // 准备阶段允许写：未解析的简历在这里触发解析（不把带写入的动作伪装成只读）
-
-
-
-
-    // ---------- 产物 ----------
-
-
-    // 复用已完成的画像产物（简历未变才复用）
-
-    // 复用已完成的候选产物（条件版本未变才复用）
-
-    // 复用同版本的匹配报告（报告版本已包含画像/候选产物，版本一致内容才可靠）
-
-    // ---------- 答复重建 ----------
-
-
-
-    // 元/月 → K/月
-
 
     /*
      * 兼容用薄委托：Workflow 内部仍保留 saveArtifact/loadXxx 的调用形状，
@@ -498,14 +456,6 @@ public class JobSeekWorkflow {
         return seekArtifactService.loadProfile(input.userId(), input.planId(), version);
     }
 
-    private SeekArtifactService.CandidatesArtifact loadCandidatesArtifact(JobSeekInput input, String version) {
-        return seekArtifactService.loadCandidates(input.userId(), input.planId(), version);
-    }
-
-    private MatchReport loadReportArtifact(JobSeekInput input, String version) {
-        return seekArtifactService.loadReport(input.userId(), input.planId(), version);
-    }
-
     // 进度事件（不暴露内部参数/Prompt/推理）
     private void publish(TaskProgressPublisher publisher, String event, Long planId, Long runId,
                          String nodeKey, String agentType, String status, String summary) {
@@ -516,31 +466,4 @@ public class JobSeekWorkflow {
                 0, status, summary, System.currentTimeMillis()));
     }
 
-    // ---------- 工具方法 ----------
-
-    /*
-     * 画像版本 = 简历版本 + 用户显式目标方向（空表示未指定）。
-     * 保存与复用必须用同一入参，否则永远命中不了；用户后来指定方向时版本变化，
-     * 目标相关分析自然刷新（审查 F4）。
-     */
-
-    // 报告版本 = 条件版本 + 画像/候选产物 ID（上下游变化则旧报告失效）
-
-
-
-
-
-    private String text(Object value) {
-        return value == null ? null : String.valueOf(value).trim();
-    }
-
-
-
-    private String toJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception exception) {
-            return null;
-        }
-    }
 }

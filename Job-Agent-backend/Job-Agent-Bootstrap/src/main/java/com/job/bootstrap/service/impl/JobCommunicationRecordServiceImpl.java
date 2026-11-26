@@ -999,42 +999,6 @@ public class JobCommunicationRecordServiceImpl implements JobCommunicationRecord
         return record;
     }
 
-    /**
-     * Entity 转 VO。
-     */
-    private JobCommunicationRecordVO toVO(JobCommunicationRecord record) {
-        JobCommunicationRecordVO vo = new JobCommunicationRecordVO();
-
-        vo.setId(record.getId());
-        vo.setApplicationId(record.getApplicationId());
-        vo.setResumeId(record.getResumeId());
-        vo.setJobId(record.getJobId());
-        vo.setGreetingRecordId(record.getGreetingRecordId());
-
-        /*
-         * 第一版先不联查岗位和公司。
-         * 如果你想在列表显示岗位名称和公司名称，
-         * 后续可以注入 JobPositionMapper 和 CompanyMapper 做补全。
-         */
-        vo.setJobTitle(null);
-        vo.setCompanyName(null);
-
-        vo.setPlatform(record.getPlatform());
-        vo.setExternalJobUrl(record.getExternalJobUrl());
-        vo.setHrName(record.getHrName());
-        vo.setHrContact(record.getHrContact());
-        vo.setGreetingText(record.getGreetingText());
-        vo.setHrReply(record.getHrReply());
-        vo.setCommunicationStatus(record.getCommunicationStatus());
-        vo.setCommunicationStatusDesc(getStatusDesc(record.getCommunicationStatus()));
-        vo.setInterviewTime(record.getInterviewTime());
-        vo.setNextFollowTime(record.getNextFollowTime());
-        vo.setNote(record.getNote());
-        vo.setCreateTime(record.getCreateTime());
-        vo.setUpdateTime(record.getUpdateTime());
-
-        return vo;
-    }
 
     /**
      * 状态描述。
