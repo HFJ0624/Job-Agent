@@ -15,4 +15,7 @@ public interface JobMatchPort {
     JobMatchVO matchJob(Long userId, Long resumeId, Long jobId);
 
     JobMatchVO matchJob(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams);
+
+    /** 预览匹配（不落库、不耗额度），用于告警/建议场景。 */
+    JobMatchVO previewMatch(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams);
 }

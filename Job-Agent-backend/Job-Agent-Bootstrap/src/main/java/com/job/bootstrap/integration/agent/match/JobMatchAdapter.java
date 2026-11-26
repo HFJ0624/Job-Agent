@@ -24,4 +24,9 @@ public class JobMatchAdapter implements JobMatchPort {
     public JobMatchVO matchJob(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams) {
         return jobMatchService.matchJob(userId, resumeId, jobId, explicitParams);
     }
+
+    @Override
+    public JobMatchVO previewMatch(Long userId, Long resumeId, Long jobId, Map<String, Object> explicitParams) {
+        return jobMatchService.previewMatch(userId, resumeId, jobId, explicitParams);
+    }
 }
