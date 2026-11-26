@@ -4,15 +4,15 @@ import com.job.ai.agent.support.trace.AgentTraceService;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
-import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
+import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
+import com.job.ai.agent.tool.registry.AgentToolInvoker;
+import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.legacy.template.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.react.*;
 import com.job.bootstrap.agent.infrastructure.persistence.AgentRunService;
-import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
-import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
-import com.job.bootstrap.agent.tool.impl.*;
+import com.job.ai.agent.tool.registry.AgentToolGuard;
+import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
+import com.job.ai.agent.tool.impl.*;
 import com.job.ai.model.turn.*;
 import com.job.bootstrap.service.*;
 import com.job.common.agent.AgentRuntimeContext;
@@ -167,7 +167,8 @@ class Phase1ReviewRegressionTest {
                 mock(ResumeAnalyzeTool.class),mock(JobMatchTool.class),mock(GreetingGenerateTool.class),
                 search,mock(JobRecommendTool.class),mock(InterviewPrepareTool.class),
                 mock(MockInterviewReviewTool.class),mock(RagSearchTool.class),
-                new AgentToolSchemaRegistry(),mock(AgentGuardrailService.class),mock(AdminExternalConnectorService.class));
+                new AgentToolSchemaRegistry(),mock(AgentGuardrailService.class),
+                new com.job.bootstrap.integration.agent.connector.ConnectorAdapter(mock(AdminExternalConnectorService.class)));
         when(gateway.chatTurn(anyString(),any(),any(),anyLong(),anyString())).thenReturn(
                 call("s1","job_search","{\"keyword\":\"Java\"}"),
                 finish("{\"outcome\":\"FOUND\",\"candidateIds\":[11],\"summary\":\"完成\"}"));

@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.legacy.template;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
+import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.ai.model.gateway.AiModelGatewayService;
 import org.junit.jupiter.api.Test;
 

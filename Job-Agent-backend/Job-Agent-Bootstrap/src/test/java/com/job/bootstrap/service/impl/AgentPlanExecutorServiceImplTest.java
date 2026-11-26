@@ -2,13 +2,13 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
-import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
+import com.job.ai.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
+import com.job.ai.agent.tool.registry.AgentToolInvoker;
+import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.agent.support.compensation.AgentPlanCompensator;
 import com.job.bootstrap.agent.legacy.template.AgentReplanner;
-import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
+import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
 import com.job.ai.model.observability.AgentObservationRecord;

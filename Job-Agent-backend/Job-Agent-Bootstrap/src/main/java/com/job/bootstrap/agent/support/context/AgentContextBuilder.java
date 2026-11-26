@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.support.context;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
+import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AiConversationMapper;
 import com.job.bootstrap.mapper.AiMessageMapper;
 import com.job.ai.model.gateway.AiModelGatewayService;

@@ -1,8 +1,8 @@
 package com.job.bootstrap.agent.scenario.jobsearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
+import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
+import com.job.ai.agent.tool.registry.AgentToolInvoker;
 import com.job.ai.agent.core.react.AgentResult;
 import com.job.ai.agent.core.react.ReActRunner;
 import com.job.ai.agent.core.react.TerminalToolContract;

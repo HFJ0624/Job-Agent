@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.scenario.jobsearch;
 
-import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentToolInvoker;
+import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
+import com.job.ai.agent.tool.registry.AgentToolInvoker;
 import com.job.ai.agent.core.react.AgentDefinition;
 import com.job.ai.agent.core.react.AgentResult;
 import com.job.ai.agent.core.react.AgentRunContext;

@@ -2,7 +2,7 @@ package com.job.bootstrap.agent.legacy.template;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
+import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.ai.model.gateway.AiModelGatewayService;
 import com.job.common.agent.tool.AgentToolParamSchema;
 import com.job.common.agent.tool.AgentToolSchema;

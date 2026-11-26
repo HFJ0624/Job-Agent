@@ -1,7 +1,7 @@
 package com.job.bootstrap.service;
 import com.job.ai.model.gateway.AiModelGatewayService;
 
-import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.ai.agent.tool.registry.AgentPlanExecutionResult;
 import com.job.common.entity.agent.AgentPlan;
 
 /**

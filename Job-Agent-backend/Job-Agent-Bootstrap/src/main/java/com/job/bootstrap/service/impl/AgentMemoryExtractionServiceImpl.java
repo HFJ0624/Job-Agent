@@ -2,9 +2,9 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
-import com.job.bootstrap.agent.tool.registry.AgentToolExecutionResult;
+import com.job.ai.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.ai.agent.tool.registry.AgentPlanStepExecutionResult;
+import com.job.ai.agent.tool.registry.AgentToolExecutionResult;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
 import com.job.bootstrap.service.AgentMemoryService;
 import com.job.common.entity.agent.AgentPlan;

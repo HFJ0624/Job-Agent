@@ -1,7 +1,7 @@
 package com.job.bootstrap.service;
 import com.job.ai.agent.support.trace.AgentTraceService;
 
-import com.job.bootstrap.agent.tool.registry.AgentPlanExecutionResult;
+import com.job.ai.agent.tool.registry.AgentPlanExecutionResult;
 
 /**
  * Agent 计划执行服务接口。

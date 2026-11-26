@@ -5,7 +5,7 @@ import com.job.ai.agent.support.trace.AgentTraceService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.bootstrap.agent.support.guardrail.AgentGuardrailService;
+import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentObservationEventMapper;
 import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.ai.model.observability.AgentObservationService;
