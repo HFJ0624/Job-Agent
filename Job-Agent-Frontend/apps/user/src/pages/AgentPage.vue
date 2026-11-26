@@ -120,12 +120,6 @@
             </div>
           </div>
 
-          <div v-if="loading" class="agent-message assistant">
-            <div class="message-avatar">AI</div>
-            <div class="message-bubble">
-              <pre>正在思考中...</pre>
-            </div>
-          </div>
         </div>
 
         <div v-if="pendingConfirmation.planId" class="confirmation-panel">
@@ -249,6 +243,8 @@ const messages = ref<AgentChatMessage[]>([
 
 const inputMessage = ref("");
 const loading = ref(false);
+/** 助手气泡的占位文案：只在等待首 token 期间显示。 */
+const THINKING_PLACEHOLDER = "正在思考中...";
 const conversationLoading = ref(false);
 const errorMessage = ref("");
 const messageListRef = ref<HTMLElement | null>(null);
@@ -468,20 +464,27 @@ async function confirmToolExecution() {
  * @param payload 对话请求参数
  */
 async function runAgentTurn(payload: AgentChatPayload) {
-  const bubble: AgentChatMessage = { role: "ASSISTANT", content: "" };
+  // 单一气泡：先显示"正在思考中"，收到首个 token 后清空再逐字追加
+  const bubble: AgentChatMessage = { role: "ASSISTANT", content: THINKING_PLACEHOLDER };
+  let receivedToken = false;
   messages.value.push(bubble);
+  await scrollToBottom();
 
   try {
     const result = await streamChatWithAgent(
       payload,
       token => {
+        if (!receivedToken) {
+          receivedToken = true;
+          bubble.content = "";   // 首个 token 到达，清掉"正在思考中"占位
+        }
         bubble.content += token;
         scrollToBottom();
       },
       applyProgressEvent
     );
-    // 流式结束：以服务端最终答案为准
-    bubble.content = result.answer;
+    // 流式结束：以服务端最终答案为准；为空时给明确兜底，避免留下空气泡
+    bubble.content = result.answer || "（本次没有返回内容，请稍后重试，或查看任务状态）";
     await applyAgentResultState(result);
     // 最终任务状态以快照为准（不能只看 token 是否结束）
     if (result.planId) {
