@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model;
 
 /**
  * 作者:hfj

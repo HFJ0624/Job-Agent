@@ -1,7 +1,7 @@
 package com.job.bootstrap.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.job.bootstrap.ai.AiRenderedPrompt;
+import com.job.ai.model.AiRenderedPrompt;
 import com.job.bootstrap.mapper.AiPromptTemplateMapper;
 import com.job.bootstrap.mapper.AiPromptVersionMapper;
 import com.job.bootstrap.service.AiPromptRuntimeService;

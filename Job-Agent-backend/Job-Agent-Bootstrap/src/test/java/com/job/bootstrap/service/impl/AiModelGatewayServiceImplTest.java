@@ -1,18 +1,18 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.ai.AiGatewayProperties;
-import com.job.bootstrap.ai.AiModelCallResponse;
-import com.job.bootstrap.ai.AiModelHttpClient;
-import com.job.bootstrap.ai.AiModelRateLimiter;
-import com.job.bootstrap.ai.AiRenderedPrompt;
-import com.job.bootstrap.ai.AiRetryPolicy;
+import com.job.ai.model.AiGatewayProperties;
+import com.job.ai.model.AiModelCallResponse;
+import com.job.ai.model.AiModelHttpClient;
+import com.job.ai.model.AiModelRateLimiter;
+import com.job.ai.model.AiRenderedPrompt;
+import com.job.ai.model.AiRetryPolicy;
 import com.job.ai.model.gateway.TokenConsumer;
 import com.job.bootstrap.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.mapper.AiModelCircuitStateMapper;
 import com.job.bootstrap.mapper.AiModelConfigMapper;
 import com.job.bootstrap.mapper.AiModelRouteMapper;
-import com.job.bootstrap.service.AgentObservationService;
+import com.job.ai.model.observability.AgentObservationService;
 import com.job.bootstrap.service.AiPromptRuntimeService;
 import com.job.common.entity.ai.AiModelCallLog;
 import com.job.common.entity.ai.AiModelCircuitState;

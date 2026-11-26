@@ -1,8 +1,8 @@
 package com.job.bootstrap.agent.support.cache;
 
-import com.job.bootstrap.observability.AgentObservationRecord;
+import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.bootstrap.rag.service.RagEmbeddingService;
-import com.job.bootstrap.service.AgentObservationService;
+import com.job.ai.model.observability.AgentObservationService;
 import com.job.enums.AgentObservationEventType;
 import com.job.enums.AgentObservationStatus;
 import lombok.RequiredArgsConstructor;

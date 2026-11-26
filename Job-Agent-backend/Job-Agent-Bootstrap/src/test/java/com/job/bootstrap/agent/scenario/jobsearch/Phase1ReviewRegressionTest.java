@@ -12,7 +12,7 @@ import com.job.bootstrap.agent.infrastructure.persistence.AgentRunService;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.agent.tool.impl.*;
-import com.job.bootstrap.ai.turn.*;
+import com.job.ai.model.turn.*;
 import com.job.bootstrap.service.*;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.common.entity.agent.AgentRun;

@@ -11,9 +11,9 @@ import com.job.bootstrap.agent.legacy.template.AgentReplanner;
 import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.bootstrap.mapper.AgentPlanMapper;
 import com.job.bootstrap.mapper.AgentPlanStepMapper;
-import com.job.bootstrap.observability.AgentObservationRecord;
+import com.job.ai.model.observability.AgentObservationRecord;
 import com.job.bootstrap.service.AgentMemoryExtractionService;
-import com.job.bootstrap.service.AgentObservationService;
+import com.job.ai.model.observability.AgentObservationService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentPlanStep;
@@ -775,8 +775,8 @@ class AgentPlanExecutorServiceImplTest {
 
     // 校验 ExecutionSuperseded 观测事件已记录（任务 J2）
     private void verifySupersededEventRecorded() {
-        org.mockito.ArgumentCaptor<com.job.bootstrap.observability.AgentObservationRecord> captor =
-                org.mockito.ArgumentCaptor.forClass(com.job.bootstrap.observability.AgentObservationRecord.class);
+        org.mockito.ArgumentCaptor<com.job.ai.model.observability.AgentObservationRecord> captor =
+                org.mockito.ArgumentCaptor.forClass(com.job.ai.model.observability.AgentObservationRecord.class);
         verify(agentObservationService, org.mockito.Mockito.atLeastOnce()).recordEvent(captor.capture());
         assertThat(captor.getAllValues().stream()
                 .anyMatch(event -> "ExecutionSuperseded".equals(event.getEventName()))).isTrue();

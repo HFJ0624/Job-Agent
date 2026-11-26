@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.core.react;
 
-import com.job.bootstrap.ai.turn.AiToolSpec;
+import com.job.ai.model.turn.AiToolSpec;
 
 import java.util.List;
 import java.util.Map;

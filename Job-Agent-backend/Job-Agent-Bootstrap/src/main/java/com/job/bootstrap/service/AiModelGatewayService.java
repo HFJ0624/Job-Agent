@@ -71,10 +71,10 @@ public interface AiModelGatewayService {
      * @param traceId   链路 ID
      * @return 结构化轮次响应
      */
-    default com.job.bootstrap.ai.turn.AiChatTurnResponse chatTurn(
+    default com.job.ai.model.turn.AiChatTurnResponse chatTurn(
             String sceneCode,
             AiModelTier tier,
-            com.job.bootstrap.ai.turn.AiChatTurnRequest request,
+            com.job.ai.model.turn.AiChatTurnRequest request,
             Long userId,
             String traceId
     ) {

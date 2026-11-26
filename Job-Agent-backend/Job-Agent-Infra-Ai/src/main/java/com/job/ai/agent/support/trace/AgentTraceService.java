@@ -1,4 +1,5 @@
 package com.job.ai.agent.support.trace;
+import com.job.ai.model.observability.AgentObservationService;
 
 /**
  * Agent Trace 记录服务接口。

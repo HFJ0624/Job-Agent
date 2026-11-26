@@ -23,7 +23,7 @@ import com.job.bootstrap.rag.service.RagEmbeddingService;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.bootstrap.service.AgentMemoryCaptureService;
 import com.job.bootstrap.service.AgentMemoryContextService;
-import com.job.bootstrap.service.AgentObservationService;
+import com.job.ai.model.observability.AgentObservationService;
 import com.job.bootstrap.service.AgentPlanExecutorService;
 import com.job.bootstrap.service.AgentPlanningService;
 import com.job.ai.agent.support.trace.AgentTraceService;

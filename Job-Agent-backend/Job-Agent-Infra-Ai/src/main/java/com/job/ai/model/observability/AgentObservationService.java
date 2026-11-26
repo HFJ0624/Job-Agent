@@ -1,7 +1,7 @@
-package com.job.bootstrap.service;
+package com.job.ai.model.observability;
 import com.job.ai.agent.support.trace.AgentTraceService;
 
-import com.job.bootstrap.observability.AgentObservationRecord;
+import com.job.ai.model.observability.AgentObservationRecord;
 
 /**
  * Agent 统一观测事件写入服务接口。

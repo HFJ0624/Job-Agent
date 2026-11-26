@@ -1,6 +1,6 @@
 package com.job.bootstrap.service;
 
-import com.job.bootstrap.ai.AiRenderedPrompt;
+import com.job.ai.model.AiRenderedPrompt;
 import com.job.common.entity.ai.AiModelRoute;
 
 import java.util.Map;

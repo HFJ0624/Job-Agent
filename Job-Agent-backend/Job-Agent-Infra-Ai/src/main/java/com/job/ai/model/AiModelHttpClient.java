@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model;
 import com.job.ai.model.gateway.TokenConsumer;
 
 import com.job.common.entity.ai.AiModelConfig;
@@ -50,5 +50,5 @@ public interface AiModelHttpClient {
      * @param request 消息序列与工具清单
      * @return 结构化轮次响应
      */
-    com.job.bootstrap.ai.turn.AiChatTurnResponse chatTurn(AiModelConfig model, com.job.bootstrap.ai.turn.AiChatTurnRequest request);
+    com.job.ai.model.turn.AiChatTurnResponse chatTurn(AiModelConfig model, com.job.ai.model.turn.AiChatTurnRequest request);
 }

@@ -1,6 +1,6 @@
 package com.job.bootstrap.agent.core.react;
 
-import com.job.bootstrap.ai.turn.AiToolSpec;
+import com.job.ai.model.turn.AiToolSpec;
 
 /**
  * 功能: 终结工具契约（第二阶段泛化）。

@@ -1,4 +1,4 @@
-package com.job.bootstrap.observability;
+package com.job.ai.model.observability;
 
 import com.job.enums.AgentObservationErrorCategory;
 import com.job.enums.AgentObservationEventType;

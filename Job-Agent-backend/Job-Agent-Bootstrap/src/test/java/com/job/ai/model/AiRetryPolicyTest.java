@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model;
 
 import com.job.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;

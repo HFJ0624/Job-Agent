@@ -2,8 +2,8 @@ package com.job.bootstrap.agent.support.compensation;
 
 import com.job.bootstrap.agent.tool.registry.AgentPlanStepExecutionResult;
 import com.job.bootstrap.agent.tool.registry.AgentToolSchemaRegistry;
-import com.job.bootstrap.observability.AgentObservationRecord;
-import com.job.bootstrap.service.AgentObservationService;
+import com.job.ai.model.observability.AgentObservationRecord;
+import com.job.ai.model.observability.AgentObservationService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.enums.AgentObservationEventType;

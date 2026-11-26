@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai.turn;
+package com.job.ai.model.turn;
 
 /**
  * 功能: 模型返回的工具调用（第一阶段）。

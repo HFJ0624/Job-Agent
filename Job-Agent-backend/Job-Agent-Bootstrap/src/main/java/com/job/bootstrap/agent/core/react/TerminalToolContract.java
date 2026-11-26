@@ -1,7 +1,7 @@
 package com.job.bootstrap.agent.core.react;
 
-import com.job.bootstrap.ai.turn.AiToolSpec;
-import com.job.bootstrap.ai.turn.AiToolCall;
+import com.job.ai.model.turn.AiToolSpec;
+import com.job.ai.model.turn.AiToolCall;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;

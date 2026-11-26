@@ -1,12 +1,12 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model;
 import com.job.ai.model.gateway.TokenConsumer;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.job.bootstrap.ai.turn.AiChatMessage;
-import com.job.bootstrap.ai.turn.AiChatTurnRequest;
-import com.job.bootstrap.ai.turn.AiChatTurnResponse;
-import com.job.bootstrap.ai.turn.AiToolCall;
-import com.job.bootstrap.ai.turn.AiToolSpec;
+import com.job.ai.model.turn.AiChatMessage;
+import com.job.ai.model.turn.AiChatTurnRequest;
+import com.job.ai.model.turn.AiChatTurnResponse;
+import com.job.ai.model.turn.AiToolCall;
+import com.job.ai.model.turn.AiToolSpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.entity.ai.AiModelConfig;
 import com.job.common.entity.base.ResultCodeEnum;

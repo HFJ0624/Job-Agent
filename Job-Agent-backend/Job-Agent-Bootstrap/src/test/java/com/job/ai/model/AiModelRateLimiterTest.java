@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model;
 
 import org.junit.jupiter.api.Test;
 

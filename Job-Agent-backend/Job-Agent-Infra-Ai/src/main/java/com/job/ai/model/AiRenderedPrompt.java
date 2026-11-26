@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai;
+package com.job.ai.model;
 
 import com.job.common.entity.ai.AiModelRoute;
 import com.job.common.entity.ai.AiPromptVersion;

@@ -1,4 +1,4 @@
-package com.job.bootstrap.ai.turn;
+package com.job.ai.model.turn;
 
 import java.util.List;
 
