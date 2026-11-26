@@ -6,7 +6,7 @@ import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.agent.tool.impl.resolver.AgentEntityResolveResult;
 import com.job.bootstrap.agent.tool.impl.resolver.AgentEntityResolver;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.JobGreetingService;
+import com.job.ai.agent.port.GreetingPort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
@@ -32,7 +32,7 @@ public class GreetingGenerateTool {
     private static final String TOOL_NAME = "GreetingGenerateTool.generateGreeting";
     private static final String DEFAULT_STYLE = "礼貌";
 
-    private final JobGreetingService jobGreetingService;
+    private final GreetingPort greetingPort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -100,7 +100,7 @@ public class GreetingGenerateTool {
             input.put("resolvedJobTitle", job.getJobTitle());
             Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
-            GreetingVO result = jobGreetingService.generateGreeting(
+            GreetingVO result = greetingPort.generateGreeting(
                     userId,
                     resume.getId(),
                     job.getId(),

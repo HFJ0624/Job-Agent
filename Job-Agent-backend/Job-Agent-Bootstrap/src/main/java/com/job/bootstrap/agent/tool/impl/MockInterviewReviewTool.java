@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.MockInterviewReviewService;
+import com.job.ai.agent.port.MockInterviewReviewPort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.interview.MockInterviewReviewVO;
 import com.job.exception.AgentToolException;
@@ -29,7 +29,7 @@ public class MockInterviewReviewTool {
 
     private static final String TOOL_NAME = "MockInterviewReviewTool.generateMockInterviewReview";
 
-    private final MockInterviewReviewService mockInterviewReviewService;
+    private final MockInterviewReviewPort mockInterviewReviewPort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -59,7 +59,7 @@ public class MockInterviewReviewTool {
             schema = agentToolGuard.validate(TOOL_NAME, input);
             Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
-            MockInterviewReviewVO vo = mockInterviewReviewService.generateReview(userId, sessionId);
+            MockInterviewReviewVO vo = mockInterviewReviewPort.generateReview(userId, sessionId);
 
             /*
              * 工具调用成功，记录 Trace。

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.bootstrap.agent.tool.registry.AgentToolGuard;
 import com.job.bootstrap.service.AgentTraceService;
-import com.job.bootstrap.service.InterviewPrepareService;
+import com.job.ai.agent.port.InterviewPreparePort;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.vo.interview.InterviewPrepareVO;
 import com.job.exception.AgentToolException;
@@ -30,7 +30,7 @@ public class InterviewPrepareTool {
 
     private static final String TOOL_NAME = "InterviewPrepareTool.prepareInterview";
 
-    private final InterviewPrepareService interviewPrepareService;
+    private final InterviewPreparePort interviewPreparePort;
     private final ObjectMapper objectMapper;
     private final AgentTraceService agentTraceService;
     private final AgentToolGuard agentToolGuard;
@@ -66,7 +66,7 @@ public class InterviewPrepareTool {
             schema = agentToolGuard.validate(TOOL_NAME, input);
             Map<String, Object> traceInput = agentToolGuard.buildTraceInput(TOOL_NAME, schema, input);
 
-            InterviewPrepareVO result = interviewPrepareService.generatePrepare(
+            InterviewPrepareVO result = interviewPreparePort.generatePrepare(
                     userId,
                     applicationId,
                     resumeId
