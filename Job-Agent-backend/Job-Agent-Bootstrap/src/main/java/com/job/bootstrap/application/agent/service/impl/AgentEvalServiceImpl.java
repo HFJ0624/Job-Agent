@@ -131,6 +131,10 @@ public class AgentEvalServiceImpl implements AgentEvalService {
     private final AgentEvalResultDiagnosisBuilder resultDiagnosisBuilder;
     private final AgentEvalCaseQualityChecker caseQualityChecker;
     private final AgentEvalMatcher agentEvalMatcher;
+
+    /** 内部步骤工具：预检索/重排等，不属于"业务工具选择"的考核范围。 */
+    private static final List<String> INTERNAL_TOOL_PREFIXES = List.of(
+            "RagPreRetrieval.", "RagRerank.", "RagPreRetrieval", "RagRerank");
     private final WorkflowTaskService workflowTaskService;
 
     @Override
@@ -649,6 +653,7 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         }
 
         boolean matched = check.actualTools.stream()
+                .filter(tool -> !isInternalTool(tool))
                 .anyMatch(tool -> agentEvalMatcher.toolStrictMatch(tool, evalCase.getExpectedToolName()));
         check.toolSelectPass = matched ? 1 : 0;
         if (!matched) {
@@ -755,13 +760,13 @@ public class AgentEvalServiceImpl implements AgentEvalService {
 
             if (!judgeResult.pass()) {
                 check.failureType = firstFailure(check.failureType, "JUDGE_FAILED");
-                check.failReasons.add("Judge 判定失败：" + check.judgeReason);
+                // 方案 A：Judge 仅展示（写 judgePass/judgeReason），不写入 failReasons
             }
 
             if (evalCase.getMinAnswerScore() != null
                     && check.judgeScore.compareTo(evalCase.getMinAnswerScore()) < 0) {
                 check.failureType = firstFailure(check.failureType, "JUDGE_SCORE_LOW");
-                check.failReasons.add("Judge 分数 " + check.judgeScore + " 低于阈值 " + evalCase.getMinAnswerScore());
+                // 方案 A：低于阈值也不阻断，仅保留分数供报告参考
             }
         } catch (Exception exception) {
             check.judgePass = null;
@@ -888,12 +893,42 @@ public class AgentEvalServiceImpl implements AgentEvalService {
                 .orderByAsc(AgentTraceLog::getCreateTime));
     }
 
+    /**
+     * 判断是否内部步骤工具（预检索/重排），这类工具不参与"工具选对率"。
+     */
+    private boolean isInternalTool(String toolName) {
+        if (!StringUtils.hasText(toolName)) {
+            return true;
+        }
+        return INTERNAL_TOOL_PREFIXES.stream().anyMatch(toolName::startsWith);
+    }
+
+    /**
+     * 把 Trace 的输入还原成"工具参数"。
+     *
+     * <p>Trace 里存的是执行信封（input/planId/stepId/toolName/toolSchema），
+     * 真正的工具参数在 input 子节点；直接拿整个信封做子集匹配会永远失败。</p>
+     */
+    private String unwrapToolInput(String inputDataJson) {
+        if (!StringUtils.hasText(inputDataJson)) {
+            return inputDataJson;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(inputDataJson);
+            JsonNode input = root.path("input");
+            return input.isMissingNode() || input.isNull() ? inputDataJson : input.toString();
+        } catch (Exception exception) {
+            return inputDataJson;
+        }
+    }
+
     private String resolveActualToolParams(AgentEvalCase evalCase, List<AgentTraceLog> traces) {
         if (!StringUtils.hasText(evalCase.getExpectedToolName())) {
             return traces.stream()
                     .filter(trace -> StringUtils.hasText(trace.getToolName()))
                     .map(AgentTraceLog::getInputData)
                     .filter(StringUtils::hasText)
+                    .map(this::unwrapToolInput)
                     .findFirst()
                     .orElse(null);
         }
@@ -902,6 +937,7 @@ public class AgentEvalServiceImpl implements AgentEvalService {
                 .filter(trace -> trace.getToolName().contains(evalCase.getExpectedToolName()))
                 .map(AgentTraceLog::getInputData)
                 .filter(StringUtils::hasText)
+                .map(this::unwrapToolInput)
                 .findFirst()
                 .orElse(null);
     }

@@ -127,7 +127,7 @@ class AgentEvalServiceImplTest {
     }
 
     @Test
-    void executeRunShouldMarkJudgeFailedBelowThreshold() {
+    void executeRunShouldRecordJudgeBelowThresholdWithoutFailing() {
         stubCaseRun();
         when(agentChatService.chat(any(), any(), any(), any(), any()))
                 .thenReturn(chatVO("推荐Java后端岗位"));
@@ -143,8 +143,8 @@ class AgentEvalServiceImplTest {
         AgentEvalResult saved = captor.getValue();
         assertThat(saved.getJudgeScore()).isEqualByComparingTo(BigDecimal.valueOf(50));
         assertThat(saved.getJudgePass()).isEqualTo(0);
-        assertThat(saved.getPassStatus()).isEqualTo(0);
-        assertThat(saved.getFailReason()).contains("Judge");
+        // 方案 A：Judge 仅做参考，低于阈值不再写入失败原因（本用例是否通过由工具断言决定）
+        assertThat(saved.getFailReason()).doesNotContain("Judge");
     }
 
     @Test
