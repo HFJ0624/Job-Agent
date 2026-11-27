@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import {
+  createEvalCoreTemplates,
   getEvalBatchReport,
   getEvalOverview,
   pageEvalCases,
   pageEvalRuns,
   runEvalDataset,
+  saveEvalCase,
+  saveEvalDataset,
   setEvalBaseline
 } from "../../../api/agentEval";
 import { listEnabledEvalDatasets } from "../../../api/agentEval";
+import { useAdminUserStore } from "../../../stores/user";
 import type {
   AgentEvalCaseInfo,
   AgentEvalDatasetInfo,
@@ -49,6 +53,23 @@ const running = ref(false);
 const reportVisible = ref(false);
 const reportLoading = ref(false);
 const report = ref<EvalBatchReportInfo | null>(null);
+
+/* ---------- 建题库 / 加题目（原来页面缺的入口） ---------- */
+const userStore = useAdminUserStore();
+const datasetDialog = ref(false);
+const datasetSaving = ref(false);
+const datasetForm = ref({ datasetName: "", datasetCode: "", description: "" });
+
+const caseDialog = ref(false);
+const caseSaving = ref(false);
+const caseForm = ref({
+  caseName: "",
+  inputMessage: "",
+  expectedToolName: "",
+  expectedToolParamsJson: "",
+  expectedAnswerKeywords: "",
+  tags: ""
+});
 
 const latest = computed(() => overview.value?.latestRun ?? null);
 const hasRun = computed(() => !!latest.value);
@@ -197,6 +218,101 @@ async function openReport(runId: number) {
   }
 }
 
+/** 新建题库：建完自动选中并刷新题目列表。 */
+async function submitDataset() {
+  if (!datasetForm.value.datasetName.trim()) {
+    ElMessage.warning("给题库起个名字");
+    return;
+  }
+  if (!datasetForm.value.datasetCode.trim()) {
+    ElMessage.warning("编码不能为空（建议 core_v1 这种带版本的写法）");
+    return;
+  }
+  datasetSaving.value = true;
+  try {
+    const created = await saveEvalDataset({
+      datasetName: datasetForm.value.datasetName.trim(),
+      datasetCode: datasetForm.value.datasetCode.trim(),
+      description: datasetForm.value.description.trim(),
+      evalType: "CALL",
+      enableStatus: 1
+    } as never);
+    datasetDialog.value = false;
+    datasetForm.value = { datasetName: "", datasetCode: "", description: "" };
+    await loadDatasets();
+    datasetId.value = created?.id ?? datasetId.value;
+    activeTab.value = "cases";
+    await refreshAll();
+    ElMessage.success("题库已创建，接着点「添加题目」或「一键生成核心模板」");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "创建题库失败");
+  } finally {
+    datasetSaving.value = false;
+  }
+}
+
+/** 一键生成核心链路模板题（覆盖 4 条链路的基础题型）。 */
+async function generateCoreTemplates() {
+  if (!datasetId.value) {
+    ElMessage.warning("先选择题库");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      "会在当前题库生成一批核心链路模板题（不会覆盖已有题目）。适合第一次建库时打底。",
+      "一键生成核心模板",
+      { confirmButtonText: "生成", cancelButtonText: "取消", type: "info" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    const result = await createEvalCoreTemplates({
+      datasetId: datasetId.value,
+      userId: Number(userStore.profile?.id ?? 1),
+      overwrite: false
+    });
+    ElMessage.success(`已生成 ${result.createdCount} 道题，跳过 ${result.skippedCount} 道`);
+    await refreshAll();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "生成失败");
+  }
+}
+
+/** 手工添加一道题：最少填 名称 + 用户输入 + 期望工具。 */
+async function submitCase() {
+  if (!datasetId.value) {
+    ElMessage.warning("先选择题库");
+    return;
+  }
+  if (!caseForm.value.caseName.trim() || !caseForm.value.inputMessage.trim()) {
+    ElMessage.warning("题目名称和用户输入必填");
+    return;
+  }
+  caseSaving.value = true;
+  try {
+    await saveEvalCase({
+      datasetId: datasetId.value,
+      caseName: caseForm.value.caseName.trim(),
+      inputMessage: caseForm.value.inputMessage.trim(),
+      evalType: "TOOL",
+      expectedToolName: caseForm.value.expectedToolName.trim() || undefined,
+      expectedToolParamsJson: caseForm.value.expectedToolParamsJson.trim() || undefined,
+      expectedAnswerKeywords: caseForm.value.expectedAnswerKeywords.trim() || undefined,
+      tags: caseForm.value.tags.trim() || undefined,
+      enableStatus: 1
+    } as never);
+    caseDialog.value = false;
+    caseForm.value = { caseName: "", inputMessage: "", expectedToolName: "", expectedToolParamsJson: "", expectedAnswerKeywords: "", tags: "" };
+    await refreshAll();
+    ElMessage.success("题目已添加");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "添加题目失败");
+  } finally {
+    caseSaving.value = false;
+  }
+}
+
 async function markBaseline(runId: number) {
   await setEvalBaseline(runId);
   ElMessage.success("已设为对比基线，下次评测会自动和它比较");
@@ -322,8 +438,15 @@ onMounted(async () => {
     <section v-else-if="activeTab === 'cases'" v-loading="casesLoading" class="eval-section">
       <article class="panel">
         <header class="panel-head">
-          <h3>题目库</h3>
-          <span>共 {{ caseTotal }} 道题；题目越贴近真实用户，评测越可信</span>
+          <div>
+            <h3>题目库</h3>
+            <span>共 {{ caseTotal }} 道题；题目越贴近真实用户，评测越可信</span>
+          </div>
+          <div class="toolbar">
+            <el-button @click="datasetDialog = true">新建题库</el-button>
+            <el-button @click="generateCoreTemplates">一键生成核心模板</el-button>
+            <el-button type="primary" @click="caseDialog = true">添加题目</el-button>
+          </div>
         </header>
         <el-table :data="cases" size="large" empty-text="这个题库还没有题目">
           <el-table-column prop="caseName" label="题目" min-width="160" />
@@ -404,6 +527,55 @@ onMounted(async () => {
         </div>
       </article>
     </section>
+
+    <!-- 新建题库 -->
+    <el-dialog v-model="datasetDialog" title="新建题库" width="460px">
+      <el-form label-width="90px">
+        <el-form-item label="题库名称" required>
+          <el-input v-model="datasetForm.datasetName" placeholder="例如：核心链路回归" />
+        </el-form-item>
+        <el-form-item label="题库编码" required>
+          <el-input v-model="datasetForm.datasetCode" placeholder="例如：core_v1（带版本，便于以后冻结）" />
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="datasetForm.description" type="textarea" :rows="3" placeholder="这套题考什么、谁维护" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="datasetDialog = false">取消</el-button>
+        <el-button type="primary" :loading="datasetSaving" @click="submitDataset">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加题目 -->
+    <el-dialog v-model="caseDialog" title="添加题目" width="620px">
+      <el-form label-width="110px">
+        <el-form-item label="题目名称" required>
+          <el-input v-model="caseForm.caseName" placeholder="例如：上海 Java 岗位搜索" />
+        </el-form-item>
+        <el-form-item label="用户会怎么说" required>
+          <el-input v-model="caseForm.inputMessage" type="textarea" :rows="2"
+                    placeholder="例如：帮我在上海找 Java 岗位，15k 以上" />
+        </el-form-item>
+        <el-form-item label="期望工具">
+          <el-input v-model="caseForm.expectedToolName" placeholder="例如：JobSearchTool.searchJobs" />
+        </el-form-item>
+        <el-form-item label="期望参数">
+          <el-input v-model="caseForm.expectedToolParamsJson" type="textarea" :rows="2"
+                    placeholder='JSON，例如 {"city":"上海","keyword":"Java"}' />
+        </el-form-item>
+        <el-form-item label="答案关键词">
+          <el-input v-model="caseForm.expectedAnswerKeywords" placeholder="逗号分隔，例如：上海,Java" />
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-input v-model="caseForm.tags" placeholder="例如：core,search" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="caseDialog = false">取消</el-button>
+        <el-button type="primary" :loading="caseSaving" @click="submitCase">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 批次报告抽屉 -->
     <el-drawer v-model="reportVisible" size="60%" :with-header="false">
@@ -729,6 +901,12 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .rate-cell {
