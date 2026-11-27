@@ -3,7 +3,7 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.job.bootstrap.mapper.JobCommunicationRecordMapper">
+<mapper namespace="com.job.bootstrap.infrastructure.persistence.communication.mapper.JobCommunicationRecordMapper">
 
     <!--
         作者: hfj

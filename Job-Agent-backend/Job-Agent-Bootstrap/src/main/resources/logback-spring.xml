@@ -112,7 +112,11 @@
           2) SQL_LOG_LEVEL=DEBUG（默认 OFF 不打印）。
           只写文件，不刷控制台。
         -->
-        <logger name="com.job.bootstrap.mapper" level="${SQL_LOG_LEVEL:-DEBUG}" additivity="false">
+        <logger name="com.job.bootstrap.infrastructure.persistence" level="${SQL_LOG_LEVEL:-DEBUG}" additivity="false">
+        <appender-ref ref="SQL_FILE"/>
+    </logger>
+    <!-- AI 自有 Mapper（com.job.agent.persistence.mapper）同样输出 SQL -->
+    <logger name="com.job.agent.persistence.mapper" level="${SQL_LOG_LEVEL:-DEBUG}" additivity="false">
             <appender-ref ref="SQL_CONSOLE" />
             <appender-ref ref="SQL_FILE" />
         </logger>
