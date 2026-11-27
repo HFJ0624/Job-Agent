@@ -5,8 +5,8 @@ import com.job.bootstrap.infrastructure.persistence.job.mapper.JobMatchRecordMap
 import com.job.bootstrap.application.job.service.JobPositionService;
 import com.job.bootstrap.application.resume.service.JobResumeService;
 import com.job.bootstrap.application.job.service.UserJobPreferenceService;
-import com.job.bootstrap.service.match.HardConditionEvaluator;
-import com.job.bootstrap.service.match.MatchEvidenceExtractor;
+import com.job.bootstrap.application.job.rule.HardConditionEvaluator;
+import com.job.bootstrap.application.job.rule.MatchEvidenceExtractor;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.match.JobMatchVO;

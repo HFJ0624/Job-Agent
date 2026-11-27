@@ -1,4 +1,4 @@
-package com.job.bootstrap.workflow;
+package com.job.bootstrap.application.workflow;
 
 import com.job.bootstrap.infrastructure.persistence.workflow.mapper.WorkflowTaskLogMapper;
 import com.job.bootstrap.infrastructure.persistence.workflow.mapper.WorkflowTaskMapper;

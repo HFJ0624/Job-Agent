@@ -1,4 +1,4 @@
-package com.job.bootstrap.interview;
+package com.job.bootstrap.application.interview;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -6,7 +6,7 @@ import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockIntervi
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewReviewRecordMapper;
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewSessionMapper;
-import com.job.bootstrap.rag.service.RagRetrievalService;
+import com.job.bootstrap.application.rag.service.RagRetrievalService;
 import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.application.interview.service.impl.MockInterviewReviewServiceImpl;
 import com.job.common.entity.interview.MockInterviewAnswer;

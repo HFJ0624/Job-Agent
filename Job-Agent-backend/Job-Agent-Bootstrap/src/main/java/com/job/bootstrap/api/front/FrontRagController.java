@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.rag.service.RagRetrievalService;
+import com.job.bootstrap.application.rag.service.RagRetrievalService;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.rag.RagSearchResultVO;

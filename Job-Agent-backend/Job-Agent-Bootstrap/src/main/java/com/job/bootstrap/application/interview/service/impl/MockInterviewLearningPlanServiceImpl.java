@@ -6,7 +6,7 @@ import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockIntervi
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewStudyPlanMapper;
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewStudyPlanRetestMapper;
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewWrongQuestionMapper;
-import com.job.bootstrap.rag.service.RagRetrievalService;
+import com.job.bootstrap.application.rag.service.RagRetrievalService;
 import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.application.interview.service.MockInterviewLearningPlanService;
 import com.job.common.dto.interview.MockInterviewStudyPlanGenerateDTO;

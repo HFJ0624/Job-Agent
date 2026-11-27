@@ -18,7 +18,7 @@ import com.job.agent.support.rewrite.AgentQueryRewriter;
 import com.job.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.agent.persistence.mapper.AiConversationMapper;
 import com.job.agent.persistence.mapper.AiMessageMapper;
-import com.job.bootstrap.rag.service.RagRetrievalService;import com.job.agent.application.chat.AgentMemoryCaptureService;
+import com.job.bootstrap.application.rag.service.RagRetrievalService;import com.job.agent.application.chat.AgentMemoryCaptureService;
 import com.job.agent.application.chat.AgentMemoryContextService;
 import com.job.agent.application.chat.AgentPlanExecutorService;
 import com.job.agent.application.chat.AgentPlanningService;

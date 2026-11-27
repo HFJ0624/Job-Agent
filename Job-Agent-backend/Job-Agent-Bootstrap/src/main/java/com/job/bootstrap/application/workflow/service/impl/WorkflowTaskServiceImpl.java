@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.job.bootstrap.infrastructure.persistence.workflow.mapper.WorkflowTaskMapper;
 import com.job.bootstrap.application.workflow.service.WorkflowTaskService;
-import com.job.bootstrap.workflow.WorkflowTaskStateMachine;
+import com.job.bootstrap.application.workflow.WorkflowTaskStateMachine;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.dto.workflow.WorkflowTaskQueryDTO;
 import com.job.common.entity.workflow.WorkflowTask;

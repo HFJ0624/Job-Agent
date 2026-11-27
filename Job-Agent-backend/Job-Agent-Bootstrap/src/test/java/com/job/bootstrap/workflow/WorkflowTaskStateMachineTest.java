@@ -1,4 +1,4 @@
-package com.job.bootstrap.workflow;
+package com.job.bootstrap.application.workflow;
 
 import com.job.enums.WorkflowTaskStatus;
 import org.junit.jupiter.api.Test;

@@ -3,7 +3,7 @@ package com.job.bootstrap.application.interview.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.InterviewQuestionBankMapper;
 import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewQuestionMapper;
-import com.job.bootstrap.rag.service.RagRetrievalService;
+import com.job.bootstrap.application.rag.service.RagRetrievalService;
 import com.job.bootstrap.application.interview.service.InterviewQuestionSelectorService;
 import com.job.common.entity.interview.InterviewQuestionBank;
 import com.job.common.entity.interview.MockInterviewQuestion;

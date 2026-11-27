@@ -1,10 +1,10 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.rag.service.RagIndexService;
-import com.job.bootstrap.rag.service.RagKnowledgeService;
-import com.job.bootstrap.rag.service.RagRetrievalService;
-import com.job.bootstrap.rag.service.RagVectorStoreService;
+import com.job.bootstrap.application.rag.service.RagIndexService;
+import com.job.bootstrap.application.rag.service.RagKnowledgeService;
+import com.job.bootstrap.application.rag.service.RagRetrievalService;
+import com.job.bootstrap.application.rag.service.RagVectorStoreService;
 import com.job.common.dto.rag.RagChunkQueryDTO;
 import com.job.common.dto.rag.RagDocumentQueryDTO;
 import com.job.common.dto.rag.RagRetrievalEvalDTO;

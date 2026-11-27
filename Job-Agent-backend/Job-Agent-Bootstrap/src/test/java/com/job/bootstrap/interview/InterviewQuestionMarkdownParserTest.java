@@ -1,7 +1,7 @@
-package com.job.bootstrap.interview;
+package com.job.bootstrap.application.interview;
 
-import com.job.bootstrap.interview.model.InterviewQuestionImportItem;
-import com.job.bootstrap.interview.parser.InterviewQuestionMarkdownParser;
+import com.job.bootstrap.application.interview.model.InterviewQuestionImportItem;
+import com.job.bootstrap.application.interview.parser.InterviewQuestionMarkdownParser;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

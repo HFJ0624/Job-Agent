@@ -1,4 +1,4 @@
-package com.job.bootstrap.workflow.handler;
+package com.job.bootstrap.application.workflow.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.infrastructure.persistence.jobapply.mapper.JobApplicationRecordMapper;

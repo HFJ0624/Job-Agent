@@ -13,7 +13,7 @@ import org.springframework.util.StringUtils;
  * 功能: 主数据源（MySQL）显式声明（修复启动失败）。
  *
  * 背景:
- * 1. {@link com.job.bootstrap.rag.config.RagConfig} 声明了 pgvector 的 DataSource（ragDataSource），
+ * 1. {@link com.job.bootstrap.application.rag.config.RagConfig} 声明了 pgvector 的 DataSource（ragDataSource），
  *    它同样是 DataSource 类型——Spring Boot 的 DataSource 自动配置看到已存在 DataSource 就退让，
  *    导致上下文里只剩 PG 数据源：MyBatis 与 Flyway 都指向 PostgreSQL，
  *    Flyway 于是报 "Unsupported Database: PostgreSQL 18.3"，应用无法启动；

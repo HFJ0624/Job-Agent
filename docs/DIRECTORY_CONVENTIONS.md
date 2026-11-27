@@ -126,3 +126,16 @@ Infra-Ai  → Framework
 Mcp-Tools → Framework
 ```
 `Infra-Ai` / `Mcp-Tools` 对 `com.job.bootstrap` 的引用数均为 **0**。
+
+### Bootstrap 现状（2026-11-27 收敛后）
+
+```
+com.job.bootstrap/
+├── api/{front,admin,mcp,agent}
+├── application/<域>/service(.impl)     域：resume/job/jobapply/communication/
+│                                        interview/workflow/user/home/admin/agent/rag
+├── infrastructure/persistence/<域>/mapper
+├── integration/agent/**                13 个端口适配器
+├── config/、mcp/、scheduler/
+```
+全局 `service` 与 `mapper` 大目录已删除，按功能域归位。

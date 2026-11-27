@@ -1,9 +1,9 @@
-package com.job.bootstrap.rag.service.impl;
+package com.job.bootstrap.application.rag.service.impl;
 
-import com.job.bootstrap.rag.config.RagProperties;
-import com.job.bootstrap.rag.service.RagEmbeddingService;
-import com.job.bootstrap.rag.service.RagKnowledgeService;
-import com.job.bootstrap.rag.service.RagVectorStoreService;
+import com.job.bootstrap.application.rag.config.RagProperties;
+import com.job.bootstrap.application.rag.service.RagEmbeddingService;
+import com.job.bootstrap.application.rag.service.RagKnowledgeService;
+import com.job.bootstrap.application.rag.service.RagVectorStoreService;
 import com.job.common.vo.rag.RagSearchResultVO;
 import org.junit.jupiter.api.Test;
 

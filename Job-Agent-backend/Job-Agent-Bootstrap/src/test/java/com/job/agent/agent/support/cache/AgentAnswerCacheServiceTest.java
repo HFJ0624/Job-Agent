@@ -1,7 +1,7 @@
 package com.job.agent.support.cache;
 
 import com.job.agent.model.observability.AgentObservationRecord;
-import com.job.bootstrap.rag.service.RagEmbeddingService;
+import com.job.bootstrap.application.rag.service.RagEmbeddingService;
 import com.job.agent.model.observability.AgentObservationService;
 import com.job.enums.AgentObservationEventType;
 import org.junit.jupiter.api.BeforeEach;

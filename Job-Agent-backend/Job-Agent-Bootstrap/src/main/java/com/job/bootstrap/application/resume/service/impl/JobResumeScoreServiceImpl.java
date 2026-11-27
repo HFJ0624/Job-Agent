@@ -7,7 +7,7 @@ import com.job.bootstrap.infrastructure.persistence.resume.mapper.JobResumeScore
 import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.application.resume.service.JobResumeScoreService;
 import com.job.bootstrap.application.resume.service.JobResumeService;
-import com.job.bootstrap.service.resume.ResumeScoreRuleEngine;
+import com.job.bootstrap.application.resume.rule.ResumeScoreRuleEngine;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.entity.resume.JobResumeScoreRecord;
 import com.job.common.vo.resume.ResumeScoreVO;
