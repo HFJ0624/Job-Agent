@@ -9,7 +9,7 @@ import com.job.ai.agent.tool.registry.AgentToolInvoker;
 import com.job.ai.agent.support.guardrail.AgentGuardrailService;
 import com.job.ai.agent.application.plan.AgentPlanParameterExtractor;
 import com.job.ai.agent.core.react.*;
-import com.job.ai.infrastructure.persistence.AgentRunService;
+import com.job.ai.persistence.AgentRunService;
 import com.job.ai.agent.tool.registry.AgentToolGuard;
 import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.ai.agent.tool.impl.*;

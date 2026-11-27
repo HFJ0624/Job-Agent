@@ -102,10 +102,11 @@ agent/
 | `agent/tool/{impl,registry}` | 8 个业务 Tool、注册表、Schema/执行结果 |
 | `agent/support/{guardrail,memory,cache,context,intent,rewrite,eval,trace}` | 护栏、记忆、缓存、上下文、意图、改写、评估、Trace 接口 |
 | `agent/scenario/{jobseek,jobsearch,resume,match}` | 复合编排、独立搜索、简历、匹配 |
-| `agent/application/{routing,task,plan}` | ChatRequestRouter、任务生命周期、参数解析 |
+| `agent/application/chat`（+`impl`） | 聊天用例、5 个辅助服务与实现、ConversationService、Trace 组装 |
+| `agent/application/{routing,task,plan}` | ChatRequestRouter、任务生命周期与取消、参数解析 |
 | `agent/port` | 11 个业务端口（JobSearch/ResumeScore/JobMatch/Rag/JobRecommend/Greeting/Interview/MockReview/Connector/EntityResolver/Embedding） |
 | `model/{gateway,prompt,turn,observability}` | 模型网关（含实现）、提示词运行时、ChatTurn 协议、观测 |
-| `persistence/model/mapper` | 9 个 AI 自有 Mapper（模型配置/路由/调用日志/熔断/会话/消息/计划/运行/产物） |
+| `persistence/`（+`mapper`） | Run/Artifact 服务 + 15 个 AI 自有 Mapper |
 
 ### 仍在 Bootstrap
 

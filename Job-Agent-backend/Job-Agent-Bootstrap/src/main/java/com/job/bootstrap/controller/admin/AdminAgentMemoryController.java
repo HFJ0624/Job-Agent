@@ -1,7 +1,7 @@
 package com.job.bootstrap.controller.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.ai.agent.application.chat.service.AgentMemoryContextService;
+import com.job.ai.agent.application.chat.AgentMemoryContextService;
 import com.job.ai.agent.support.memory.AgentMemoryService;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.base.Result;

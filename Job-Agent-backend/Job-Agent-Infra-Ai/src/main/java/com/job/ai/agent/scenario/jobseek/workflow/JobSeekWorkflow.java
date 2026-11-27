@@ -5,7 +5,7 @@ import com.job.ai.agent.scenario.jobseek.service.SeekContextResolver;
 import com.job.ai.agent.scenario.jobseek.policy.SeekVersionPolicy;
 import com.job.ai.agent.scenario.jobseek.assembler.SeekAnswerAssembler;
 import com.job.ai.agent.scenario.jobseek.config.JobSeekExecutorConfig;
-import com.job.ai.infrastructure.persistence.AgentArtifactService;
+import com.job.ai.persistence.AgentArtifactService;
 import com.job.ai.agent.core.event.AgentProgressEvent;
 import com.job.ai.agent.core.event.TaskProgressPublisher;
 import com.job.ai.agent.core.budget.TaskExecutionBudget;

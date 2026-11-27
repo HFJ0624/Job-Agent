@@ -1,7 +1,7 @@
 package com.job.ai.agent.scenario.jobsearch;
 
-import com.job.ai.persistence.model.mapper.AiConversationMapper;
-import com.job.ai.persistence.model.mapper.AiMessageMapper;
+import com.job.ai.persistence.mapper.AiConversationMapper;
+import com.job.ai.persistence.mapper.AiMessageMapper;
 import com.job.common.entity.agent.AiConversation;
 import com.job.common.entity.agent.AiMessage;
 import lombok.extern.slf4j.Slf4j;

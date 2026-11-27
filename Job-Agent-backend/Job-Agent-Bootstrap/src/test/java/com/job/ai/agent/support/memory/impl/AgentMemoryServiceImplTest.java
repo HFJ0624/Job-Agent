@@ -1,8 +1,8 @@
 package com.job.ai.agent.support.memory.impl;
 
 import com.job.ai.agent.support.memory.AgentMemoryProperties;
-import com.job.ai.persistence.model.mapper.AgentLongTermMemoryMapper;
-import com.job.ai.persistence.model.mapper.AgentMemoryHistoryMapper;
+import com.job.ai.persistence.mapper.AgentLongTermMemoryMapper;
+import com.job.ai.persistence.mapper.AgentMemoryHistoryMapper;
 import com.job.common.entity.agent.AgentLongTermMemory;
 import com.job.common.entity.agent.AgentMemoryHistory;
 import com.job.enums.AgentMemoryStatus;

@@ -9,7 +9,7 @@ import com.job.bootstrap.mapper.AgentObservationAlertRuleMapper;
 import com.job.bootstrap.mapper.AgentObservationEventMapper;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
 import com.job.bootstrap.mapper.AgentTraceRetentionPolicyMapper;
-import com.job.ai.persistence.model.mapper.AiModelCallLogMapper;
+import com.job.ai.persistence.mapper.AiModelCallLogMapper;
 import com.job.bootstrap.service.AdminAgentObservationService;
 import com.job.common.dto.agent.AgentObservationAlertRecordQueryDTO;
 import com.job.common.dto.agent.AgentObservationAlertRuleQueryDTO;

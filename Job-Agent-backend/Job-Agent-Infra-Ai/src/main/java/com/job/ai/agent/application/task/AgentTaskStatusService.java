@@ -1,9 +1,9 @@
 package com.job.ai.agent.application.task;
 
-import com.job.ai.infrastructure.persistence.AgentArtifactService;
+import com.job.ai.persistence.AgentArtifactService;
 import com.job.ai.agent.core.budget.TaskBudgetRegistry;
 import com.job.ai.agent.core.budget.TaskExecutionBudget;
-import com.job.ai.infrastructure.persistence.AgentRunService;
+import com.job.ai.persistence.AgentRunService;
 import com.job.common.entity.agent.AgentArtifact;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.common.entity.agent.AgentRun;

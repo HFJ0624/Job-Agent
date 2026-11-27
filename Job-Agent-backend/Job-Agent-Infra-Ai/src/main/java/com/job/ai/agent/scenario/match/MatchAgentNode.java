@@ -7,7 +7,7 @@ import com.job.ai.agent.core.react.AgentRunExecutionHooks;
 import com.job.ai.agent.core.react.ReActRunner;
 import com.job.ai.agent.scenario.resume.ResumeProfile;
 import com.job.ai.agent.scenario.resume.ResumeSections;
-import com.job.ai.infrastructure.persistence.AgentRunService;
+import com.job.ai.persistence.AgentRunService;
 import com.job.ai.agent.scenario.jobsearch.JobCandidates;
 import com.job.ai.agent.scenario.jobsearch.SearchConstraints;
 import com.job.ai.model.turn.AiChatMessage;
