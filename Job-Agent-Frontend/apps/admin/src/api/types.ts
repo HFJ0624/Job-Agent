@@ -1545,3 +1545,36 @@ export interface InterviewQuestionImportResult {
   failedCount: number;
   warnings: string[];
 }
+
+/** 评测概览（后端 /admin/agent/eval/overview）。 */
+export interface EvalOverviewInfo {
+  datasetId?: number;
+  totalCases?: number;
+  latestRun?: AgentEvalRunInfo;
+  passRate?: number;
+  failCount?: number;
+  lastRunTime?: string;
+  trend: EvalTrendPoint[];
+  failureTop: EvalFailureCategory[];
+}
+
+export interface EvalTrendPoint {
+  runId: number;
+  time?: string;
+  passRate?: number;
+}
+
+export interface EvalFailureCategory {
+  code: string;
+  label: string;
+  count: number;
+  ratio?: number;
+}
+
+/** 单批次报告（后端 /admin/agent/eval/batches/{runId}/report）。 */
+export interface EvalBatchReportInfo {
+  run?: AgentEvalRunInfo;
+  failureCategories: EvalFailureCategory[];
+  cases: AgentEvalResultInfo[];
+  caseTotal: number;
+}

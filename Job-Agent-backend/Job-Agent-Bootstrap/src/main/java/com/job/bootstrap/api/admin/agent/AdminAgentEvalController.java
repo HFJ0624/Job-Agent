@@ -2,6 +2,9 @@ package com.job.bootstrap.api.admin.agent;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.bootstrap.application.agent.service.AgentEvalService;
+import com.job.bootstrap.application.agent.service.EvalBatchReportService;
+import com.job.common.vo.agent.EvalBatchReportVO;
+import com.job.common.vo.agent.EvalOverviewVO;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
 import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;
@@ -46,6 +49,19 @@ import java.util.List;
 public class AdminAgentEvalController {
 
     private final AgentEvalService agentEvalService;
+    private final EvalBatchReportService evalBatchReportService;
+
+    /** 概览：最近批次指标 + 趋势 + 失败 Top（首页四张卡）。 */
+    @GetMapping("/overview")
+    public Result<EvalOverviewVO> overview(@RequestParam(required = false) Long datasetId) {
+        return Result.build(evalBatchReportService.overview(datasetId), ResultCodeEnum.SUCCESS);
+    }
+
+    /** 单批次报告：指标 + 失败分类 + 逐用例结果。 */
+    @GetMapping("/batches/{runId}/report")
+    public Result<EvalBatchReportVO> batchReport(@PathVariable Long runId) {
+        return Result.build(evalBatchReportService.report(runId), ResultCodeEnum.SUCCESS);
+    }
 
     @GetMapping("/datasets/page")
     public Result<IPage<AgentEvalDatasetVO>> pageDatasets(AgentEvalDatasetQueryDTO query) {

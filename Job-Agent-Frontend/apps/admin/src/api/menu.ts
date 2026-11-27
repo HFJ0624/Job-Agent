@@ -126,7 +126,7 @@ export const adminMenus: AdminMenuItem[] = [
     name: "AgentEval",
     title: "Eval 平台",
     icon: "TrendCharts",
-    component: "agent/EvalPlatform"
+    component: "agent/eval/EvalPlatformView"
   },
   {
     id: 14,

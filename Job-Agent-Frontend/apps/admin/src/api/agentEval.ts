@@ -14,6 +14,8 @@ import type {
   AgentEvalResultQuery,
   AgentEvalRunInfo,
   AgentEvalRunQuery,
+  EvalBatchReportInfo,
+  EvalOverviewInfo,
   PageResult
 } from "./types";
 
@@ -125,4 +127,15 @@ export function applyEvalQuickFix(resultId: number, payload: AgentEvalQuickFixPa
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+// 概览：最近批次指标 + 趋势 + 失败 Top
+export function getEvalOverview(datasetId?: number | string) {
+  const suffix = datasetId ? `?datasetId=${datasetId}` : "";
+  return request<EvalOverviewInfo>(`/admin/agent/eval/overview${suffix}`);
+}
+
+// 单批次报告：指标 + 失败分类 + 逐用例结果
+export function getEvalBatchReport(runId: number) {
+  return request<EvalBatchReportInfo>(`/admin/agent/eval/batches/${runId}/report`);
 }
