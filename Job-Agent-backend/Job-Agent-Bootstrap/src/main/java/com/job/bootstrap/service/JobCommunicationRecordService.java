@@ -1,5 +1,5 @@
 package com.job.bootstrap.service;
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 
 import com.job.common.dto.communication.*;
 import com.job.common.vo.communication.*;

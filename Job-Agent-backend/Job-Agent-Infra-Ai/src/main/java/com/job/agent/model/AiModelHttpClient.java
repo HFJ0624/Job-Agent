@@ -1,0 +1,54 @@
+package com.job.agent.model;
+import com.job.agent.model.gateway.TokenConsumer;
+
+import com.job.common.entity.ai.AiModelConfig;
+
+/**
+ * 功能: 模型 HTTP 客户端接口（任务8）。
+ *
+ * 设计说明:
+ * 1. 把“调用 OpenAI 兼容接口并解析响应”从网关编排里抽出来，便于单测用 mock 替换，
+ *    从而在不调用真实收费 API 的前提下验证重试、熔断、限流。
+ * 2. 实现默认走 RestTemplate（见 RestTemplateAiModelHttpClient）。
+ */
+public interface AiModelHttpClient {
+
+    /**
+     * 调用一次 OpenAI 兼容模型接口。
+     *
+     * @param model         模型配置
+     * @param systemPrompt  系统提示词
+     * @param userMessage   用户消息
+     * @return 模型输出与 token 用量
+     */
+    AiModelCallResponse chat(AiModelConfig model, String systemPrompt, String userMessage);
+
+    /**
+     * 以 SSE 流式方式调用 OpenAI 兼容模型接口（任务 G5）。
+     *
+     * 说明:
+     * 1. 请求体带 stream=true，逐行读取 data 事件，把 choices[0].delta.content 增量回调给 consumer；
+     * 2. 供应商不支持流式或网络失败时抛异常，由调用方（网关）决定降级策略；
+     * 3. 实现不负责重试——流式中途重试会重复推送 token，重试决策在网关层。
+     *
+     * @param model         模型配置
+     * @param systemPrompt  系统提示词
+     * @param userMessage   用户消息
+     * @param consumer      token 消费者
+     */
+    void chatStream(AiModelConfig model, String systemPrompt, String userMessage, TokenConsumer consumer);
+
+    /**
+     * 结构化轮次调用（第一阶段 ReAct）：完整消息序列 + 工具清单。
+     *
+     * 说明:
+     * 1. content 为空但 tool_calls 有值是合法响应（模型选择调用工具）；
+     * 2. 既无 content 也无 tool_calls、响应无法解析时抛异常，由网关按失败处理；
+     * 3. finish_reason=length（输出截断）不在这里抛异常——返回给 Runner 按协议错误处理。
+     *
+     * @param model   模型配置
+     * @param request 消息序列与工具清单
+     * @return 结构化轮次响应
+     */
+    com.job.agent.model.turn.AiChatTurnResponse chatTurn(AiModelConfig model, com.job.agent.model.turn.AiChatTurnRequest request);
+}

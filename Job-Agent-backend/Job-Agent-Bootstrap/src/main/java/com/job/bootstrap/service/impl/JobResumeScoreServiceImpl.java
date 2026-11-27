@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.mapper.JobResumeScoreRecordMapper;
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.JobResumeScoreService;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.bootstrap.service.resume.ResumeScoreRuleEngine;

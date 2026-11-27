@@ -3,7 +3,7 @@ package com.job.bootstrap.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.bootstrap.mapper.JobApplyDecisionRecordMapper;
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.JobApplyDecisionService;
 import com.job.bootstrap.service.JobMatchService;
 import com.job.bootstrap.service.JobPositionService;

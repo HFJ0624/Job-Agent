@@ -2,11 +2,11 @@ package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.ai.agent.support.guardrail.AgentGuardrailService;
+import com.job.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
-import com.job.ai.model.observability.AgentObservationRecord;
-import com.job.ai.model.observability.AgentObservationService;
-import com.job.ai.agent.support.trace.AgentTraceService;
+import com.job.agent.model.observability.AgentObservationRecord;
+import com.job.agent.model.observability.AgentObservationService;
+import com.job.agent.support.trace.AgentTraceService;
 import com.job.common.entity.agent.AgentTraceLog;
 import com.job.enums.AgentObservationEventType;
 import com.job.enums.AgentObservationStatus;

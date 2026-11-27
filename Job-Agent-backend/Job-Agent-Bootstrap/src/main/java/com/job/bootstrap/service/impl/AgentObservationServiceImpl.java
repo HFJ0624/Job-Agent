@@ -1,14 +1,14 @@
 package com.job.bootstrap.service.impl;
-import com.job.ai.model.gateway.impl.AiModelGatewayServiceImpl;
-import com.job.ai.model.gateway.AiModelGatewayService;
-import com.job.ai.agent.support.trace.AgentTraceService;
+import com.job.agent.model.gateway.impl.AiModelGatewayServiceImpl;
+import com.job.agent.model.gateway.AiModelGatewayService;
+import com.job.agent.support.trace.AgentTraceService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.job.common.agent.AgentRuntimeContext;
-import com.job.ai.agent.support.guardrail.AgentGuardrailService;
+import com.job.agent.support.guardrail.AgentGuardrailService;
 import com.job.bootstrap.mapper.AgentObservationEventMapper;
-import com.job.ai.model.observability.AgentObservationRecord;
-import com.job.ai.model.observability.AgentObservationService;
+import com.job.agent.model.observability.AgentObservationRecord;
+import com.job.agent.model.observability.AgentObservationService;
 import com.job.common.entity.agent.AgentObservationEvent;
 import com.job.enums.AgentObservationErrorCategory;
 import com.job.enums.AgentObservationEventType;

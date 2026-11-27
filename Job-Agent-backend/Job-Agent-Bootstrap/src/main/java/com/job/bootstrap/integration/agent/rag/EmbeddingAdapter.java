@@ -1,6 +1,6 @@
 package com.job.bootstrap.integration.agent.rag;
 
-import com.job.ai.agent.port.EmbeddingPort;
+import com.job.agent.port.EmbeddingPort;
 import com.job.bootstrap.rag.service.RagEmbeddingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

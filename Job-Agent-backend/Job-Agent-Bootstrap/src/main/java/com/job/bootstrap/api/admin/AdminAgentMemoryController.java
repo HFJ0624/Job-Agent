@@ -1,8 +1,8 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.ai.agent.application.chat.AgentMemoryContextService;
-import com.job.ai.agent.support.memory.AgentMemoryService;
+import com.job.agent.application.chat.AgentMemoryContextService;
+import com.job.agent.support.memory.AgentMemoryService;
 import com.job.common.dto.agent.AgentMemoryQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

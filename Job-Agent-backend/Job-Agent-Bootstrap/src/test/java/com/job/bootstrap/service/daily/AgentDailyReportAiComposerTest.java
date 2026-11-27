@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.daily;
 
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.impl.AgentDailyReportAiComposer;
 import com.job.common.vo.agent.AgentInboxVO;
 import org.junit.jupiter.api.Test;

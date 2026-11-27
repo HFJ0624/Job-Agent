@@ -1,6 +1,6 @@
 package com.job.bootstrap.integration.agent.interview;
 
-import com.job.ai.agent.port.InterviewPreparePort;
+import com.job.agent.port.InterviewPreparePort;
 import com.job.bootstrap.service.InterviewPrepareService;
 import com.job.common.vo.interview.InterviewPrepareVO;
 import lombok.RequiredArgsConstructor;

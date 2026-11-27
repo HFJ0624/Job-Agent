@@ -91,9 +91,9 @@ agent/
 
 ---
 
-## 7. 模块迁移现状（2026-11-26，分支 wordbuddy-stage）
+## 7. 模块迁移现状（2026-11-27，分支 wordbuddy-stage）
 
-### 已迁入 `Job-Agent-Infra-Ai`（包根 `com.job.ai`）
+### 已迁入 `Job-Agent-Infra-Ai`（包根 `com.job.agent`）
 
 | 包 | 内容 |
 |---|---|
@@ -104,6 +104,7 @@ agent/
 | `agent/scenario/{jobseek,jobsearch,resume,match}` | 复合编排、独立搜索、简历、匹配 |
 | `agent/application/chat`（+`impl`） | 聊天用例、5 个辅助服务与实现、ConversationService、Trace 组装 |
 | `agent/application/{routing,task,plan}` | ChatRequestRouter、任务生命周期与取消、参数解析 |
+| `agent/role` | 角色包：5 个 LangChain4j Assistant（HR 沟通/面试邀请抽取/求职/总结/简历评分） |
 | `agent/port` | 11 个业务端口（JobSearch/ResumeScore/JobMatch/Rag/JobRecommend/Greeting/Interview/MockReview/Connector/EntityResolver/Embedding） |
 | `model/{gateway,prompt,turn,observability}` | 模型网关（含实现）、提示词运行时、ChatTurn 协议、观测 |
 | `persistence/`（+`mapper`） | Run/Artifact 服务 + 15 个 AI 自有 Mapper |
@@ -114,8 +115,8 @@ agent/
 |---|---|---|
 | `api/controller/AgentController` | HTTP/SSE 入口 | 按规范保留 |
 | `integration/agent/**` | 11 个端口适配器 | 按规范保留 |
-| — | 旧模板链路（5 类） | ✅ 已迁 `com.job.ai.agent.legacy.template` |
-| — | 聊天/记忆捕获/记忆上下文/计划执行/补偿 | ✅ 已全部迁入 `com.job.ai.agent.application.chat`、`agent.support.compensation`、`agent.legacy.template` |
+| — | 旧模板链路（5 类） | ✅ 已迁 `com.job.agent.agent.legacy.template` |
+| — | 聊天/记忆捕获/记忆上下文/计划执行/补偿 | ✅ 已全部迁入 `com.job.agent.agent.application.chat`、`agent.support.compensation`、`agent.legacy.template` |
 
 ### 依赖约束（已满足）
 

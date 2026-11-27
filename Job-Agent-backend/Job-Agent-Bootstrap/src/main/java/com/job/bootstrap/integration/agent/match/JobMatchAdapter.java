@@ -1,6 +1,6 @@
 package com.job.bootstrap.integration.agent.match;
 
-import com.job.ai.agent.port.JobMatchPort;
+import com.job.agent.port.JobMatchPort;
 import com.job.bootstrap.service.JobMatchService;
 import com.job.common.vo.match.JobMatchVO;
 import lombok.RequiredArgsConstructor;

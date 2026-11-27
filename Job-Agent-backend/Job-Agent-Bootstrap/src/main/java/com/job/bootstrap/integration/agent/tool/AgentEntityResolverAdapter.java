@@ -8,8 +8,8 @@ import com.job.common.entity.company.JobCompany;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
 import com.job.enums.AgentToolErrorCode;
-import com.job.ai.agent.tool.impl.resolver.AgentEntityResolveResult;
-import com.job.ai.agent.tool.impl.resolver.EntityResolverPort;
+import com.job.agent.tool.impl.resolver.AgentEntityResolveResult;
+import com.job.agent.tool.impl.resolver.EntityResolverPort;
 import com.job.exception.AgentToolException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -26,7 +26,7 @@ import java.util.Map;
  */
 @Component
 @RequiredArgsConstructor
-public class AgentEntityResolverAdapter implements com.job.ai.agent.tool.impl.resolver.EntityResolverPort {
+public class AgentEntityResolverAdapter implements com.job.agent.tool.impl.resolver.EntityResolverPort {
 
     private static final int NOT_DELETED = 0;
     private static final int DEFAULT_RESUME = 1;

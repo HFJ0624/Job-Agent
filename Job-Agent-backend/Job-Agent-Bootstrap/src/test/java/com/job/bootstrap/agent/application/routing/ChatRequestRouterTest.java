@@ -1,9 +1,9 @@
-package com.job.ai.agent.application.routing;
+package com.job.agent.application.routing;
 
-import com.job.ai.agent.application.task.AgentTaskService;
-import com.job.ai.agent.scenario.jobsearch.JobSearchReactEntry;
-import com.job.ai.agent.scenario.jobseek.entry.JobSeekReactEntry;
-import com.job.ai.agent.scenario.resume.ResumeReactEntry;
+import com.job.agent.application.task.AgentTaskService;
+import com.job.agent.scenario.jobsearch.JobSearchReactEntry;
+import com.job.agent.scenario.jobseek.entry.JobSeekReactEntry;
+import com.job.agent.scenario.resume.ResumeReactEntry;
 import com.job.common.entity.agent.AgentPlan;
 import org.junit.jupiter.api.Test;
 

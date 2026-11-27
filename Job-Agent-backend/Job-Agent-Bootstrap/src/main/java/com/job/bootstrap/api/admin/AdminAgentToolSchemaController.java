@@ -1,6 +1,6 @@
 package com.job.bootstrap.api.admin;
 
-import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
+import com.job.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

@@ -1,6 +1,6 @@
 package com.job.bootstrap.integration.agent.job;
 
-import com.job.ai.agent.port.PreferencePort;
+import com.job.agent.port.PreferencePort;
 import com.job.bootstrap.service.UserJobPreferenceService;
 import com.job.common.vo.preference.UserJobPreferenceVO;
 import lombok.RequiredArgsConstructor;

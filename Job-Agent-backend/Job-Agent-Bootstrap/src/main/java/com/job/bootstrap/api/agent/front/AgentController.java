@@ -1,9 +1,9 @@
 package com.job.bootstrap.api.agent.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.ai.agent.core.event.SseTaskProgressPublisher;
-import com.job.ai.agent.application.task.AgentTaskStatusService;
-import com.job.ai.api.chat.AgentChatService;
+import com.job.agent.core.event.SseTaskProgressPublisher;
+import com.job.agent.application.task.AgentTaskStatusService;
+import com.job.agent.api.chat.AgentChatService;
 import com.job.bootstrap.service.AgentHistoryService;
 import com.job.common.dto.agent.AgentChatRequestDTO;
 import com.job.common.entity.base.Result;
@@ -36,7 +36,7 @@ public class AgentController {
     /** 第三阶段：任务状态快照与取消。 */
     private final AgentTaskStatusService agentTaskStatusService;
     /** 取消用例：校验归属 → 取消预算 → 落 CANCELLED，Controller 不再直接操作。 */
-    private final com.job.ai.agent.application.task.AgentTaskCancelService agentTaskCancelService;
+    private final com.job.agent.application.task.AgentTaskCancelService agentTaskCancelService;
 
     /**
      * SSE 流式超时时间（毫秒）。

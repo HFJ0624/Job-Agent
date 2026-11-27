@@ -1,10 +1,10 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.ai.agent.support.guardrail.AgentGuardrailService;
-import com.job.ai.agent.support.guardrail.PiiMasker;
+import com.job.agent.support.guardrail.AgentGuardrailService;
+import com.job.agent.support.guardrail.PiiMasker;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
-import com.job.ai.model.observability.AgentObservationService;
+import com.job.agent.model.observability.AgentObservationService;
 import com.job.common.entity.agent.AgentTraceLog;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

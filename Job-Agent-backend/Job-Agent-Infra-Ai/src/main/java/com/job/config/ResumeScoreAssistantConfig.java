@@ -1,6 +1,6 @@
 package com.job.config;
 
-import com.job.agent.ResumeScoreAssistant;
+import com.job.agent.role.ResumeScoreAssistant;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.springframework.beans.factory.annotation.Qualifier;

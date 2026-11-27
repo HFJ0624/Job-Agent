@@ -1,5 +1,5 @@
 package com.job.config;
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;

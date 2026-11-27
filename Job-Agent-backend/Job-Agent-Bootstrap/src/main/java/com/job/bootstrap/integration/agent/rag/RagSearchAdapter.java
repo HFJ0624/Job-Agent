@@ -1,6 +1,6 @@
 package com.job.bootstrap.integration.agent.rag;
 
-import com.job.ai.agent.port.RagSearchPort;
+import com.job.agent.port.RagSearchPort;
 import com.job.bootstrap.rag.service.RagRetrievalService;
 import com.job.common.vo.rag.RagSearchResultVO;
 import lombok.RequiredArgsConstructor;

@@ -1,6 +1,6 @@
 package com.job.bootstrap.integration.agent.resume;
 
-import com.job.ai.agent.port.ResumePort;
+import com.job.agent.port.ResumePort;
 import com.job.bootstrap.service.JobResumeService;
 import com.job.common.entity.resume.JobResume;
 import lombok.RequiredArgsConstructor;

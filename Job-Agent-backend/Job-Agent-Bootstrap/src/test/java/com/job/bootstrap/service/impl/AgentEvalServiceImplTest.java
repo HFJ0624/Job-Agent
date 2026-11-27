@@ -1,14 +1,14 @@
 package com.job.bootstrap.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.ai.agent.support.eval.AgentEvalMatcher;
+import com.job.agent.support.eval.AgentEvalMatcher;
 import com.job.bootstrap.mapper.AgentEvalCaseMapper;
 import com.job.bootstrap.mapper.AgentEvalDatasetMapper;
 import com.job.bootstrap.mapper.AgentEvalResultMapper;
 import com.job.bootstrap.mapper.AgentEvalRunMapper;
 import com.job.bootstrap.mapper.AgentTraceLogMapper;
-import com.job.ai.api.chat.AgentChatService;
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.api.chat.AgentChatService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.WorkflowTaskService;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentEvalCase;

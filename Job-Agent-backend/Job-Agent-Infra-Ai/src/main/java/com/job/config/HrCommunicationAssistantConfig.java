@@ -1,6 +1,6 @@
 package com.job.config;
 
-import com.job.agent.HrCommunicationAssistant;
+import com.job.agent.role.HrCommunicationAssistant;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;

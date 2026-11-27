@@ -1,7 +1,7 @@
-package com.job.ai.agent.legacy.template;
+package com.job.agent.legacy.template;
 
-import com.job.ai.agent.support.intent.AgentIntentCode;
-import com.job.ai.agent.tool.registry.AgentToolSchemaRegistry;
+import com.job.agent.support.intent.AgentIntentCode;
+import com.job.agent.tool.registry.AgentToolSchemaRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

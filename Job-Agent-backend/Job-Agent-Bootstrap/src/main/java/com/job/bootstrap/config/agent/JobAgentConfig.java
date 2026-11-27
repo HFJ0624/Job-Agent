@@ -1,8 +1,8 @@
 package com.job.bootstrap.config.agent;
 
-import com.job.agent.JobAgentAssistant;
-import com.job.agent.JobAgentSummaryAssistant;
-import com.job.ai.agent.tool.impl.*;
+import com.job.agent.role.JobAgentAssistant;
+import com.job.agent.role.JobAgentSummaryAssistant;
+import com.job.agent.tool.impl.*;
 import com.job.mcp.connector.tool.EmailConnectorTool;
 import com.job.mcp.connector.tool.RecruitmentPlatformConnectorTool;
 import com.job.mcp.connector.tool.ResumeExportConnectorTool;

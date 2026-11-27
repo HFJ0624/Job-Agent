@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.job;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.ai.agent.port.JobSearchPort;
+import com.job.agent.port.JobSearchPort;
 import com.job.bootstrap.service.JobPositionService;
 import com.job.common.entity.position.JobPosition;
 import lombok.RequiredArgsConstructor;

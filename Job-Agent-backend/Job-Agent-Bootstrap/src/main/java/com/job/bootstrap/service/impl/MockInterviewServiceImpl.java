@@ -9,7 +9,7 @@ import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.mapper.MockInterviewSessionMapper;
 import com.job.bootstrap.mapper.MockInterviewWrongQuestionMapper;
 import com.job.bootstrap.service.FileStorageService;
-import com.job.ai.model.gateway.AiModelGatewayService;
+import com.job.agent.model.gateway.AiModelGatewayService;
 import com.job.bootstrap.service.InterviewPrepareService;
 import com.job.bootstrap.service.InterviewQuestionSelectorService;
 import com.job.bootstrap.service.JobPositionService;
