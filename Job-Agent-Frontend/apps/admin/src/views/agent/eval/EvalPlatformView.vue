@@ -475,10 +475,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* 与 RAG 知识库一致：铺满主内容区，不再限宽居中 */
 .eval-page {
-  padding: 24px 28px 40px;
-  max-width: 1240px;
-  margin: 0 auto;
+  width: 100%;
+  padding: 4px 0 24px;
 }
 
 .eval-hero {
@@ -537,7 +537,7 @@ onMounted(async () => {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -589,7 +589,7 @@ onMounted(async () => {
 
 .two-column {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
   gap: 14px;
   margin-bottom: 16px;
 }
