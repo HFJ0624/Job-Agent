@@ -10,7 +10,7 @@ import com.job.agent.tool.impl.JobSearchTool;
 import com.job.agent.tool.impl.MockInterviewReviewTool;
 import com.job.agent.tool.impl.RagSearchTool;
 import com.job.agent.tool.impl.ResumeAnalyzeTool;
-import com.job.bootstrap.service.AdminExternalConnectorService;
+import com.job.bootstrap.application.admin.service.AdminExternalConnectorService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.enums.AgentToolErrorCode;
 import com.job.exception.AgentToolException;

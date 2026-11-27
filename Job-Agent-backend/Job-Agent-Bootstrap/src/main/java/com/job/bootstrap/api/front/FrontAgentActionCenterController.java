@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.AgentActionCenterService;
+import com.job.bootstrap.application.agent.service.AgentActionCenterService;
 import com.job.common.dto.agent.AgentActionItemStatusDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

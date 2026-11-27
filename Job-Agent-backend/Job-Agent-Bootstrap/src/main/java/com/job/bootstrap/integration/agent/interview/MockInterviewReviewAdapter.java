@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.interview;
 
 import com.job.agent.port.MockInterviewReviewPort;
-import com.job.bootstrap.service.MockInterviewReviewService;
+import com.job.bootstrap.application.interview.service.MockInterviewReviewService;
 import com.job.common.vo.interview.MockInterviewReviewVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

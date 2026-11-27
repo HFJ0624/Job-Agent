@@ -1,10 +1,10 @@
 package com.job.bootstrap.interview;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.job.bootstrap.mapper.InterviewQuestionBankMapper;
-import com.job.bootstrap.mapper.MockInterviewQuestionMapper;
+import com.job.bootstrap.infrastructure.persistence.interview.mapper.InterviewQuestionBankMapper;
+import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewQuestionMapper;
 import com.job.bootstrap.rag.service.RagRetrievalService;
-import com.job.bootstrap.service.impl.InterviewQuestionSelectorServiceImpl;
+import com.job.bootstrap.application.interview.service.impl.InterviewQuestionSelectorServiceImpl;
 import com.job.common.entity.interview.InterviewQuestionBank;
 import com.job.common.entity.interview.MockInterviewQuestion;
 import com.job.common.entity.position.JobPosition;

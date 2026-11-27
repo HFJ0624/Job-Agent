@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.JobCompanyService;
+import com.job.bootstrap.application.job.service.JobCompanyService;
 import com.job.common.dto.company.CompanyPageDTO;
 import com.job.common.dto.company.CompanySaveDTO;
 import com.job.common.entity.base.PageResult;

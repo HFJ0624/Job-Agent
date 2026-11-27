@@ -1,11 +1,11 @@
 package com.job.bootstrap.service.match;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.mapper.JobMatchRecordMapper;
-import com.job.bootstrap.service.JobPositionService;
-import com.job.bootstrap.service.JobResumeService;
-import com.job.bootstrap.service.UserJobPreferenceService;
-import com.job.bootstrap.service.impl.JobMatchServiceImpl;
+import com.job.bootstrap.infrastructure.persistence.job.mapper.JobMatchRecordMapper;
+import com.job.bootstrap.application.job.service.JobPositionService;
+import com.job.bootstrap.application.resume.service.JobResumeService;
+import com.job.bootstrap.application.job.service.UserJobPreferenceService;
+import com.job.bootstrap.application.job.service.impl.JobMatchServiceImpl;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;
 import com.job.common.vo.match.JobMatchVO;

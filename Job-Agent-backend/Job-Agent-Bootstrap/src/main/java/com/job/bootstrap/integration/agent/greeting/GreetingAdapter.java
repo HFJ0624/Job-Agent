@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.greeting;
 
 import com.job.agent.port.GreetingPort;
-import com.job.bootstrap.service.JobGreetingService;
+import com.job.bootstrap.application.communication.service.JobGreetingService;
 import com.job.common.vo.greeting.GreetingVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

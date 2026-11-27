@@ -1,8 +1,8 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.JobCompanyService;
-import com.job.bootstrap.service.JobPositionService;
+import com.job.bootstrap.application.job.service.JobCompanyService;
+import com.job.bootstrap.application.job.service.JobPositionService;
 import com.job.common.dto.position.PositionPageDTO;
 import com.job.common.dto.position.PositionSaveDTO;
 import com.job.common.entity.base.PageResult;

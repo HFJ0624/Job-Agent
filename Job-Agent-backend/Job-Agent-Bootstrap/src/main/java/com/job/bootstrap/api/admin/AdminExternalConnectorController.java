@@ -1,6 +1,6 @@
 package com.job.bootstrap.api.admin;
 
-import com.job.bootstrap.service.AdminExternalConnectorService;
+import com.job.bootstrap.application.admin.service.AdminExternalConnectorService;
 import com.job.common.agent.tool.AgentToolSchema;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

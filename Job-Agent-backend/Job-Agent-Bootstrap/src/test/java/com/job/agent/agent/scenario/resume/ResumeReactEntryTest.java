@@ -7,7 +7,7 @@ import com.job.agent.core.event.TaskProgressPublisher;
 import com.job.agent.scenario.jobsearch.ReactSearchProperties;
 import com.job.agent.application.task.AgentTaskService;
 import com.job.agent.core.budget.TaskBudgetRegistry;
-import com.job.bootstrap.service.JobResumeService;
+import com.job.bootstrap.application.resume.service.JobResumeService;
 import com.job.common.entity.agent.AgentPlan;
 import com.job.enums.AgentPlanStatus;
 import org.junit.jupiter.api.BeforeEach;

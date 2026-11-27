@@ -1,8 +1,8 @@
 package com.job.bootstrap.workflow.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.service.AgentEvalService;
-import com.job.bootstrap.service.WorkflowTaskProgressService;
+import com.job.bootstrap.application.agent.service.AgentEvalService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskProgressService;
 import com.job.bootstrap.workflow.WorkflowTaskHandler;
 import com.job.common.entity.workflow.WorkflowTask;
 import com.job.enums.WorkflowTaskType;

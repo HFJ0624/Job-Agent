@@ -1,20 +1,20 @@
 package com.job.bootstrap.service.dashboard;
 
-import com.job.bootstrap.mapper.AgentObservationAlertRecordMapper;
-import com.job.bootstrap.mapper.AgentTraceLogMapper;
+import com.job.bootstrap.infrastructure.persistence.agent.mapper.AgentObservationAlertRecordMapper;
+import com.job.bootstrap.infrastructure.persistence.agent.mapper.AgentTraceLogMapper;
 import com.job.agent.persistence.mapper.AiModelCallLogMapper;
 import com.job.agent.persistence.mapper.AiModelConfigMapper;
 import com.job.agent.persistence.mapper.AiPromptVersionMapper;
-import com.job.bootstrap.mapper.JobApplicationRecordMapper;
-import com.job.bootstrap.mapper.JobPositionMapper;
-import com.job.bootstrap.mapper.JobReminderMapper;
-import com.job.bootstrap.mapper.JobResumeMapper;
-import com.job.bootstrap.mapper.JobUserMapper;
-import com.job.bootstrap.mapper.MockInterviewSessionMapper;
-import com.job.bootstrap.mapper.RagChunkMapper;
-import com.job.bootstrap.mapper.RagDocumentMapper;
-import com.job.bootstrap.mapper.WorkflowTaskMapper;
-import com.job.bootstrap.service.impl.AdminDashboardServiceImpl;
+import com.job.bootstrap.infrastructure.persistence.jobapply.mapper.JobApplicationRecordMapper;
+import com.job.bootstrap.infrastructure.persistence.job.mapper.JobPositionMapper;
+import com.job.bootstrap.infrastructure.persistence.communication.mapper.JobReminderMapper;
+import com.job.bootstrap.infrastructure.persistence.resume.mapper.JobResumeMapper;
+import com.job.bootstrap.infrastructure.persistence.user.mapper.JobUserMapper;
+import com.job.bootstrap.infrastructure.persistence.interview.mapper.MockInterviewSessionMapper;
+import com.job.bootstrap.infrastructure.persistence.rag.mapper.RagChunkMapper;
+import com.job.bootstrap.infrastructure.persistence.rag.mapper.RagDocumentMapper;
+import com.job.bootstrap.infrastructure.persistence.workflow.mapper.WorkflowTaskMapper;
+import com.job.bootstrap.application.admin.service.impl.AdminDashboardServiceImpl;
 import com.job.common.vo.admin.AdminDashboardOverviewVO;
 import org.junit.jupiter.api.Test;
 

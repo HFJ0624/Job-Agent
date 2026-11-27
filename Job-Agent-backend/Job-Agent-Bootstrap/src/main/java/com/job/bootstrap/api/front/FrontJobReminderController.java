@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobReminderService;
+import com.job.bootstrap.application.communication.service.JobReminderService;
 import com.job.common.dto.reminder.ReminderCreateDTO;
 import com.job.common.dto.reminder.ReminderPostponeDTO;
 import com.job.common.dto.reminder.ReminderQueryDTO;

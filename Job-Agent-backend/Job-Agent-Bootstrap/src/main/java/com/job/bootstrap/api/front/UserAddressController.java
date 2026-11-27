@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobUserAddressService;
+import com.job.bootstrap.application.user.service.JobUserAddressService;
 import com.job.common.dto.address.SaveUserAddressDTO;
 import com.job.common.entity.address.JobUserAddress;
 import com.job.common.entity.base.Result;

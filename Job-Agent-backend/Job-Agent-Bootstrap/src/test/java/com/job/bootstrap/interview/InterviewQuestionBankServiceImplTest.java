@@ -2,13 +2,13 @@ package com.job.bootstrap.interview;
 
 import com.job.bootstrap.interview.model.InterviewQuestionImportItem;
 import com.job.bootstrap.interview.parser.InterviewQuestionMarkdownParser;
-import com.job.bootstrap.mapper.InterviewQuestionBankMapper;
+import com.job.bootstrap.infrastructure.persistence.interview.mapper.InterviewQuestionBankMapper;
 import com.job.bootstrap.rag.model.RagDocumentSource;
 import com.job.bootstrap.rag.service.RagEmbeddingService;
 import com.job.bootstrap.rag.service.RagKnowledgeService;
 import com.job.bootstrap.rag.service.RagVectorStoreService;
 import com.job.bootstrap.rag.utils.RagTextSplitter;
-import com.job.bootstrap.service.impl.InterviewQuestionBankServiceImpl;
+import com.job.bootstrap.application.interview.service.impl.InterviewQuestionBankServiceImpl;
 import com.job.common.entity.interview.InterviewQuestionBank;
 import com.job.common.entity.rag.RagChunk;
 import com.job.common.vo.rag.RagIndexResultVO;

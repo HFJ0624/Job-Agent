@@ -1,6 +1,6 @@
 package com.job.bootstrap.scheduler;
 
-import com.job.bootstrap.service.AdminFollowUpAgentService;
+import com.job.bootstrap.application.admin.service.AdminFollowUpAgentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;

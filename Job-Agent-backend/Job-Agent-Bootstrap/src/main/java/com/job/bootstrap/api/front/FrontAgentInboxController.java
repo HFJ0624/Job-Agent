@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.AgentInboxService;
+import com.job.bootstrap.application.agent.service.AgentInboxService;
 import com.job.common.dto.agent.AgentInboxActionDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.vo.agent.AgentInboxVO;

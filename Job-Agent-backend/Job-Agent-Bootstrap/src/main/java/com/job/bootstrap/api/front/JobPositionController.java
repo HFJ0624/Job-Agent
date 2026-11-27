@@ -1,9 +1,9 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobApplyDecisionService;
-import com.job.bootstrap.service.JobGreetingService;
-import com.job.bootstrap.service.JobMatchService;
+import com.job.bootstrap.application.jobapply.service.JobApplyDecisionService;
+import com.job.bootstrap.application.communication.service.JobGreetingService;
+import com.job.bootstrap.application.job.service.JobMatchService;
 import com.job.common.dto.decision.JobApplyDecisionRequestDTO;
 import com.job.common.dto.greeting.GreetingGenerateRequestDTO;
 import com.job.common.dto.match.JobMatchRequestDTO;

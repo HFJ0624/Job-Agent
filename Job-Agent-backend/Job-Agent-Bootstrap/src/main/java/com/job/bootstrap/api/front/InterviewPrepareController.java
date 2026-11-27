@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.InterviewPrepareService;
+import com.job.bootstrap.application.interview.service.InterviewPrepareService;
 import com.job.common.dto.interview.InterviewPrepareGenerateDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

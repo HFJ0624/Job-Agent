@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.InterviewQuestionBankService;
+import com.job.bootstrap.application.interview.service.InterviewQuestionBankService;
 import com.job.common.dto.interview.InterviewQuestionBankQueryDTO;
 import com.job.common.dto.interview.InterviewQuestionImportDTO;
 import com.job.common.entity.base.Result;

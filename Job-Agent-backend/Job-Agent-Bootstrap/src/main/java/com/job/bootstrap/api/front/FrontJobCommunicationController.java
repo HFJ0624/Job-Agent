@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobCommunicationRecordService;
+import com.job.bootstrap.application.communication.service.JobCommunicationRecordService;
 import com.job.common.dto.communication.*;
 import com.job.common.entity.base.Result;
 import com.job.common.vo.communication.*;

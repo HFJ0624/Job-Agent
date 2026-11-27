@@ -2,9 +2,9 @@ package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.JobCompanyService;
-import com.job.bootstrap.service.JobInteractionService;
-import com.job.bootstrap.service.JobPositionService;
+import com.job.bootstrap.application.job.service.JobCompanyService;
+import com.job.bootstrap.application.job.service.JobInteractionService;
+import com.job.bootstrap.application.job.service.JobPositionService;
 import com.job.common.dto.interaction.JobCommunicationDTO;
 import com.job.common.dto.position.PositionPageDTO;
 import com.job.common.entity.base.PageResult;

@@ -1,10 +1,10 @@
 package com.job.bootstrap.service.action;
 
-import com.job.bootstrap.service.JobReminderService;
-import com.job.bootstrap.service.MockInterviewLearningPlanService;
-import com.job.bootstrap.service.MockInterviewWrongQuestionService;
-import com.job.bootstrap.service.WorkflowTaskService;
-import com.job.bootstrap.service.impl.AgentActionExecutor;
+import com.job.bootstrap.application.communication.service.JobReminderService;
+import com.job.bootstrap.application.interview.service.MockInterviewLearningPlanService;
+import com.job.bootstrap.application.interview.service.MockInterviewWrongQuestionService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskService;
+import com.job.bootstrap.application.agent.service.impl.AgentActionExecutor;
 import com.job.common.dto.interview.MockInterviewStudyPlanItemStatusDTO;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.entity.agent.AgentActionItem;

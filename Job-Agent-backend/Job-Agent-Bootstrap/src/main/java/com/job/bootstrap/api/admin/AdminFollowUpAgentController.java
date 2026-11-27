@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.AdminFollowUpAgentService;
+import com.job.bootstrap.application.admin.service.AdminFollowUpAgentService;
 import com.job.common.dto.agent.AgentFollowUpApplicationQueryDTO;
 import com.job.common.dto.agent.AgentFollowUpRuleQueryDTO;
 import com.job.common.dto.agent.AgentFollowUpRuleSaveDTO;

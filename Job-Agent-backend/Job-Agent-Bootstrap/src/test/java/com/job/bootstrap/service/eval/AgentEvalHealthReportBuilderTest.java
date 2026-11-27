@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.eval;
 
-import com.job.bootstrap.service.impl.AgentEvalHealthReportBuilder;
+import com.job.bootstrap.application.agent.service.impl.AgentEvalHealthReportBuilder;
 import com.job.common.entity.agent.AgentEvalCase;
 import com.job.common.entity.agent.AgentEvalResult;
 import com.job.common.entity.agent.AgentEvalRun;

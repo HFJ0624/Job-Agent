@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.AdminAgentObservationService;
+import com.job.bootstrap.application.admin.service.AdminAgentObservationService;
 import com.job.common.dto.agent.AgentObservationAlertRecordQueryDTO;
 import com.job.common.dto.agent.AgentObservationAlertRuleQueryDTO;
 import com.job.common.dto.agent.AgentObservationAlertRuleSaveDTO;

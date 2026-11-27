@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobUserService;
+import com.job.bootstrap.application.user.service.JobUserService;
 import com.job.common.dto.auth.LoginDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

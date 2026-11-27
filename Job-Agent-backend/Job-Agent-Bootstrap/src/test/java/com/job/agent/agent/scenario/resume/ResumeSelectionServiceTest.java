@@ -1,6 +1,6 @@
 package com.job.agent.scenario.resume;
 
-import com.job.bootstrap.service.JobResumeService;
+import com.job.bootstrap.application.resume.service.JobResumeService;
 import com.job.common.entity.resume.JobResume;
 import org.junit.jupiter.api.Test;
 

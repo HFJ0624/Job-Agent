@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobUserService;
+import com.job.bootstrap.application.user.service.JobUserService;
 import com.job.common.dto.user.UpdateUserProfileDTO;
 import com.job.common.vo.user.UserVO;
 import com.job.common.entity.base.Result;

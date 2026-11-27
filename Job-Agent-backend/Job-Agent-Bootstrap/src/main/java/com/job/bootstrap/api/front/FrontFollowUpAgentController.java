@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.FrontFollowUpAgentService;
+import com.job.bootstrap.application.jobapply.service.FrontFollowUpAgentService;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.agent.FrontFollowUpCenterVO;

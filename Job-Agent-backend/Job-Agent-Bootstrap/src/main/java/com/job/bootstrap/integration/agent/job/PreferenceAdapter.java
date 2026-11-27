@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.job;
 
 import com.job.agent.port.PreferencePort;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.bootstrap.application.job.service.UserJobPreferenceService;
 import com.job.common.vo.preference.UserJobPreferenceVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

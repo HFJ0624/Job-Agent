@@ -2,7 +2,7 @@ package com.job.bootstrap.integration.agent.job;
 
 import com.job.common.dto.preference.JobRecommendQueryDTO;
 import com.job.agent.port.JobRecommendPort;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.bootstrap.application.job.service.UserJobPreferenceService;
 import com.job.common.vo.preference.JobRecommendVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

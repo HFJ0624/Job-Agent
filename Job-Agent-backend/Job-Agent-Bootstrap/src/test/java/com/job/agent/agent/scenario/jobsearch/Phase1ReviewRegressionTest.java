@@ -14,7 +14,7 @@ import com.job.agent.tool.registry.AgentToolGuard;
 import com.job.agent.tool.registry.AgentToolSchemaRegistry;
 import com.job.agent.tool.impl.*;
 import com.job.agent.model.turn.*;
-import com.job.bootstrap.service.*;
+
 import com.job.common.agent.AgentRuntimeContext;
 import com.job.common.entity.agent.AgentRun;
 import com.job.common.entity.position.JobPosition;
@@ -28,6 +28,9 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import com.job.bootstrap.application.admin.service.AdminExternalConnectorService;
+import com.job.bootstrap.application.job.service.JobPositionService;
+import com.job.bootstrap.application.job.service.UserJobPreferenceService;
 
 /**
  * 第一阶段验收回归测试（外部审查提供，2026-11-03）。

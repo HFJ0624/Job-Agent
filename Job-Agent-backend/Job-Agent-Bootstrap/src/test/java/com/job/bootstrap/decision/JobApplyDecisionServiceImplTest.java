@@ -2,12 +2,12 @@ package com.job.bootstrap.decision;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.mapper.JobApplyDecisionRecordMapper;
+import com.job.bootstrap.infrastructure.persistence.jobapply.mapper.JobApplyDecisionRecordMapper;
 import com.job.agent.model.gateway.AiModelGatewayService;
-import com.job.bootstrap.service.JobMatchService;
-import com.job.bootstrap.service.JobPositionService;
-import com.job.bootstrap.service.JobResumeService;
-import com.job.bootstrap.service.impl.JobApplyDecisionServiceImpl;
+import com.job.bootstrap.application.job.service.JobMatchService;
+import com.job.bootstrap.application.job.service.JobPositionService;
+import com.job.bootstrap.application.resume.service.JobResumeService;
+import com.job.bootstrap.application.jobapply.service.impl.JobApplyDecisionServiceImpl;
 import com.job.common.entity.decision.JobApplyDecisionRecord;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;

@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.eval;
 
-import com.job.bootstrap.service.impl.AgentEvalCoreTemplateFactory;
+import com.job.bootstrap.application.agent.service.impl.AgentEvalCoreTemplateFactory;
 import com.job.common.entity.agent.AgentEvalCase;
 import com.job.common.vo.agent.AgentEvalCoreTemplateCreateResultVO;
 import org.junit.jupiter.api.Test;

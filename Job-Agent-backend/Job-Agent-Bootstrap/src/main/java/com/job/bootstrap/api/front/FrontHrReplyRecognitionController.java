@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.HrReplyRecognitionService;
+import com.job.bootstrap.application.communication.service.HrReplyRecognitionService;
 import com.job.common.dto.communication.HrReplyRecognitionConfirmDTO;
 import com.job.common.dto.communication.HrReplyRecognizeDTO;
 import com.job.common.entity.base.Result;

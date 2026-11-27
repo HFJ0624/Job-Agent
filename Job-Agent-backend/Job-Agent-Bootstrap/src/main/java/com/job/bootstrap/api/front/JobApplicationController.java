@@ -2,7 +2,7 @@ package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.JobApplicationService;
+import com.job.bootstrap.application.jobapply.service.JobApplicationService;
 import com.job.common.dto.application.JobApplicationQueryDTO;
 import com.job.common.dto.application.JobApplicationSaveDTO;
 import com.job.common.dto.application.JobApplicationStatusUpdateDTO;

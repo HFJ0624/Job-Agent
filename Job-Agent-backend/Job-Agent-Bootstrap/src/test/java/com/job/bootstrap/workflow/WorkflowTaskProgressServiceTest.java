@@ -1,8 +1,8 @@
 package com.job.bootstrap.workflow;
 
-import com.job.bootstrap.mapper.WorkflowTaskLogMapper;
-import com.job.bootstrap.mapper.WorkflowTaskMapper;
-import com.job.bootstrap.service.impl.WorkflowTaskProgressServiceImpl;
+import com.job.bootstrap.infrastructure.persistence.workflow.mapper.WorkflowTaskLogMapper;
+import com.job.bootstrap.infrastructure.persistence.workflow.mapper.WorkflowTaskMapper;
+import com.job.bootstrap.application.workflow.service.impl.WorkflowTaskProgressServiceImpl;
 import com.job.common.entity.workflow.WorkflowTask;
 import com.job.common.entity.workflow.WorkflowTaskLog;
 import org.junit.jupiter.api.Test;

@@ -1,8 +1,8 @@
 package com.job.bootstrap.rag.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.job.bootstrap.mapper.JobCommunicationMessageMapper;
-import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
+import com.job.bootstrap.infrastructure.persistence.communication.mapper.JobCommunicationMessageMapper;
+import com.job.bootstrap.infrastructure.persistence.communication.mapper.JobCommunicationRecordMapper;
 import com.job.bootstrap.rag.model.RagDocumentSource;
 import com.job.bootstrap.rag.model.RagDocumentType;
 import com.job.bootstrap.rag.model.RagTextChunk;
@@ -11,9 +11,9 @@ import com.job.bootstrap.rag.service.RagIndexService;
 import com.job.bootstrap.rag.service.RagKnowledgeService;
 import com.job.bootstrap.rag.utils.RagTextSplitter;
 import com.job.bootstrap.rag.service.RagVectorStoreService;
-import com.job.bootstrap.service.JobCompanyService;
-import com.job.bootstrap.service.JobPositionService;
-import com.job.bootstrap.service.JobResumeService;
+import com.job.bootstrap.application.job.service.JobCompanyService;
+import com.job.bootstrap.application.job.service.JobPositionService;
+import com.job.bootstrap.application.resume.service.JobResumeService;
 import com.job.common.entity.communication.JobCommunicationMessage;
 import com.job.common.entity.communication.JobCommunicationRecord;
 import com.job.common.entity.company.JobCompany;

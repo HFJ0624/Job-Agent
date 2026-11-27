@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.AdminAiModelService;
+import com.job.bootstrap.application.admin.service.AdminAiModelService;
 import com.job.common.dto.ai.AiModelCallLogQueryDTO;
 import com.job.common.dto.ai.AiModelConfigQueryDTO;
 import com.job.common.dto.ai.AiModelConfigSaveDTO;

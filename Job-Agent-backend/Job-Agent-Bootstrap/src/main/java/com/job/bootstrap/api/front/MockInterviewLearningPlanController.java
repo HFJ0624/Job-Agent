@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.MockInterviewLearningPlanService;
+import com.job.bootstrap.application.interview.service.MockInterviewLearningPlanService;
 import com.job.common.dto.interview.MockInterviewStudyPlanGenerateDTO;
 import com.job.common.dto.interview.MockInterviewStudyPlanItemStatusDTO;
 import com.job.common.dto.interview.MockInterviewStudyPlanRetestSubmitDTO;

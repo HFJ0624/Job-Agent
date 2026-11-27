@@ -1,7 +1,7 @@
 package com.job.bootstrap.workflow;
 
-import com.job.bootstrap.service.WorkflowTaskProgressService;
-import com.job.bootstrap.service.WorkflowTaskService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskProgressService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskService;
 import com.job.common.entity.workflow.WorkflowTask;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

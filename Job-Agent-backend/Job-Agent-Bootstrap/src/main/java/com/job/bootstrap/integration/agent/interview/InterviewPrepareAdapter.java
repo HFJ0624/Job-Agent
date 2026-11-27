@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.interview;
 
 import com.job.agent.port.InterviewPreparePort;
-import com.job.bootstrap.service.InterviewPrepareService;
+import com.job.bootstrap.application.interview.service.InterviewPrepareService;
 import com.job.common.vo.interview.InterviewPrepareVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

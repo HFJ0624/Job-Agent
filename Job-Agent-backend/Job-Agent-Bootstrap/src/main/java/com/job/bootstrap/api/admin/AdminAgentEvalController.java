@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.AgentEvalService;
+import com.job.bootstrap.application.agent.service.AgentEvalService;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalCaseSaveDTO;
 import com.job.common.dto.agent.AgentEvalCoreTemplateCreateDTO;

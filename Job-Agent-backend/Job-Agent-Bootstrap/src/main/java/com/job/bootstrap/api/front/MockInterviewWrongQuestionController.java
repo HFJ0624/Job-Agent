@@ -2,7 +2,7 @@ package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.MockInterviewWrongQuestionService;
+import com.job.bootstrap.application.interview.service.MockInterviewWrongQuestionService;
 import com.job.common.dto.interview.MockInterviewWrongQuestionQueryDTO;
 import com.job.common.dto.interview.MockInterviewWrongQuestionStatusDTO;
 import com.job.common.entity.base.Result;

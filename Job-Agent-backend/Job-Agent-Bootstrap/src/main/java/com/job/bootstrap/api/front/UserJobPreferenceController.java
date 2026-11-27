@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.bootstrap.application.job.service.UserJobPreferenceService;
 import com.job.common.dto.preference.JobRecommendQueryDTO;
 import com.job.common.dto.preference.UserJobPreferenceSaveDTO;
 import com.job.common.entity.base.Result;

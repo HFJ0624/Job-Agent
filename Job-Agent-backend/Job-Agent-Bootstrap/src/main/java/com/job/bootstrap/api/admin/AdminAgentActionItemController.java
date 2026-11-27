@@ -1,7 +1,7 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.AdminAgentActionItemService;
+import com.job.bootstrap.application.admin.service.AdminAgentActionItemService;
 import com.job.common.dto.agent.AgentActionItemQueryDTO;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;

@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.resume;
 
 import com.job.agent.port.ResumeScorePort;
-import com.job.bootstrap.service.JobResumeScoreService;
+import com.job.bootstrap.application.resume.service.JobResumeScoreService;
 import com.job.common.vo.resume.ResumeScoreVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

@@ -1,8 +1,8 @@
 package com.job.bootstrap.api.front;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.job.bootstrap.service.JobResumeScoreService;
-import com.job.bootstrap.service.JobResumeService;
+import com.job.bootstrap.application.resume.service.JobResumeScoreService;
+import com.job.bootstrap.application.resume.service.JobResumeService;
 import com.job.common.dto.resume.ResumeScoreRequestDTO;
 import com.job.common.dto.resume.ResumeUpdateDTO;
 import com.job.common.dto.resume.ResumeUploadDTO;

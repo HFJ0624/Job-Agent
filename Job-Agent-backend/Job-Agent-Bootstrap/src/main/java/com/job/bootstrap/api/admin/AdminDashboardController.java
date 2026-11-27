@@ -1,6 +1,6 @@
 package com.job.bootstrap.api.admin;
 
-import com.job.bootstrap.service.AdminDashboardService;
+import com.job.bootstrap.application.admin.service.AdminDashboardService;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.admin.AdminDashboardOverviewVO;

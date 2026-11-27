@@ -1,6 +1,6 @@
 package com.job.bootstrap.api.admin;
 
-import com.job.bootstrap.service.AdminAgentOperationService;
+import com.job.bootstrap.application.admin.service.AdminAgentOperationService;
 import com.job.common.entity.base.Result;
 import com.job.common.entity.base.ResultCodeEnum;
 import com.job.common.vo.agent.AgentOperationDashboardVO;

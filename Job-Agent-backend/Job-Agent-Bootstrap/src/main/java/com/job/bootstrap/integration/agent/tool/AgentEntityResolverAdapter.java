@@ -1,9 +1,9 @@
 package com.job.bootstrap.integration.agent.tool;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.job.bootstrap.mapper.JobCompanyMapper;
-import com.job.bootstrap.mapper.JobPositionMapper;
-import com.job.bootstrap.mapper.JobResumeMapper;
+import com.job.bootstrap.infrastructure.persistence.job.mapper.JobCompanyMapper;
+import com.job.bootstrap.infrastructure.persistence.job.mapper.JobPositionMapper;
+import com.job.bootstrap.infrastructure.persistence.resume.mapper.JobResumeMapper;
 import com.job.common.entity.company.JobCompany;
 import com.job.common.entity.position.JobPosition;
 import com.job.common.entity.resume.JobResume;

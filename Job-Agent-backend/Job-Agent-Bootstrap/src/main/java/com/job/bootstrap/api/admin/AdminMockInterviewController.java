@@ -1,6 +1,6 @@
 package com.job.bootstrap.api.admin;
 
-import com.job.bootstrap.service.AdminMockInterviewService;
+import com.job.bootstrap.application.admin.service.AdminMockInterviewService;
 import com.job.common.dto.interview.MockInterviewSessionQueryDTO;
 import com.job.common.entity.base.PageResult;
 import com.job.common.entity.base.Result;

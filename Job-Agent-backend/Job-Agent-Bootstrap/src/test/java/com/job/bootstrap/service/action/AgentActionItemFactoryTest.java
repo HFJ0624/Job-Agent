@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.action;
 
-import com.job.bootstrap.service.impl.AgentActionItemFactory;
+import com.job.bootstrap.application.agent.service.impl.AgentActionItemFactory;
 import com.job.common.entity.agent.AgentActionItem;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
 package com.job.bootstrap.service.operation;
 
-import com.job.bootstrap.service.impl.AdminAgentOperationStatsCalculator;
+import com.job.bootstrap.application.admin.service.impl.AdminAgentOperationStatsCalculator;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

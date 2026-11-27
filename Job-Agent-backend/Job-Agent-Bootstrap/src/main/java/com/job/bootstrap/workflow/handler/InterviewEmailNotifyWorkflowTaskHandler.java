@@ -2,10 +2,10 @@ package com.job.bootstrap.workflow.handler;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.job.bootstrap.mapper.JobApplicationRecordMapper;
-import com.job.bootstrap.mapper.JobUserMapper;
-import com.job.bootstrap.service.JobMailSenderService;
-import com.job.bootstrap.service.WorkflowTaskProgressService;
+import com.job.bootstrap.infrastructure.persistence.jobapply.mapper.JobApplicationRecordMapper;
+import com.job.bootstrap.infrastructure.persistence.user.mapper.JobUserMapper;
+import com.job.bootstrap.application.communication.service.JobMailSenderService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskProgressService;
 import com.job.bootstrap.workflow.WorkflowTaskHandler;
 import com.job.common.entity.application.JobApplicationRecord;
 import com.job.common.entity.user.JobUser;

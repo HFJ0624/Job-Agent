@@ -1,8 +1,8 @@
 package com.job.bootstrap.api.admin;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.job.bootstrap.service.WorkflowTaskService;
-import com.job.bootstrap.service.WorkflowTaskProgressService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskService;
+import com.job.bootstrap.application.workflow.service.WorkflowTaskProgressService;
 import com.job.common.dto.workflow.WorkflowTaskCreateDTO;
 import com.job.common.dto.workflow.WorkflowTaskQueryDTO;
 import com.job.common.entity.base.Result;

@@ -2,8 +2,8 @@ package com.job.bootstrap.integration.agent.communication;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.job.agent.port.CommunicationCompensationPort;
-import com.job.bootstrap.mapper.JobCommunicationRecordMapper;
-import com.job.bootstrap.service.JobCommunicationRecordService;
+import com.job.bootstrap.infrastructure.persistence.communication.mapper.JobCommunicationRecordMapper;
+import com.job.bootstrap.application.communication.service.JobCommunicationRecordService;
 import com.job.common.entity.communication.JobCommunicationRecord;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

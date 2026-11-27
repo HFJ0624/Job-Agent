@@ -1,7 +1,7 @@
 package com.job.bootstrap.integration.agent.connector;
 
 import com.job.agent.port.ConnectorPort;
-import com.job.bootstrap.service.AdminExternalConnectorService;
+import com.job.bootstrap.application.admin.service.AdminExternalConnectorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

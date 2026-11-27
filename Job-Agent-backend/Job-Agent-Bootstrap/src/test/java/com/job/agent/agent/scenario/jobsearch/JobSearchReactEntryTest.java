@@ -6,7 +6,7 @@ import com.job.agent.core.react.AgentResult;
 import com.job.agent.persistence.AgentRunService;
 import com.job.agent.model.turn.AiChatMessage;
 import com.job.agent.support.trace.AgentTraceService;
-import com.job.bootstrap.service.UserJobPreferenceService;
+import com.job.bootstrap.application.job.service.UserJobPreferenceService;
 import com.job.common.entity.agent.AgentRun;
 import com.job.enums.AgentRunStatus;
 import org.junit.jupiter.api.BeforeEach;
