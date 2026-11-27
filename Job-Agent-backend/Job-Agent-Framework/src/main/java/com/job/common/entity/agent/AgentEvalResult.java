@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.Date;
 
 /**
@@ -116,12 +117,12 @@ public class AgentEvalResult{
     /**
      * 回答质量分。
      */
-    private java.math.BigDecimal answerQualityScore;
+    private BigDecimal answerQualityScore;
 
     /**
      * LLM-as-Judge 评分。
      */
-    private java.math.BigDecimal judgeScore;
+    private BigDecimal judgeScore;
 
     /**
      * LLM-as-Judge 是否通过。
@@ -146,7 +147,7 @@ public class AgentEvalResult{
     /**
      * 回答质量分相对基准的变化值。
      */
-    private java.math.BigDecimal answerScoreDelta;
+    private BigDecimal answerScoreDelta;
 
     /**
      * 是否通过。
@@ -175,4 +176,6 @@ public class AgentEvalResult{
     private Long costTime;
 
     private Date createTime;
+
+    private Long expectedRagDocumentId;
 }

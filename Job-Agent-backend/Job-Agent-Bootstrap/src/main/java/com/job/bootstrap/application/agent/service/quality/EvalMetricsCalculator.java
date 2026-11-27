@@ -1,6 +1,7 @@
 package com.job.bootstrap.application.agent.service.quality;
 
 import com.job.common.vo.agent.AgentEvalResultVO;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -35,12 +36,89 @@ public final class EvalMetricsCalculator {
     /**
      * 计算整批指标。
      *
-     * <p>TODO(练习 2)：按 docs/EVAL_CORE_CODE.md 实现；当前返回 null 走回退逻辑。</p>
-     *
      * @param cases 该批次全部逐用例结果（可能为空）
      * @return 指标；未实现时返回 null
      */
     public static Metrics calculate(List<AgentEvalResultVO> cases) {
-        return null;
+
+        //判断为空直接返回0
+        if (cases == null || cases.isEmpty()){
+            return new Metrics(0,0,0,0,0,0);
+        }
+
+        int total =cases.size();
+        int pass = 0;
+
+        //三个准确率各自的分子/分母
+        int toolBase = 0,toolPass = 0;
+        int paramBase = 0,paramPass = 0;
+        int ragBase = 0,ragPass = 0;
+        int answerPass = 0;
+
+        int cost = 0;
+
+        for (AgentEvalResultVO item : cases){
+
+            if (item == null){
+                continue;
+            }
+
+            if (Integer.valueOf(1).equals(item.getPassStatus())){
+                pass++;
+            }
+
+            //计算工具名称指标
+            if (StringUtils.hasText(item.getExpectedToolName())) {
+                toolBase++;
+                if (Integer.valueOf(1).equals(item.getToolSelectPass())){
+                    toolPass++;
+                }
+            }
+
+            // 计算工具选择指标
+            if (Integer.valueOf(1).equals(item.getToolSelectPass())) {
+                paramBase++;
+                if (Integer.valueOf(1).equals(item.getToolParamPass())) {
+                    paramPass++;
+                }
+            }
+
+            //计算rag指标
+            if (item.getExpectedRagDocumentId() != null) {
+                ragBase++;
+                if (Integer.valueOf(1).equals(item.getRagHitPass())) {
+                    ragPass++;
+                }
+            }
+
+            //计算回答指标
+            if (Integer.valueOf(1).equals(item.getAnswerKeywordPass())) {
+                answerPass++;
+            }
+
+            //计算成本
+            cost += item.getCostTime() == null ? 0 : item.getCostTime();
+        }
+
+        //返回百分比指标数据
+        return new Metrics(
+                percent(pass,total),
+                percent(toolBase,toolBase),
+                percent(paramPass,paramBase),
+                percent(ragPass,ragBase),
+                percent(answerPass,total),
+                cost / total
+        );
+    }
+
+    /**
+     * 百分比：保留 2 位；分母为 0 返回 0，避免 NaN 传到前端。
+     */
+    private static double percent(int numerator,int denominator){
+        if (denominator == 0){
+            return 0;
+        }
+
+        return Math.round(numerator * 10000.0 / denominator) / 100.0;
     }
 }

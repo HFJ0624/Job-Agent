@@ -576,7 +576,7 @@ public class AgentEvalServiceImpl implements AgentEvalService {
 
         try {
             chatVO = agentChatService.chat(evalCase.getUserId(), null, null, evalCase.getInputMessage(), List.of());
-            traces = listCaseTraces(evalCase, chatVO, beginTime);
+            traces = listCaseTraces(evalCase, chatVO);
             check = evaluateCase(evalCase, chatVO, traces);
         } catch (Exception exception) {
             check.pass = false;
@@ -614,7 +614,9 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         result.setTraceId(resolveTraceId(traces));
         result.setCostTime(System.currentTimeMillis() - start);
         result.setCreateTime(new Date());
+        result.setExpectedRagDocumentId(evalCase.getExpectedRagDocumentId());
         agentEvalResultMapper.insert(result);
+
         return result;
     }
 
@@ -869,14 +871,20 @@ public class AgentEvalServiceImpl implements AgentEvalService {
         return values;
     }
 
-    private List<AgentTraceLog> listCaseTraces(AgentEvalCase evalCase, AgentChatVO chatVO, Date beginTime) {
+    /**
+     * 取本次用例执行产生的 Trace。
+     *
+     * <p>只按 userId + conversationId 过滤：评测每条用例都是新建会话，ID 已唯一。
+     * 不能再加 create_time 过滤——agent_trace_log 与 agent_eval_result 的时间源不一致
+     * （前者落库为 UTC，后者为本地时间），会导致刚产生的 Trace 被全部过滤掉。</p>
+     */
+    private List<AgentTraceLog> listCaseTraces(AgentEvalCase evalCase, AgentChatVO chatVO) {
         if (chatVO == null || chatVO.getConversationId() == null) {
             return Collections.emptyList();
         }
         return agentTraceLogMapper.selectList(new LambdaQueryWrapper<AgentTraceLog>()
                 .eq(AgentTraceLog::getUserId, evalCase.getUserId())
                 .eq(AgentTraceLog::getConversationId, chatVO.getConversationId())
-                .ge(AgentTraceLog::getCreateTime, beginTime)
                 .orderByAsc(AgentTraceLog::getCreateTime));
     }
 

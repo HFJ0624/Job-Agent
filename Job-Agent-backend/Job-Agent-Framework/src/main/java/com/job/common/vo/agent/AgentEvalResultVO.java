@@ -45,6 +45,8 @@ public class AgentEvalResultVO {
     private String failureType;
     private String traceId;
     private Long costTime;
+    private Long expectedRagDocumentId;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date createTime;
 
