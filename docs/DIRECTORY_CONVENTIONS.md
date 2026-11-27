@@ -131,7 +131,8 @@ Mcp-Tools → Framework
 
 ```
 com.job.bootstrap/
-├── api/{front,admin,mcp,agent}
+├── api/front|admin/<功能>（auth/agent/job/resume/interview/rag/...）
+├── api/{mcp,agent}
 ├── application/<域>/service(.impl)     域：resume/job/jobapply/communication/
 │                                        interview/workflow/user/home/admin/agent/rag
 ├── infrastructure/persistence/<域>/mapper
