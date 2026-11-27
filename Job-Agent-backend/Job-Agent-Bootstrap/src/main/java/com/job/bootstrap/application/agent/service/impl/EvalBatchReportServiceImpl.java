@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.job.bootstrap.application.agent.service.AgentEvalService;
 import com.job.bootstrap.application.agent.service.EvalBatchReportService;
 import com.job.bootstrap.application.agent.service.quality.EvalFailureClassifier;
+import com.job.bootstrap.application.agent.service.quality.EvalGateEvaluator;
+import com.job.bootstrap.application.agent.service.quality.EvalMetricsCalculator;
 import com.job.common.dto.agent.AgentEvalCaseQueryDTO;
 import com.job.common.dto.agent.AgentEvalResultQueryDTO;
 import com.job.common.dto.agent.AgentEvalRunQueryDTO;
@@ -11,6 +13,7 @@ import com.job.common.vo.agent.AgentEvalResultVO;
 import com.job.common.vo.agent.AgentEvalRunVO;
 import com.job.common.vo.agent.EvalBatchReportVO;
 import com.job.common.vo.agent.EvalFailureCategoryVO;
+import com.job.common.vo.agent.EvalMetricsVO;
 import com.job.common.vo.agent.EvalOverviewVO;
 import com.job.common.vo.agent.EvalTrendPointVO;
 import com.job.exception.BizException;
@@ -92,7 +95,50 @@ public class EvalBatchReportServiceImpl implements EvalBatchReportService {
         report.setCases(cases);
         report.setCaseTotal(cases.size());
         report.setFailureCategories(countByCategory(cases));
+        attachMetrics(report, cases);
+        attachGate(report, run);
         return report;
+    }
+
+    /**
+     * 挂载"由逐用例重算"的指标；练习 2 未实现时返回 null，前端回退到 run 聚合值。
+     */
+    private void attachMetrics(EvalBatchReportVO report, List<AgentEvalResultVO> cases) {
+        EvalMetricsCalculator.Metrics metrics = EvalMetricsCalculator.calculate(cases);
+        if (metrics == null) {
+            return;
+        }
+        EvalMetricsVO vo = new EvalMetricsVO();
+        vo.setPassRate(metrics.passRate());
+        vo.setToolAccuracy(metrics.toolAccuracy());
+        vo.setParamAccuracy(metrics.paramAccuracy());
+        vo.setRagHitRate(metrics.ragHitRate());
+        vo.setAnswerRate(metrics.answerRate());
+        vo.setAvgCostTime(metrics.avgCostTime());
+        report.setMetrics(vo);
+    }
+
+    /**
+     * 挂载门禁结论；练习 3 未实现时返回 null，界面不展示 PASS/BLOCK。
+     */
+    private void attachGate(EvalBatchReportVO report, AgentEvalRunVO run) {
+        AgentEvalRunVO baseline = null;
+        if (run.getCompareRunId() != null) {
+            try {
+                baseline = agentEvalService.getRun(run.getCompareRunId());
+            } catch (Exception ignored) {
+                // 基线被删不影响报告主体
+            }
+        }
+        EvalGateEvaluator.GateResult gate = EvalGateEvaluator.evaluate(run, baseline);
+        if (gate == null) {
+            return;
+        }
+        report.setGatePass(gate.pass());
+        report.setGateReason(gate.reason());
+        report.setPassRateDelta(gate.passRateDelta());
+        report.setToolDelta(gate.toolDelta());
+        report.setParamDelta(gate.paramDelta());
     }
 
     /** 取最近批次的结果并统计失败 Top（不含"通过"）。 */

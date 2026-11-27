@@ -414,7 +414,14 @@ onMounted(async () => {
               <h2>{{ report.run.runName || "评测报告" }}</h2>
               <p>{{ formatTime(report.run.startTime || report.run.createTime) }} · {{ report.run.totalCount }} 道题</p>
             </div>
-            <el-tag :type="statusTone(report.run.status)" effect="light" round>{{ statusText(report.run.status) }}</el-tag>
+            <div class="report-tags">
+              <el-tag :type="statusTone(report.run.status)" effect="light" round>{{ statusText(report.run.status) }}</el-tag>
+              <!-- 门禁徽标：练习 3 实现后自动出现 -->
+              <el-tag v-if="report.gatePass !== undefined && report.gatePass !== null"
+                      :type="report.gatePass ? 'success' : 'danger'" effect="dark" round>
+                {{ report.gatePass ? "PASS 可合入" : "BLOCK 需修复" }}
+              </el-tag>
+            </div>
           </header>
 
           <div class="report-metrics">
@@ -425,6 +432,10 @@ onMounted(async () => {
             <div><span>资料命中率</span><strong>{{ Number(report.run.ragHitRate ?? 0).toFixed(1) }}%</strong></div>
             <div><span>平均耗时</span><strong>{{ report.run.avgCostTime ?? 0 }}ms</strong></div>
           </div>
+
+          <p v-if="report.gateReason" class="gate-reason" :class="{ blocked: report.gatePass === false }">
+            {{ report.gateReason }}
+          </p>
 
           <h3 class="report-subtitle">失分点分布</h3>
           <div v-if="report.failureCategories.length" class="chip-row">
@@ -781,6 +792,26 @@ onMounted(async () => {
 .report-subtitle {
   font-size: 14px;
   margin: 18px 0 10px;
+}
+
+.report-tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.gate-reason {
+  margin: 0 0 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 13px;
+}
+
+.gate-reason.blocked {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .chip-row {

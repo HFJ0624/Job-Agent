@@ -1577,4 +1577,19 @@ export interface EvalBatchReportInfo {
   failureCategories: EvalFailureCategory[];
   cases: AgentEvalResultInfo[];
   caseTotal: number;
+  /** 逐用例重算指标；未实现时为空，页面回退 run 聚合值。 */
+  metrics?: {
+    passRate?: number;
+    toolAccuracy?: number;
+    paramAccuracy?: number;
+    ragHitRate?: number;
+    answerRate?: number;
+    avgCostTime?: number;
+  };
+  /** 门禁结果；未实现时为空。 */
+  gatePass?: boolean;
+  gateReason?: string;
+  passRateDelta?: number;
+  toolDelta?: number;
+  paramDelta?: number;
 }

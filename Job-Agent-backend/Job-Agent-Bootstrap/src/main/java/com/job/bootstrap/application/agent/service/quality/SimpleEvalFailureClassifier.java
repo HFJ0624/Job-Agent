@@ -15,29 +15,10 @@ public class SimpleEvalFailureClassifier implements EvalFailureClassifier {
 
     @Override
     public String classify(AgentEvalResultVO result) {
-        if (result == null) {
-            return OTHER;
-        }
-        // 通过：passStatus=1
-        if (Integer.valueOf(1).equals(result.getPassStatus())) {
+        // TODO(练习 1)：按 docs/EVAL_CORE_CODE.md 实现完整优先级规则。
+        // 当前最小实现：只区分"通过/未归因"，保证报告能跑起来。
+        if (result != null && Integer.valueOf(1).equals(result.getPassStatus())) {
             return NONE;
-        }
-        // 已有的归因优先（历史数据/上游已判定）
-        if (StringUtils.hasText(result.getFailureType())) {
-            return result.getFailureType();
-        }
-        // 基础兜底：按最直观的标志位粗分
-        if (Integer.valueOf(0).equals(result.getToolSelectPass())) {
-            return TOOL_MISMATCH;
-        }
-        if (Integer.valueOf(0).equals(result.getToolParamPass())) {
-            return PARAM_MISS;
-        }
-        if (Integer.valueOf(0).equals(result.getRagHitPass())) {
-            return RETRIEVAL_EMPTY;
-        }
-        if (Integer.valueOf(0).equals(result.getAnswerKeywordPass())) {
-            return ASSERT_FAIL;
         }
         return OTHER;
     }
